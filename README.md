@@ -23,6 +23,13 @@ export PATH="/d/Java/jdk-17.0.20.1+1/bin:$PATH"
 
 APK 输出：`app/build/outputs/apk/debug/app-debug.apk`
 
+```bash
+# 发布包（beta 分发用 debug 密钥签名，可与侧载的 debug 包互相覆盖安装、不清数据）
+./gradlew :app:assembleRelease
+```
+
+APK 输出：`app/build/outputs/apk/release/app-release.apk`
+
 ## 真机调试（USB 实时日志）
 
 1. **手机打开开发者选项**：设置 → 关于手机 → 连点"版本号"7 次；华为/荣耀通常是 设置 → 系统和更新 → 开发人员选项（或先在关于手机连点版本号开启）。
@@ -40,5 +47,7 @@ ADB="D:/AndroidSDK/platform-tools/adb.exe"
 "$ADB" logcat -v time -s ControlECO > controleco.log  # 边看边存文件，方便把样本发给开发会话
 ```
 
-5. **采样流程**（页面规则调试）：`logcat -c` 清屏 → 手机上完整走一遍支付 → 终端里 `snapshot pkg=... texts=[...]` 就是页面文本快照，复制出来对照修改 `PageRules.kt`（流程见维护指南第五节）。
+5. **采样流程**（页面解析器调试）：`logcat -c` 清屏 → 手机上完整走一遍支付 → 终端里 `snapshot pkg=... texts=[...]`
+   与 `page matched / page scene` 就是页面文本快照与解析判定，据此在 `capture/page/` 下对应应用的专属解析器里加/改规则
+   （流程与日志对照表见 `docs/通知规则维护指南.md` 第五节）。
 

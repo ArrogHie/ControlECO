@@ -1841,7 +1841,7 @@ object CaptureCenter {
 
         scope.launch {
             try {
-                handlePageSnapshot(snapshot, captureAll)
+                handlePageSnapshot(snapshot, captureAll, isDebugBuild)
             } catch (e: Exception) {
                 AppLog.e("Page", "page capture handling failed", e)
             }
@@ -1849,7 +1849,7 @@ object CaptureCenter {
     }
 
     /** 页面快照的处理主体：解析 → 留样 → 融合 → 入账 */
-    private suspend fun handlePageSnapshot(snapshot: PageSnapshot, captureAll: Boolean) {
+    private suspend fun handlePageSnapshot(snapshot: PageSnapshot, captureAll: Boolean, isDebugBuild: Boolean) {
         val packageName = snapshot.packageName
         val capturedAt = snapshot.captureTime
 
@@ -1865,22 +1865,30 @@ object CaptureCenter {
             return
         }
 
-        // 支付类页面快照进 INFO 日志（华为默认隐藏 DEBUG 级日志）；文本做卡尾号遮罩后再落日志与样本库
+        // 支付类页面快照进 INFO 日志（华为默认隐藏 DEBUG 级日志）；文本做卡尾号遮罩后再落日志与样本库。
+        // 日志里只对"交易相关页面"给足正文（调规则要看它）：无关页面（桌面/系统界面/聊天）只给短摘要——
+        // 通知栏正文、桌面图标清单属于用户隐私，不该进日志（样本库仍在本地留全量，供扩规则）。
         val snapshotText = NotificationRules.maskCardTails(snapshot.lines.joinToString(" | ")).take(4000)
+        // 注意不要写成 `(result as? SceneOnly)?.scene != UNKNOWN`：转换失败时左边是 null，
+        // `null != UNKNOWN` 恒为真，反而把无关页面判成交易相关（真机日志里踩到过）
+        val tradeRelated = candidate != null ||
+            (result is PageParseResult.SceneOnly && result.scene != PageScene.UNKNOWN) ||
+            PageParserRegistry.hasDedicatedParser(packageName)
+        val logLimit = if (tradeRelated || isDebugBuild) 600 else 120
         if (candidate != null) {
             AppLog.i(
                 "Page",
                 "page matched pkg=$packageName rule=${candidate.ruleName} scene=${candidate.scene} " +
                     "state=${candidate.tradeState} ${Money.formatYuan(candidate.amountCents)} " +
                     "收款方=${candidate.counterparty} 支付方式=${candidate.paymentMethod ?: "-"} " +
-                    "texts=[${snapshotText.take(600)}]",
+                    "texts=[${snapshotText.take(logLimit)}]",
             )
         } else {
             AppLog.i(
                 "Page",
                 "page scene pkg=$packageName " +
                     "detail=${(result as? PageParseResult.SceneOnly)?.let { "${it.scene}/${it.tradeState} ${it.reason}" } ?: "-"} " +
-                    "texts=[${snapshotText.take(600)}]",
+                    "texts=[${snapshotText.take(logLimit)}]",
             )
         }
 

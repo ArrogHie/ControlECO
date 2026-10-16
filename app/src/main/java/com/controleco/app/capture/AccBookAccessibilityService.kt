@@ -244,9 +244,14 @@ class AccBookAccessibilityService : AccessibilityService() {
         val snapshot = buildSnapshot(pkg)
         val contentHash = snapshot.fingerprint.hashCode()
 
+        // 只在"调试全量采样"里出现的包名（桌面/系统界面等）不做稳定性补采：
+        // 它们没有解析器，采多轮也只是白跑；走一轮留样本即可
+        val samplingOnly = !CaptureAppCatalog.isListed(pkg) &&
+            com.controleco.app.capture.page.PageParserRegistry.parserFor(pkg) == null
+
         // 空树：窗口切换过渡期内容未就绪，限次补采
         if (snapshot.lines.isEmpty()) {
-            if (emptyRetries < MAX_EMPTY_RETRIES) {
+            if (emptyRetries < if (samplingOnly) 1 else MAX_EMPTY_RETRIES) {
                 emptyRetries++
                 AppLog.i("Page", "collect empty pkg=$pkg retry#$emptyRetries")
                 scheduleCollect(SAMPLE_INTERVAL_MS)
@@ -262,7 +267,7 @@ class AccBookAccessibilityService : AccessibilityService() {
 
         val settled = stableRounds + 1 >= STABLE_ROUNDS_REQUIRED
         val roundsExhausted = sampleRound >= MAX_SAMPLE_ROUNDS
-        if (settled || roundsExhausted) {
+        if (samplingOnly || settled || roundsExhausted) {
             deliver(snapshot, contentHash)
             return
         }
@@ -285,8 +290,7 @@ class AccBookAccessibilityService : AccessibilityService() {
         AppLog.d(
             "Page",
             "snapshot pkg=${snapshot.packageName} cls=${snapshot.className.substringAfterLast('.')} " +
-                "nodes=${snapshot.nodes.size} lines=${snapshot.lines.size} " +
-                "texts=[${NotificationRules.maskCardTails(snapshot.lines.joinToString(" | ")).take(600)}]",
+                "nodes=${snapshot.nodes.size} lines=${snapshot.lines.size}",
         )
         CaptureCenter.onPageCaptured(snapshot, BuildConfig.DEBUG)
     }
