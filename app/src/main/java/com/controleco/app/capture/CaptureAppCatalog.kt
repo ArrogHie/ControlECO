@@ -124,6 +124,18 @@ internal object CaptureAppCatalog {
     /** 是否监听某应用（**目录外的包名返回 false**：目录只覆盖包名可枚举的通知/页面通道） */
     fun isWatched(context: Context, packageName: String): Boolean = packageName in watched(context)
 
+    /** 目录内是否有这个应用（用于区分"用户关掉的目录应用"与"目录外的来源"） */
+    fun isListed(packageName: String): Boolean = apps.any { it.packageName == packageName }
+
+    /**
+     * 页面通道（无障碍）的放行判定：**目录内的应用一律看用户开关**——
+     * 「监听的 App」必须真正约束页面通道，否则用户在设置里关掉京东，它的支付页仍会被采集。
+     * 目录外的包名只放行"有专属页面解析器"的来源（当前为空集，为后续新增来源留的口子）。
+     */
+    fun pageCaptureAllowed(context: Context, packageName: String): Boolean =
+        if (isListed(packageName)) isWatched(context, packageName)
+        else com.controleco.app.capture.page.PageParserRegistry.hasDedicatedParser(packageName)
+
     /** 目录外来源（短信/未知银行包名）不因目录开关被拒，交给各通道自己的签名闸门 */
     fun isWatchedOrUnknown(context: Context, packageName: String): Boolean =
         watchedOrUnknown(watched(context), packageName)

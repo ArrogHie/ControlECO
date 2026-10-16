@@ -290,6 +290,14 @@ interface PendingDao {
     )
     suspend fun updateFromPage(id: Long, amountCents: Long, timestamp: Long, counterparty: String, note: String, ruleName: String)
 
+    /** 页面捕获到的支付工具（账户匹配用；只在非空时写入，见 CaptureCenter） */
+    @Query("UPDATE pending_transactions SET paymentInstrument = :instrument WHERE id = :id")
+    suspend fun updatePaymentInstrument(id: Long, instrument: String)
+
+    /** 用户手改过该笔：后续自动富化不再覆盖金额/商户/时间（用户输入优先） */
+    @Query("UPDATE pending_transactions SET userEdited = 1 WHERE id = :id")
+    suspend fun markUserEdited(id: Long)
+
     /** 金额待补录回填：写金额并重算去重键（来源段/方向段/分钟桶不变） */
     @Query("UPDATE pending_transactions SET amountCents = :amountCents, dedupKey = :dedupKey WHERE id = :id")
     suspend fun updateAmountAndKey(id: Long, amountCents: Long, dedupKey: String)

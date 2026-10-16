@@ -1169,6 +1169,7 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                         accs,
                         item.sourcePackage,
                         CaptureDefaults.bankNameOf(item.sourcePackage, item.ruleName),
+                        instrumentLabel = item.paymentInstrument,
                     ) ?: return@launch,
                     timestamp = item.timestamp,
                     note = item.note.ifBlank { item.ruleName },
@@ -1193,8 +1194,11 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
      * 按来源推测账户：微信→微信零钱、支付宝→支付宝、银行侧（短信/银行推送）→ 先按银行名匹配
      * 账户名，再退化到"银行"关键词。[ruleName] 供号码兜底的短信取回银行名用。
      */
-    fun guessAccountId(sourcePackage: String, ruleName: String = ""): Long? =
-        CaptureDefaults.accountId(accounts.value, sourcePackage, CaptureDefaults.bankNameOf(sourcePackage, ruleName))
+    fun guessAccountId(sourcePackage: String, ruleName: String = "", instrument: String? = null): Long? =
+        CaptureDefaults.accountId(
+            accounts.value, sourcePackage, CaptureDefaults.bankNameOf(sourcePackage, ruleName),
+            instrumentLabel = instrument,
+        )
 
     fun clearCaptureLog() {
         viewModelScope.launch(Dispatchers.IO) {

@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CaptureTraceEntity::class,
         MerchantRuleEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = true,
 )
 abstract class AccBookDatabase : RoomDatabase() {
@@ -145,6 +145,20 @@ abstract class AccBookDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v9：待确认条目增加"页面捕获到的支付工具"与"用户是否手改过"两列。
+         * - `paymentInstrument`：页面解析出的支付工具（零钱 / 招商银行(1234) / 美团月付…），
+         *   入账时据此匹配实际记账账户（"从微信付的"不等于"从微信零钱付的"）；
+         * - `userEdited`：用户手动改过该笔后置位，后续页面/银行侧富化不再覆盖用户输入。
+         * 两列都带默认值，历史条目照常读取。
+         */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE pending_transactions ADD COLUMN paymentInstrument TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE pending_transactions ADD COLUMN userEdited INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile
         private var instance: AccBookDatabase? = null
 
@@ -157,7 +171,7 @@ abstract class AccBookDatabase : RoomDatabase() {
                 )
                     .addMigrations(
                         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
-                        MIGRATION_6_7, MIGRATION_7_8,
+                        MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
                     )
                     .build().also { instance = it }
             }

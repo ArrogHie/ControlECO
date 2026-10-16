@@ -22,9 +22,16 @@ internal fun hasRecentSameEntry(
     amountCents: Long,
     now: Long,
     windowMs: Long = AUTO_ENTRY_DEDUP_WINDOW_MS,
+    /**
+     * 本条候选的交易时间（页面**账单详情页**会带上"原始交易时刻"）：同额同来源时，
+     * 既比"捕获时刻"也比"交易时刻"——否则用户在付款一分钟后再翻出该笔的账单详情页，
+     * 会被当成新的一笔自动入账（重复记账）。传 null 时行为与只比捕获时刻一致。
+     */
+    txTime: Long? = null,
 ): Boolean = candidates.any {
     it.sourcePackage == sourcePackage && it.type == type && it.amountCents == amountCents &&
-        abs(now - it.createdAt) <= windowMs
+        (abs(now - it.createdAt) <= windowMs ||
+            (txTime != null && txTime > 0 && abs(txTime - it.timestamp) <= windowMs))
 }
 
 /**

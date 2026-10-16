@@ -1,7 +1,7 @@
 <resources>
     <string name="app_name">我ECO</string>
     <string name="a11y_service_label">我ECO 支付页面采集</string>
-    <string name="a11y_service_description">在微信/支付宝的支付成功页与账单详情页读取页面文字，自动提取金额、收款方与支付方式用于记账。仅在本机处理，不联网上传。</string>
+    <string name="a11y_service_description">在你已开启的支付、电商与外卖应用的支付结果页、订单详情页读取页面文字，自动提取金额、收款方与支付方式用于记账。仅在本机处理，不联网上传、不保存屏幕截图。</string>
     <string name="shortcut_quick_add_short">记一笔</string>
     <string name="shortcut_quick_add_long">记一笔（快速记账）</string>
     <string name="shortcut_pending_short">待确认</string>

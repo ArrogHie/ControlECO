@@ -15,6 +15,13 @@ import com.controleco.app.capture.overlay.dismissOutcome
 import com.controleco.app.capture.overlay.OVERLAY_DELAY_MS
 import com.controleco.app.capture.overlay.OverlayConditions
 import com.controleco.app.capture.overlay.shouldShowOverlay
+import com.controleco.app.capture.page.PageCandidate
+import com.controleco.app.capture.page.PageFlow
+import com.controleco.app.capture.page.PageFlowTracker
+import com.controleco.app.capture.page.PageParseResult
+import com.controleco.app.capture.page.PageParserRegistry
+import com.controleco.app.capture.page.PageScene
+import com.controleco.app.capture.page.PageSnapshot
 import com.controleco.app.data.db.AccountDao
 import com.controleco.app.data.db.AccountEntity
 import com.controleco.app.data.db.CaptureChannel
@@ -114,6 +121,12 @@ object CaptureCenter {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val recentKeys = LinkedHashMap<String, Long>()
+
+    /**
+     * 去重键分配：同一分钟内同来源同金额的第二笔独立交易会拿到带流程后缀的键
+     * （否则第二笔会被 dedupKey 唯一索引吞掉，见 DedupKeyAllocator）。
+     */
+    private val dedupKeyAllocator = DedupKeyAllocator()
 
     private lateinit var appContext: Context
     private lateinit var txDao: TransactionDao
@@ -524,6 +537,7 @@ object CaptureCenter {
                 .onFailure { AppLog.w("Ntf", "undo entry delete failed", it) }
             if (dedupKey.isNotBlank()) {
                 pendingDao.deleteByDedupKey(dedupKey)
+                dedupKeyAllocator.release(dedupKey)
                 cancelCaptureNotification(entryNotifId(dedupKey))
                 if (ConfirmCardWindow.showingPendingId > 0 &&
                     ConfirmCardWindow.showingPendingId == pendingIdOfDedup(dedupKey)
@@ -548,6 +562,8 @@ object CaptureCenter {
             } else {
                 pendingDao.deleteByDedupKey(dedupKey)
             }
+            // 条目已丢弃：释放去重键，同分钟桶里的下一笔真实交易可以复用
+            if (dedupKey.isNotBlank()) dedupKeyAllocator.release(dedupKey)
             cancelCaptureNotification(pendingNotifId(dedupKey))
             if (ConfirmCardWindow.showingPendingId == pendingId) {
                 mainHandler.post { ConfirmCardWindow.dismissConfirm() }
@@ -586,8 +602,9 @@ object CaptureCenter {
                     return@launch
                 }
                 if (pendingDao.countByDedupKey(newKey) > 0) {
-                    // 同笔的完整捕获已入队：占位条退场
+                    // 同笔的完整捕获已入队：占位条退场（键释放，允许后续同分钟桶复用）
                     pendingDao.deleteById(pendingId)
+                    dedupKeyAllocator.release(stub.dedupKey)
                     AppLog.i("Ntf", "amount stub superseded by existing entry key=$newKey")
                     onResult(AmountUpdateResult.NotFound)
                     return@launch
@@ -923,6 +940,7 @@ object CaptureCenter {
     /** 卡片「忽略」：丢弃待确认条目（误报纠错，一条点击） */
     private suspend fun ignoreFromOverlay(pendingId: Long, dedupKey: String) {
         PendingActions.discard(pendingDao, pendingId)
+        if (dedupKey.isNotBlank()) dedupKeyAllocator.release(dedupKey)
         cancelCaptureNotification(pendingNotifId(dedupKey))
         AppLog.i("Overlay", "ignored from card #$pendingId")
     }
@@ -1343,6 +1361,27 @@ object CaptureCenter {
                 )
                 if (related != null) {
                     AppLog.d("Ntf", "skip duplicate ${parsed.dedupKey} (page side won, related #${related.pending.id})")
+                    // 通知 → 页面 方向的补充：页面先到时只补页面缺失的字段（更接近真实交易时刻的发布时间），
+                    // 绝不覆盖页面已确认的金额/商户/支付方式，也不产生第二条账目
+                    val fixedTime = mergeNotificationInfo(related.pending, sourceAt)
+                    val enrichedPending = related.pending
+                    if (fixedTime != null) {
+                        pendingDao.updateFromPage(
+                            enrichedPending.id, enrichedPending.amountCents, fixedTime,
+                            enrichedPending.counterparty, enrichedPending.note, enrichedPending.ruleName,
+                        )
+                        if (enrichedPending.status == PendingStatus.AUTO) {
+                            txDao.updateCapturedByExternalId(
+                                "NTF:${enrichedPending.dedupKey}",
+                                enrichedPending.amountCents,
+                                fixedTime,
+                                enrichedPending.counterparty,
+                                enrichedPending.note,
+                            )
+                        }
+                        AppLog.i("Ntf", "enriched page entry #${enrichedPending.id} with notification time")
+                        refreshCardIfShowing(enrichedPending.id)
+                    }
                     traceCapture(
                         channel = CaptureChannel.NOTIFICATION,
                         packageName = packageName,
@@ -1687,7 +1726,9 @@ object CaptureCenter {
 
     /**
      * 银行侧信息并入既有条目：支付侧信息更全（商户/支付方式），只追加银行侧独有的账户线索
-     * （"银行 工商银行(1234)"），不改金额/时间/方向（金额全等才可能命中）。
+     * （"银行 工商银行(1234)"），不改金额/时间/方向（金额全等才可能命中）；
+     * 银行侧的卡信息同时写进支付工具列（页面没给出支付工具时用它做账户匹配）。
+     * 用户手动改过的条目只补账户线索，不动金额/商户。
      * 目标若是自动入账条目，同步回填交易本身（与页面回填同一路径）。
      */
     private suspend fun mergeBankInfoIntoPending(
@@ -1709,7 +1750,10 @@ object CaptureCenter {
             note,
             existing.ruleName,
         )
-        if (existing.status == PendingStatus.AUTO) {
+        if (existing.paymentInstrument.isBlank()) {
+            pendingDao.updatePaymentInstrument(existing.id, ledger.accountLabel)
+        }
+        if (existing.status == PendingStatus.AUTO && !existing.userEdited) {
             txDao.updateCapturedByExternalId(
                 "NTF:${existing.dedupKey}",
                 existing.amountCents,
@@ -1722,7 +1766,8 @@ object CaptureCenter {
             "Sms",
             "merged bank info into " +
                 (if (existing.status == PendingStatus.AUTO) "auto entry" else "pending") +
-                " #${existing.id} ${ledger.ruleName} 账户=${ledger.accountLabel}",
+                " #${existing.id} ${ledger.ruleName} 账户=${ledger.accountLabel}" +
+                (if (existing.userEdited) " [用户已手改，仅补账户线索]" else ""),
         )
     }
 
@@ -1764,23 +1809,29 @@ object CaptureCenter {
 
     // ---------- 通道二：无障碍页面抓取 ----------
 
-    /** 由无障碍服务回调（主线程），texts 为页面文本快照（控件树顺序） */
-    fun onPageCaptured(
-        packageName: String,
-        texts: List<String>,
-        capturedAt: Long,
-        isDebugBuild: Boolean,
-    ) {
+    /**
+     * 由无障碍服务回调（采集线程）：处理一份结构化页面快照。
+     *
+     * 调用链（页面通道的唯一入口）：
+     * `PageParserRegistry.parse`（按包名分派专属解析器）→ 页面候选 → 与既有条目融合 → 入账/待确认。
+     * 旧的"通用关键词解析 + 按包名白名单再过滤一次"入口已删除，不存在第二个页面解析入口。
+     */
+    fun onPageCaptured(snapshot: PageSnapshot, isDebugBuild: Boolean) {
         _lastEventAt.value = System.currentTimeMillis()
 
-        if (!initialized || texts.isEmpty()) return
-        // 「捕获所有页面（调试）」优先于监听目录：这个开关的目的就是采样任意应用的页面扩规则，
-        // 此前"未监听 → 直接返回"的闸门排在最前，把目录外应用的采样彻底挡死（自测发现的 bug）
+        if (!initialized || snapshot.lines.isEmpty()) return
+        val packageName = snapshot.packageName
+        // 「捕获所有页面（调试）」优先于监听目录：这个开关的目的就是采样任意应用的页面扩规则
         val captureAll = isDebugCaptureAllPages(isDebugBuild)
         if (!captureAll && packageName != appContext.packageName &&
-            !CaptureAppCatalog.isWatched(appContext, packageName)
+            !CaptureAppCatalog.pageCaptureAllowed(appContext, packageName)
         ) {
             AppLog.d("Page", "skip (app not watched) pkg=$packageName")
+            return
+        }
+        // 总开关 + 页面通道开关：两个都要看（此前总开关没有约束页面通道，自测发现的缺陷）
+        if (!isCaptureEnabled()) {
+            AppLog.d("Page", "skip (capture disabled) pkg=$packageName")
             return
         }
         if (!isA11yCaptureEnabled() && !captureAll) {
@@ -1790,167 +1841,108 @@ object CaptureCenter {
 
         scope.launch {
             try {
-                // 支出方向优先（支付成功页/账单详情页），没有则试收入方向（转账收款/红包/收款到账）
-                val parsed = PageRules.parse(packageName, texts, capturedAt)
-                    ?: PageRules.parseIncome(packageName, texts, capturedAt)
-                // 感兴趣的页面（或调试全量）才落快照，聊天/朋友圈等噪音不进捕获日志
-                if (parsed == null && !captureAll && !PageRules.looksInteresting(texts)) {
-                    AppLog.d("Page", "skip (not interesting) pkg=$packageName nodes=${texts.size}")
-                    return@launch
-                }
+                handlePageSnapshot(snapshot, captureAll)
+            } catch (e: Exception) {
+                AppLog.e("Page", "page capture handling failed", e)
+            }
+        }
+    }
 
-                // 支付类页面快照进 INFO 日志（华为默认隐藏 DEBUG 级日志）；聊天等噪音不打
-                AppLog.i("Page", "page snapshot pkg=$packageName texts=[${texts.joinToString(" | ").take(1200)}]")
-                val snapshotText = texts.joinToString(" | ").take(4000)
+    /** 页面快照的处理主体：解析 → 留样 → 融合 → 入账 */
+    private suspend fun handlePageSnapshot(snapshot: PageSnapshot, captureAll: Boolean) {
+        val packageName = snapshot.packageName
+        val capturedAt = snapshot.captureTime
 
-                val rawId = captureDao.insert(
-                    CapturedNotificationEntity(
-                        packageName = packageName,
-                        title = parsed?.ruleName ?: "页面快照",
-                        text = snapshotText,
-                        postTime = capturedAt,
-                        source = CaptureChannel.A11Y,
-                    ),
+        val flows = PageFlowTracker.shared
+        flows.evictExpired()
+        val flow = flows.flow(packageName)
+        val result = PageParserRegistry.parse(snapshot, flow)
+        val candidate = (result as? PageParseResult.Candidate)?.candidate
+
+        val interesting = candidate != null || isInterestingPage(snapshot, result)
+        if (!interesting && !captureAll) {
+            AppLog.d("Page", "skip (not interesting) pkg=$packageName lines=${snapshot.lines.size}")
+            return
+        }
+
+        // 支付类页面快照进 INFO 日志（华为默认隐藏 DEBUG 级日志）；文本做卡尾号遮罩后再落日志与样本库
+        val snapshotText = NotificationRules.maskCardTails(snapshot.lines.joinToString(" | ")).take(4000)
+        if (candidate != null) {
+            AppLog.i(
+                "Page",
+                "page matched pkg=$packageName rule=${candidate.ruleName} scene=${candidate.scene} " +
+                    "state=${candidate.tradeState} ${Money.formatYuan(candidate.amountCents)} " +
+                    "收款方=${candidate.counterparty} 支付方式=${candidate.paymentMethod ?: "-"} " +
+                    "texts=[${snapshotText.take(600)}]",
+            )
+        } else {
+            AppLog.i(
+                "Page",
+                "page scene pkg=$packageName " +
+                    "detail=${(result as? PageParseResult.SceneOnly)?.let { "${it.scene}/${it.tradeState} ${it.reason}" } ?: "-"} " +
+                    "texts=[${snapshotText.take(600)}]",
+            )
+        }
+
+        val rawId = captureDao.insert(
+            CapturedNotificationEntity(
+                packageName = packageName,
+                title = candidate?.ruleName ?: "页面快照",
+                text = snapshotText,
+                postTime = capturedAt,
+                source = CaptureChannel.A11Y,
+            ),
+        )
+        if (candidate == null) {
+            captureDao.updateMatch(rawId, "页面快照", false)
+            return
+        }
+
+        if (!isA11yCaptureEnabled()) {
+            // 采样模式（页面抓取关 + 调试全量开）：只留证据，不入队不弹窗
+            captureDao.updateMatch(rawId, candidate.ruleName, false)
+            AppLog.i("Page", "skip enqueue（设置页「自动记录支付页面」开关关闭）${candidate.ruleName}")
+            return
+        }
+
+        // 同笔的"金额待补"占位条被完整页面捕获取代（占位条只用于兜底提醒，不保留）
+        supersedeAmountStubs(packageName, candidate.type, capturedAt)
+        // 去重键：同分钟同额的第二笔独立交易加流程后缀，避免被唯一索引吞掉
+        val flowIdentity = flowIdentityFor(flow, snapshot)
+        val dedupKey = dedupKeyAllocator.allocate(candidate.dedupKey, flowIdentity)
+
+        // 融合（页面 → 通知 / 同流程的后续页面）：命中即合并，不产生第二条
+        val mergeable = pendingDao.getMergeable()
+        val related = pickRelatedPendingForPage(
+            mergeable, packageName, candidate.type, candidate.amountCents, capturedAt, flowIdentity,
+        )
+        if (related != null) {
+            mergePageIntoExisting(related, candidate, rawId, snapshotText, capturedAt)
+            return
+        }
+
+        // 页面信息最全：任一入账开关开启即直接入账
+        if (directEntryEnabled()) {
+            val entered = enterEntry(
+                type = candidate.type,
+                amountCents = candidate.amountCents,
+                timestamp = candidate.txTime ?: capturedAt,
+                counterparty = candidate.counterparty,
+                note = candidate.note,
+                sourcePackage = packageName,
+                dedupKey = dedupKey,
+                ruleName = candidate.ruleName,
+                isRefund = candidate.isRefund,
+                source = CaptureDefaults.txSource(packageName),
+                paymentInstrument = candidate.instrument?.label,
+            )
+            if (entered != null) {
+                captureDao.updateMatch(rawId, candidate.ruleName, true)
+                AppLog.i(
+                    "Page",
+                    "entered: ${candidate.ruleName} ${Money.formatYuan(candidate.amountCents)} " +
+                        "收款方=${candidate.counterparty} 支付方式=${candidate.paymentMethod ?: "-"}",
                 )
-                if (parsed == null) {
-                    AppLog.i("Page", "page not matched pkg=$packageName（对照上方快照扩规则）")
-                    return@launch
-                }
-
-                if (!isA11yCaptureEnabled()) {
-                    // 采样模式（页面抓取关 + 调试全量开）：只留证据，不入队不弹窗
-                    captureDao.updateMatch(rawId, parsed.ruleName, false)
-                    AppLog.i("Page", "skip enqueue（设置页「自动记录支付页面」开关关闭）${parsed.ruleName}")
-                    return@launch
-                }
-
-                // 跨通道合并（10s 窗口）：通知先捕获时用页面信息覆盖（页面更全：商户/支付方式）；
-                // 页面是权威来源，金额对不上（通知误解析）也按同笔处理、以页面金额为准
-                val related = pickRelatedPending(
-                    pendingDao.getMergeable(), packageName, parsed.type, parsed.amountCents, capturedAt,
-                    allowAmountMismatch = true,
-                )
-                if (related != null) {
-                    val merged = mergePageInfo(
-                        existing = related.pending,
-                        pageAmountCents = parsed.amountCents,
-                        pageTxTime = parsed.txTime,
-                        pageCounterparty = parsed.counterparty,
-                        pageNote = parsed.note,
-                        pagePaymentMethod = parsed.paymentMethod,
-                        pageRuleName = parsed.ruleName,
-                    )
-                    pendingDao.updateFromPage(
-                        related.pending.id,
-                        merged.amountCents,
-                        merged.timestamp,
-                        merged.counterparty,
-                        merged.note,
-                        merged.ruleName,
-                    )
-                    val autoEntered = related.pending.status == PendingStatus.AUTO
-                    if (autoEntered) {
-                        // 自动入账的那笔：把页面信息同步回交易本身
-                        txDao.updateCapturedByExternalId(
-                            "NTF:${related.pending.dedupKey}",
-                            merged.amountCents,
-                            merged.timestamp,
-                            merged.counterparty,
-                            merged.note,
-                        )
-                    }
-                    captureDao.updateMatch(rawId, parsed.ruleName, true)
-                    AppLog.i(
-                        "Page",
-                        (if (autoEntered) "filled auto entry #" else "merged page info into pending #") +
-                            "${related.pending.id} ${parsed.ruleName} ${Money.formatYuan(parsed.amountCents)}" +
-                            (if (related.sameAmount) "" else " (通知解析 ${Money.formatYuan(related.pending.amountCents)}，页面金额为准)"),
-                    )
-                    // 溯源：本页捕获的字段是**合并后真正生效的值**，附上页面原始快照，
-                    // 键取同笔条目的 dedupKey——金额被页面改写时通知侧的键已对不上交易，只有这个键能解析到账目
-                    traceCapture(
-                        channel = CaptureChannel.A11Y,
-                        packageName = packageName,
-                        title = "页面快照",
-                        text = snapshotText,
-                        bigText = "",
-                        capturedAt = capturedAt,
-                        matchedRule = merged.ruleName,
-                        type = parsed.type,
-                        amountCents = merged.amountCents,
-                        counterparty = merged.counterparty,
-                        note = merged.note,
-                        dedupKey = related.pending.dedupKey,
-                        outcome = TraceOutcome.MERGED_PAGE,
-                    )
-                    // 页面富化：卡片在展示就刷新内容，没在展示就按"卡片优先"再试一次
-                    // （首次尝试可能因支付保护等系统弹层被拒；此刻用户通常已回到结果页）
-                    refreshCardIfShowing(related.pending.id)
-                    retryCardIfNoCard(related.pending.id)
-                    return@launch
-                }
-
-                // 入账方式：任一"入账"开关开启即先直接入账；页面信息最全，直接落账
-                if (directEntryEnabled()) {
-                    val entered = enterEntry(
-                        type = parsed.type,
-                        amountCents = parsed.amountCents,
-                        timestamp = parsed.txTime ?: capturedAt,
-                        counterparty = parsed.counterparty,
-                        note = parsed.note,
-                        sourcePackage = packageName,
-                        dedupKey = parsed.dedupKey,
-                        ruleName = parsed.ruleName,
-                    )
-                    if (entered != null) {
-                        captureDao.updateMatch(rawId, parsed.ruleName, true)
-                        AppLog.i(
-                            "Page",
-                            "entered: ${parsed.ruleName} ${Money.formatYuan(parsed.amountCents)} 收款方=${parsed.counterparty}",
-                        )
-                        traceCapture(
-                            channel = CaptureChannel.A11Y,
-                            packageName = packageName,
-                            title = "页面快照",
-                            text = snapshotText,
-                            bigText = "",
-                            capturedAt = capturedAt,
-                            matchedRule = parsed.ruleName,
-                            type = parsed.type,
-                            amountCents = parsed.amountCents,
-                            counterparty = parsed.counterparty,
-                            note = parsed.note,
-                            dedupKey = parsed.dedupKey,
-                            outcome = TraceOutcome.AUTO_ENTRY,
-                        )
-                        announceEntry(
-                            entered = entered,
-                            type = parsed.type,
-                            isRefund = false,
-                            amountCents = parsed.amountCents,
-                            sourceLabel = parsed.sourceLabel,
-                            counterparty = parsed.counterparty,
-                            dedupKey = parsed.dedupKey,
-                        )
-                        return@launch
-                    }
-                }
-
-                val pendingId = pendingDao.insert(
-                    PendingTransactionEntity(
-                        type = parsed.type,
-                        amountCents = parsed.amountCents,
-                        timestamp = parsed.txTime ?: capturedAt,
-                        counterparty = parsed.counterparty,
-                        note = parsed.note,
-                        sourcePackage = packageName,
-                        ruleName = parsed.ruleName,
-                        dedupKey = parsed.dedupKey,
-                        rawNotificationId = rawId,
-                    ),
-                )
-                captureDao.updateMatch(rawId, parsed.ruleName, true)
-                AppLog.i("Page", "queued pending: ${parsed.ruleName} ${Money.formatYuan(parsed.amountCents)} 收款方=${parsed.counterparty}")
                 traceCapture(
                     channel = CaptureChannel.A11Y,
                     packageName = packageName,
@@ -1958,31 +1950,167 @@ object CaptureCenter {
                     text = snapshotText,
                     bigText = "",
                     capturedAt = capturedAt,
-                    matchedRule = parsed.ruleName,
-                    type = parsed.type,
-                    amountCents = parsed.amountCents,
-                    counterparty = parsed.counterparty,
-                    note = parsed.note,
-                    dedupKey = parsed.dedupKey,
-                    outcome = TraceOutcome.PENDING,
+                    matchedRule = candidate.ruleName,
+                    type = candidate.type,
+                    amountCents = candidate.amountCents,
+                    counterparty = candidate.counterparty,
+                    note = candidate.note,
+                    dedupKey = dedupKey,
+                    outcome = TraceOutcome.AUTO_ENTRY,
                 )
-                announceCapture(
-                    type = parsed.type,
-                    isRefund = false,
-                    amountCents = parsed.amountCents,
-                    sourceLabel = parsed.sourceLabel,
-                    counterparty = parsed.counterparty,
-                    paymentMethod = parsed.paymentMethod,
-                    dedupKey = parsed.dedupKey,
-                    ruleName = parsed.ruleName,
-                    txTime = parsed.txTime,
-                    note = parsed.note,
-                    pendingId = pendingId,
+                announceEntry(
+                    entered = entered,
+                    type = candidate.type,
+                    isRefund = candidate.isRefund,
+                    amountCents = candidate.amountCents,
+                    sourceLabel = candidate.sourceLabel,
+                    counterparty = candidate.counterparty,
+                    dedupKey = dedupKey,
                 )
-            } catch (e: Exception) {
-                AppLog.e("Page", "page capture handling failed", e)
+                return
             }
         }
+
+        val pendingId = pendingDao.insert(
+            PendingTransactionEntity(
+                type = candidate.type,
+                amountCents = candidate.amountCents,
+                timestamp = candidate.txTime ?: capturedAt,
+                counterparty = candidate.counterparty,
+                note = candidate.note,
+                sourcePackage = packageName,
+                ruleName = candidate.ruleName,
+                dedupKey = dedupKey,
+                rawNotificationId = rawId,
+                refundMark = if (candidate.isRefund) RefundMark.REFUND_INCOME else RefundMark.NONE,
+                paymentInstrument = candidate.instrument?.label.orEmpty(),
+            ),
+        )
+        captureDao.updateMatch(rawId, candidate.ruleName, true)
+        AppLog.i(
+            "Page",
+            "queued pending: ${candidate.ruleName} ${Money.formatYuan(candidate.amountCents)} " +
+                "收款方=${candidate.counterparty} 支付方式=${candidate.paymentMethod ?: "-"}",
+        )
+        traceCapture(
+            channel = CaptureChannel.A11Y,
+            packageName = packageName,
+            title = "页面快照",
+            text = snapshotText,
+            bigText = "",
+            capturedAt = capturedAt,
+            matchedRule = candidate.ruleName,
+            type = candidate.type,
+            amountCents = candidate.amountCents,
+            counterparty = candidate.counterparty,
+            note = candidate.note,
+            dedupKey = dedupKey,
+            outcome = TraceOutcome.PENDING,
+        )
+        announceCapture(
+            type = candidate.type,
+            isRefund = candidate.isRefund,
+            amountCents = candidate.amountCents,
+            sourceLabel = candidate.sourceLabel,
+            counterparty = candidate.counterparty,
+            paymentMethod = candidate.paymentMethod,
+            dedupKey = dedupKey,
+            ruleName = candidate.ruleName,
+            txTime = candidate.txTime,
+            note = candidate.note,
+            pendingId = pendingId,
+        )
+    }
+
+    /**
+     * 页面候选并入既有条目（页面信息优先）。
+     * 覆盖金额/时间/商户/备注/支付工具；用户手改过的条目只补空白（见 mergePageInfo）；
+     * 已自动入账的条目同步回填交易本身。
+     */
+    private suspend fun mergePageIntoExisting(
+        related: RelatedPending,
+        candidate: PageCandidate,
+        rawId: Long,
+        snapshotText: String,
+        capturedAt: Long,
+    ) {
+        val existing = related.pending
+        val merged = mergePageInfo(
+            existing = existing,
+            pageAmountCents = candidate.amountCents,
+            pageTxTime = candidate.txTime,
+            pageCounterparty = candidate.counterparty,
+            pageNote = candidate.note,
+            pagePaymentMethod = candidate.paymentMethod,
+            pageRuleName = candidate.ruleName,
+            pageInstrument = candidate.instrument?.label.orEmpty(),
+        )
+        pendingDao.updateFromPage(
+            existing.id, merged.amountCents, merged.timestamp, merged.counterparty, merged.note, merged.ruleName,
+        )
+        if (merged.paymentInstrument.isNotBlank() && merged.paymentInstrument != existing.paymentInstrument) {
+            pendingDao.updatePaymentInstrument(existing.id, merged.paymentInstrument)
+        }
+        val autoEntered = existing.status == PendingStatus.AUTO
+        if (autoEntered && !existing.userEdited) {
+            // 自动入账的那笔：把页面信息同步回交易本身
+            txDao.updateCapturedByExternalId(
+                "NTF:${existing.dedupKey}",
+                merged.amountCents,
+                merged.timestamp,
+                merged.counterparty,
+                merged.note,
+            )
+        }
+        captureDao.updateMatch(rawId, candidate.ruleName, true)
+        AppLog.i(
+            "Page",
+            (if (autoEntered) "filled auto entry #" else "merged page info into pending #") +
+                "${existing.id} ${candidate.ruleName} ${Money.formatYuan(candidate.amountCents)}" +
+                (if (related.sameAmount) "" else " (原金额 ${Money.formatYuan(existing.amountCents)}，页面金额为准)") +
+                (if (existing.userEdited) " [用户已手改，仅补空白]" else ""),
+        )
+        // 溯源：本页捕获的字段是**合并后真正生效的值**，附上页面原始快照，
+        // 键取同笔条目的 dedupKey——金额被页面改写时通知侧的键已对不上交易，只有这个键能解析到账目
+        traceCapture(
+            channel = CaptureChannel.A11Y,
+            packageName = existing.sourcePackage,
+            title = "页面快照",
+            text = snapshotText,
+            bigText = "",
+            capturedAt = capturedAt,
+            matchedRule = merged.ruleName,
+            type = candidate.type,
+            amountCents = merged.amountCents,
+            counterparty = merged.counterparty,
+            note = merged.note,
+            dedupKey = existing.dedupKey,
+            outcome = TraceOutcome.MERGED_PAGE,
+        )
+        // 页面富化：卡片在展示就刷新内容，没在展示就按"卡片优先"再试一次
+        refreshCardIfShowing(existing.id)
+        retryCardIfNoCard(existing.id)
+    }
+
+    /**
+     * 页面是否值得进捕获日志（未匹配样本池）：解析器判定的交易场景，或页面命中交易锚点。
+     * 聊天/朋友圈等噪音页不进库，避免捕获日志被无障碍事件刷爆。
+     */
+    private fun isInterestingPage(snapshot: PageSnapshot, result: PageParseResult): Boolean {
+        if (result is PageParseResult.SceneOnly && result.scene != PageScene.UNKNOWN) return true
+        val joined = snapshot.joined
+        return pageInterestingMarkers.any { joined.contains(it) }
+    }
+
+    private val pageInterestingMarkers = listOf(
+        "支付成功", "付款成功", "交易成功", "支付完成", "账单详情", "交易详情", "订单详情",
+        "收款成功", "退款成功", "转账成功", "付款方式", "支付方式", "交易单号", "订单编号",
+    )
+
+    /** 页面候选的流程标识：同一次支付流程内的多张页面共享，另一笔同额交易必然不同 */
+    private fun flowIdentityFor(flow: PageFlow, snapshot: PageSnapshot): String {
+        val raw = "${flow.pageKey}|w${snapshot.windowId}"
+        return "f" + Integer.toHexString(raw.hashCode())
     }
 
     /** 直接入账结果：新交易 id + 对应的 AUTO 条目 id（卡片与通知都按它们工作） */
@@ -2014,6 +2142,7 @@ object CaptureCenter {
         isRefund: Boolean = false,
         source: TxSource = TxSource.NOTIFICATION,
         bankName: String? = null,
+        paymentInstrument: String? = null,
     ): Entered? {
         val learned = merchantRuleDao.getAll()
         val categories = categoryDao.getAll()
@@ -2022,17 +2151,24 @@ object CaptureCenter {
             categories, type, counterparty.ifBlank { note },
             learnedRules = learned, counterparty = counterparty, note = note,
         )
+        // 账户：页面解析出的支付工具（"招商银行(1234)"/"零钱"）优先参与匹配——
+        // "从微信付的"不等于"从微信零钱付的"，匹配不到才回落渠道兜底
         val accountId = CaptureDefaults.accountId(
             accounts, sourcePackage, bankName,
             learnedAccountId = MerchantRules.accountIdFrom(learned, accounts, type, counterparty, note),
+            instrumentLabel = paymentInstrument,
         )
         if (categoryId == null || accountId == null) {
             AppLog.w("Ntf", "direct entry skipped (no category/account to use)")
             return null
         }
-        // 重复预检（±60s 同笔数据库校验）：同来源+同方向+同金额在窗口内已有条目（待确认或已入账）
+        // 重复预检（±60s 同数据库校验）：同来源+同方向+同金额在窗口内已有条目（待确认或已入账）
         // → 不静默入账，回落"入队 + 提醒"（重复通知/分钟边界重发不会造成双记账，可疑的第二笔仍让用户看到）
-        if (hasRecentSameEntry(pendingDao.getMergeable(), sourcePackage, type, amountCents, System.currentTimeMillis())) {
+        if (hasRecentSameEntry(
+                pendingDao.getMergeable(), sourcePackage, type, amountCents, System.currentTimeMillis(),
+                txTime = timestamp,
+            )
+        ) {
             AppLog.i("Ntf", "direct entry skipped (recent same entry) $sourcePackage $type ${Money.formatYuan(amountCents)}")
             return null
         }
@@ -2063,9 +2199,14 @@ object CaptureCenter {
                     dedupKey = dedupKey,
                     refundMark = if (isRefund) RefundMark.REFUND_INCOME else RefundMark.NONE,
                     status = PendingStatus.AUTO,
+                    paymentInstrument = paymentInstrument.orEmpty(),
                 ),
             )
-            AppLog.i("Ntf", "entered #$txId ${Money.formatYuan(amountCents)} dedup=$dedupKey")
+            AppLog.i(
+                "Ntf",
+                "entered #$txId ${Money.formatYuan(amountCents)} dedup=$dedupKey" +
+                    (paymentInstrument?.let { " 支付工具=$it" } ?: ""),
+            )
             Entered(txId, pendingId)
         } catch (e: Exception) {
             // externalId 唯一索引冲突 = 这笔已经入过账（重复通知/双通道）：找回原交易，卡片/通知仍可用

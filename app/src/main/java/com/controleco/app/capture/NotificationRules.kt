@@ -30,6 +30,7 @@ object NotificationRules {
     const val WECHAT = "com.tencent.mm"
     const val ALIPAY = "com.eg.android.AlipayGphone"
     const val UNIONPAY = "com.unionpay"
+    const val MEITUAN_TAKEOUT = "com.sankuai.meituan.takeoutnew"
 
     val knownPackages = setOf(WECHAT, ALIPAY, UNIONPAY)
 
@@ -54,7 +55,7 @@ object NotificationRules {
         "com.sankuai.meituan" to "美团",
         // 自测修正：美团外卖的真实包名是 takeoutnew（此前误写成 takeaway——不存在的包名，
         // 等于这个渠道的通知/页面两条路都被静默排除，见开发日志同日条目）
-        "com.sankuai.meituan.takeoutnew" to "美团外卖",
+        MEITUAN_TAKEOUT to "美团外卖",
         "me.ele" to "饿了么",
     )
 

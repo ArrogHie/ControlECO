@@ -215,6 +215,19 @@ data class PendingTransactionEntity(
     /** 退款标记：通知捕获的退款到账收入打 REFUND_INCOME，与账单导入口径一致 */
     @ColumnInfo(defaultValue = "NONE")
     val refundMark: RefundMark = RefundMark.NONE,
+    /**
+     * 页面捕获到的支付工具（"零钱" / "招商银行(1234)" / "美团月付"…）：
+     * 入账时用于把"从哪个渠道付的"换算成"实际从哪个账户出的"（见 page/PaymentAccountResolver）。
+     * 只存展示文本（含卡尾号），不存完整卡号。
+     */
+    @ColumnInfo(defaultValue = "")
+    val paymentInstrument: String = "",
+    /**
+     * 用户是否手动改过这笔（悬浮卡保存 / 待确认确认时置位）：
+     * 置位后页面与银行侧的后续富化不再覆盖金额/商户/时间——用户输入优先于自动解析。
+     */
+    @ColumnInfo(defaultValue = "0")
+    val userEdited: Boolean = false,
     val status: PendingStatus = PendingStatus.PENDING,
     val createdAt: Long = System.currentTimeMillis(),
 )

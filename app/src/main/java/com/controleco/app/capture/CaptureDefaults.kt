@@ -1,5 +1,7 @@
 package com.controleco.app.capture
 
+import com.controleco.app.capture.page.PaymentAccountResolver
+import com.controleco.app.capture.page.PaymentInstrumentParser
 import com.controleco.app.data.db.AccountEntity
 import com.controleco.app.data.db.CategoryEntity
 import com.controleco.app.data.db.MerchantRuleEntity
@@ -38,15 +40,32 @@ internal object CaptureDefaults {
     }
 
     /**
-     * 账户推测。优先级：学到的账户 > 银行名匹配（银行侧）/ 渠道名匹配（支付侧）> 第一个账户。
+     * 账户推测。优先级（纯函数，便于单测）：
+     * 1. 学到的账户（确认/编辑过几次后自动记住）；
+     * 2. **支付工具匹配**（页面解析出的"招商银行(1234)"/"零钱"/"美团月付"→ 见 PaymentAccountResolver）：
+     *    "从微信付的"不等于"从微信零钱付的"，银行卡支付的这笔必须记到那张卡上；
+     * 3. 银行名匹配（银行侧来源的短信/推送）；
+     * 4. 渠道名匹配（微信/支付宝/银行）；
+     * 5. 第一个账户兜底。
+     *
+     * [instrumentLabel] 是页面捕获到的支付工具展示文本（可含卡尾号）：
+     * **只在真正匹配上账户时才采用**，匹配不到就走渠道兜底——绝不把备注文本当成"已匹配账户"。
      */
     fun accountId(
         accounts: List<AccountEntity>,
         sourcePackage: String,
         bankName: String? = null,
         learnedAccountId: Long? = null,
+        instrumentLabel: String? = null,
+        channelLabel: String? = null,
     ): Long? {
         if (learnedAccountId != null && accounts.any { it.id == learnedAccountId }) return learnedAccountId
+        val channel = channelLabel?.takeIf { it.isNotBlank() } ?: channelKeywordOf(sourcePackage)
+        val instrument = instrumentLabel?.takeIf { it.isNotBlank() }
+            ?.let { PaymentInstrumentParser.parse(it, channel) }
+        if (instrument != null) {
+            PaymentAccountResolver.resolve(accounts, instrument, channel)?.let { return it.accountId }
+        }
         if (bankName != null) {
             // 账户名常起"招行卡""工行"这类简称：按标准名 + 全部别名逐个匹配
             for (alias in BankLedgerRules.aliasesOf(bankName)) {
@@ -54,13 +73,15 @@ internal object CaptureDefaults {
                 accounts.firstOrNull { it.name.contains(alias) }?.id?.let { return it }
             }
         }
-        val keyword = when (sourcePackage) {
-            NotificationRules.WECHAT -> "微信"
-            NotificationRules.ALIPAY -> "支付宝"
-            else -> "银行"
-        }
-        return accounts.firstOrNull { it.name.contains(keyword) }?.id
+        return accounts.firstOrNull { it.name.contains(channel) }?.id
             ?: accounts.firstOrNull()?.id
+    }
+
+    /** 来源 → 渠道账户关键词（账户名模糊匹配与支付工具解析的渠道名） */
+    fun channelKeywordOf(sourcePackage: String): String = when (sourcePackage) {
+        NotificationRules.WECHAT -> "微信"
+        NotificationRules.ALIPAY -> "支付宝"
+        else -> "银行"
     }
 
     /** 是否为银行侧来源（短信前缀 / 云闪付 / 银行 App 推送包名）：决定交易来源标记与账户推测口径 */

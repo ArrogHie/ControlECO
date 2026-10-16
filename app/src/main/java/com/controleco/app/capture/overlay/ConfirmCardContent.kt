@@ -124,6 +124,7 @@ internal class ConfirmCardState {
             learnedAccountId = MerchantRules.accountIdFrom(
                 learnedRules, accounts, pending.type, pending.counterparty, pending.note,
             ),
+            instrumentLabel = pending.paymentInstrument,
         )
     }
 
@@ -158,6 +159,7 @@ internal class ConfirmCardState {
                 accounts,
                 pending.sourcePackage,
                 CaptureDefaults.bankNameOf(pending.sourcePackage, pending.ruleName),
+                instrumentLabel = pending.paymentInstrument,
             )
         }
     }

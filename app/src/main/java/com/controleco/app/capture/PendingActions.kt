@@ -73,8 +73,11 @@ internal object PendingActions {
 
     /**
      * 已入账条目的编辑同步（悬浮卡"先入账、后修改"）：卡内当前值写回交易与 AUTO 条目，
-     * 并学习商户归类（与 [confirm] 同一口径）。返回 false = 找不到该笔交易（可能已被撤销），
-     * 调用方只需静默收场。
+     * 并学习商户归类（与 [confirm] 同一口径）。
+     *
+     * 同时给条目打上"用户已手改"标记：此后页面/银行侧的自动富化不再覆盖金额/商户/时间——
+     * 用户输入优先于自动解析（见 CaptureMerge.mergePageInfo）。
+     * 返回 false = 找不到该笔交易（可能已被撤销），调用方只需静默收场。
      */
     suspend fun updateEntered(
         txDao: TransactionDao,
@@ -90,12 +93,13 @@ internal object PendingActions {
         val txId = txDao.findIdByExternalId(externalId) ?: return false
         val counterpartyValue = counterparty.trim().ifBlank { item.counterparty }
         txDao.updateEnteredFields(txId, amountCents, categoryId, accountId, counterpartyValue)
-        // AUTO 条目同步：页面/银行通道后续富化以它为准，不能留旧值
+        // AUTO 条目同步：页面/银行通道后续富化以它为准，不能留旧值；并置位"用户已手改"
         pendingDao.updateFromPage(item.id, amountCents, item.timestamp, counterpartyValue, item.note, item.ruleName)
+        pendingDao.markUserEdited(item.id)
         merchantRuleDao?.let {
             MerchantRules.learn(it, item.type, categoryId, accountId, counterpartyValue, item.note)
         }
-        AppLog.i("pending", "updated entered tx=#$txId amount=$amountCents externalId=$externalId")
+        AppLog.i("pending", "updated entered tx=#$txId amount=$amountCents externalId=$externalId (user edited)")
         return true
     }
 

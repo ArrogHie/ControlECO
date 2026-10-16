@@ -1,14 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   无障碍采集配置：不限包名（「捕获所有页面（调试）」需要采样其他应用），
-  服务内按运行时开关过滤——只收微信/支付宝，「捕获所有页面」开启时放行全部应用。
-  只订阅窗口变化事件，只读窗口内容；刻意不申请手势/按键等能力（最小化权限）；
-  notificationTimeout 做系统级事件节流第一道闸。
+  服务内按运行时开关过滤——只收已知交易来源（见 PageParserRegistry）与用户监听的目录应用，
+  调试开关开启时放行全部应用。
+
+  采集标志（缺一不可，服务启动时还会再确认一次）：
+  - flagRetrieveInteractiveWindows：多窗口读取——支付成功页可能是 dialog/非焦点窗口；
+  - flagIncludeNotImportantViews：部分支付页把金额/商户节点标为"不重要视图"，不开读不到；
+  - flagReportViewIds：保留控件 id，作为文本定位的补充证据。
+
+  只订阅窗口变化事件、只读窗口内容；刻意不申请手势/按键/截图能力（最小化权限，不做截图识别）；
+  notificationTimeout 做系统级事件节流第一道闸（服务内另有事件合并与稳定性补采）。
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews|flagReportViewIds"
     android:canRetrieveWindowContent="true"
     android:description="@string/a11y_service_description"
-    android:notificationTimeout="300" />
+    android:notificationTimeout="100" />
