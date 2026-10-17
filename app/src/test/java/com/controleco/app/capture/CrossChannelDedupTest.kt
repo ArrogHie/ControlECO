@@ -178,4 +178,13 @@ class CrossChannelDedupTest {
             ),
         )
     }
+
+    @Test
+    fun `bank evidence requires bank name or card tail`() {
+        // 金额与时间吻合还不够：支付侧条目必须出现银行名/卡尾号才能与银行侧合并
+        assertFalse(CrossChannelDedup.hasBankEvidence("", "工商银行", "1234"))
+        assertFalse(CrossChannelDedup.hasBankEvidence("微信支付 · 已支付¥50.00", "工商银行", "1234"))
+        assertTrue(CrossChannelDedup.hasBankEvidence("支付方式 工商银行储蓄卡", "工商银行", null))
+        assertTrue(CrossChannelDedup.hasBankEvidence("尾号1234", "工商银行", "1234"))
+    }
 }

@@ -145,4 +145,20 @@ class CaptureDefaultsTest {
         assertEquals(TxSource.NOTIFICATION, CaptureDefaults.txSource(NotificationRules.WECHAT))
         assertEquals(TxSource.NOTIFICATION, CaptureDefaults.txSource("com.example.unknown"))
     }
+
+    @Test
+    fun `可信账户匹配_银行卡按尾号或银行名_不回落渠道账户`() {
+        val withCard = accounts + acc(9, "招商银行(1234)")
+        assertEquals(9L, CaptureDefaults.trustedAccountId(withCard, NotificationRules.WECHAT, "招商银行(1234)"))
+        // 尾号对不上：不能因为"从微信付的"就改记到微信零钱
+        assertNull(CaptureDefaults.trustedAccountId(withCard, NotificationRules.WECHAT, "招商银行(9999)"))
+        // 银行名唯一命中（账户名含银行名）可以匹配
+        assertEquals(4L, CaptureDefaults.trustedAccountId(accounts, "SMS:中国银行", "中国银行储蓄卡"))
+        // 渠道钱包按渠道匹配
+        assertEquals(2L, CaptureDefaults.trustedAccountId(accounts, NotificationRules.WECHAT, "零钱"))
+        // 电商页面只写了"微信支付"：按支付渠道本身匹配微信账户，不能落到"银行"账户
+        assertEquals(2L, CaptureDefaults.trustedAccountId(accounts, NotificationRules.MEITUAN_TAKEOUT, "微信支付"))
+        // 完全匹配不到 → null，由调用方保持原账户
+        assertNull(CaptureDefaults.trustedAccountId(accounts, NotificationRules.WECHAT, "某个不存在的卡"))
+    }
 }

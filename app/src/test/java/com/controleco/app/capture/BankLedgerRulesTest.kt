@@ -65,6 +65,35 @@ class BankLedgerRulesTest {
     }
 
     @Test
+    fun `integer amounts with currency markers are parsed`() {
+        // CR-006：币种前缀/后缀曾包含在正则完整匹配里，导致整数金额被当成"没有货币标记"丢掉
+        val cases = listOf(
+            "【工商银行】您尾号1234卡消费人民币50元" to 5000L,
+            "【工商银行】您尾号1234卡消费¥50元" to 5000L,
+            "【工商银行】您尾号1234卡消费50元" to 5000L,
+            "【工商银行】您尾号1234卡消费人民币1,234元" to 123_400L,
+            "【工商银行】您尾号1234卡消费￥1,234元" to 123_400L,
+        )
+        for ((body, expected) in cases) {
+            assertEquals(body, expected, parseSms(body)?.amountCents)
+        }
+    }
+
+    @Test
+    fun `integer balance and date never win over the transaction amount`() {
+        // 修复整数金额时不能把余额/日期当交易金额
+        val r = parseSms("【建设银行】余额10000元，您尾号5678账户10月8日12:30消费123元")!!
+        assertEquals(12_300L, r.amountCents)
+        val r2 = parseSms("【招商银行】您尾号1234卡10月8日消费人民币50元，余额5000元")!!
+        assertEquals(5000L, r2.amountCents)
+    }
+
+    @Test
+    fun `balance-only integer message is not recorded`() {
+        assertNull(parseSms("【工商银行】您尾号1234卡余额人民币5,000元，请登录手机银行查看"))
+    }
+
+    @Test
     fun `date and time are not taken as amount`() {
         val r = parseSms("【中国银行】您尾号1234卡2026年10月8日12:30消费88.00元")!!
         assertEquals(8800L, r.amountCents)

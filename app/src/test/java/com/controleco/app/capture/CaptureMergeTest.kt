@@ -29,6 +29,10 @@ class CaptureMergeTest {
         timestamp: Long = base,
         paymentInstrument: String = "",
         userEdited: Boolean = false,
+        flowId: String = "",
+        notificationInstanceId: String = "",
+        bankInstanceId: String = "",
+        orderId: String = "",
         dedupKey: String = "$packageName|$type|$amount|${timestamp / 60_000}",
     ) = PendingTransactionEntity(
         id = id,
@@ -42,6 +46,10 @@ class CaptureMergeTest {
         dedupKey = dedupKey,
         paymentInstrument = paymentInstrument,
         userEdited = userEdited,
+        flowId = flowId,
+        notificationInstanceId = notificationInstanceId,
+        bankInstanceId = bankInstanceId,
+        orderId = orderId,
         status = status,
         createdAt = createdAt,
     )
@@ -65,18 +73,19 @@ class CaptureMergeTest {
     }
 
     @Test
-    fun `金额不同时_页面侧唯一候选仍算同笔_页面金额为准`() {
-        val hit = pickRelatedPending(
-            listOf(pending(amount = 100)), NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 1_000,
-            allowAmountMismatch = true,
-        )!!
-        assertFalse(hit.sameAmount)
-        assertEquals(100L, hit.pending.amountCents)
+    fun `金额不同时_页面侧也不自动合并_候选唯一不是同一笔的证据`() {
+        // 先捕获 ¥1.00、随后捕获 ¥12.90：可能是通知误解析，也可能是两笔不同金额的付款。
+        // 仅有"候选唯一"不能证明同笔——保留独立记录，交由用户确认（CR-003）。
+        assertNull(
+            pickRelatedPendingForPage(
+                listOf(pending(amount = 100)), NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 1_000,
+            ),
+        )
     }
 
     @Test
-    fun `金额不同时_通知侧不认作同笔_避免两笔付款并成一条`() {
-        // 默认（通知侧）：严格比金额
+    fun `金额不同时_通知侧同样不认作同笔`() {
+        // 通知侧：严格比金额
         assertNull(pickRelatedPending(listOf(pending(amount = 100)), NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 1_000))
     }
 
@@ -84,7 +93,7 @@ class CaptureMergeTest {
     fun `金额不同且候选不止一条时不算同笔`() {
         val pool = listOf(pending(id = 1, amount = 100), pending(id = 2, amount = 200))
         assertNull(
-            pickRelatedPending(pool, NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 1_000, allowAmountMismatch = true),
+            pickRelatedPendingForPage(pool, NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 1_000),
         )
     }
 
@@ -133,13 +142,14 @@ class CaptureMergeTest {
     }
 
     @Test
-    fun `页面重捕_十秒内金额不一致仍按原逻辑并（通知误解析覆盖）`() {
-        // 页面侧 10s 窗口允许金额不一致（通知误解析历史）：长窗口不承担这个职责
+    fun `页面重捕_十秒内金额不一致也不合并`() {
+        // 金额不同绝不能因为时间近、候选唯一就并成一笔（页面来源优先不改变"是否同一笔"的判定）
         val pool = listOf(pending(packageName = NotificationRules.MEITUAN_TAKEOUT, amount = 100))
-        val hit = pickRelatedPendingForPage(
-            pool, NotificationRules.MEITUAN_TAKEOUT, TxType.EXPENSE, 1800, base + 3_000,
-        )!!
-        assertFalse(hit.sameAmount)
+        assertNull(
+            pickRelatedPendingForPage(
+                pool, NotificationRules.MEITUAN_TAKEOUT, TxType.EXPENSE, 1800, base + 3_000,
+            ),
+        )
     }
 
     @Test
@@ -231,11 +241,11 @@ class CaptureMergeTest {
     }
 
     @Test
-    fun `用户手改保护_金额商户时间保持既有值_只补空白`() {
+    fun `用户手改保护_金额商户时间备注都保持既有值_只补空白支付工具`() {
         val existing = pending(
             amount = 1290,
             counterparty = "肯德基",
-            note = "",
+            note = "用户备注",
             ruleName = "微信·支付",
             timestamp = base,
             createdAt = base,
@@ -246,18 +256,18 @@ class CaptureMergeTest {
             pageAmountCents = 2006,
             pageTxTime = base + 9_000,
             pageCounterparty = "鸿润福连锁超市",
-            pageNote = "",
+            pageNote = "页面备注",
             pagePaymentMethod = "零钱",
             pageRuleName = "支付宝·支付页",
             pageInstrument = "零钱",
         )
-        // 用户输入优先：金额/商户/时间/规则名保持既有值
+        // 用户输入优先：金额/商户/时间/备注/规则名保持既有值
         assertEquals(1290L, merged.amountCents)
         assertEquals("肯德基", merged.counterparty)
         assertEquals(base, merged.timestamp)
+        assertEquals("用户备注", merged.note)
         assertEquals("微信·支付", merged.ruleName)
-        // 只补空白：备注与支付工具
-        assertEquals("支付方式 零钱", merged.note)
+        // 只补空白：支付工具
         assertEquals("零钱", merged.paymentInstrument)
     }
 
@@ -356,13 +366,127 @@ class CaptureMergeTest {
     }
 
     @Test
+    fun `流程身份持久化在独立列_旧键无后缀也能识别同流程`() {
+        // CR-002：第一笔页面交易的持久化键可能没有后缀，但 flowId 列有身份。
+        // 同一流程的详情页（可能超出 10s）必须凭该列命中，不能因键形态而重开一笔。
+        val existing = pending(
+            amount = 1290,
+            timestamp = base,
+            createdAt = base,
+            dedupKey = "com.tencent.mm|EXPENSE|1290|${base / 60_000}",
+            flowId = "p:flow-1",
+        )
+        val hit = pickRelatedPendingForPage(
+            listOf(existing), NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 600_000, "p:flow-1",
+        )!!
+        assertEquals(1L, hit.pending.id)
+        // 另一流程不能凭 10s 同额窗口并进来
+        assertNull(
+            pickRelatedPendingForPage(
+                listOf(existing), NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 3_000, "p:flow-2",
+            ),
+        )
+    }
+
+    @Test
+    fun `不同通知实例_同分钟同额也不合并`() {
+        val existing = pending(
+            amount = 1280,
+            createdAt = base,
+            notificationInstanceId = "n:first",
+        )
+        assertNull(
+            pickRelatedPending(
+                listOf(existing), NotificationRules.WECHAT, TxType.EXPENSE, 1280,
+                base + 3_000, flowIdentity = "n:second",
+            ),
+        )
+        // 同一条通知的重复回调仍命中
+        assertTrue(
+            pickRelatedPending(
+                listOf(existing), NotificationRules.WECHAT, TxType.EXPENSE, 1280,
+                base + 3_000, flowIdentity = "n:first",
+            ) != null,
+        )
+    }
+
+    @Test
+    fun `订单号相同_忽略时间窗口认作同一笔`() {
+        val existing = pending(
+            amount = 1290,
+            timestamp = base,
+            createdAt = base,
+            orderId = "202610170001",
+        )
+        val hit = pickRelatedPendingForPage(
+            listOf(existing), NotificationRules.WECHAT, TxType.EXPENSE, 1290,
+            base + 24 * 3_600_000, "p:another-flow", orderId = "202610170001",
+        )!!
+        assertEquals(1L, hit.pending.id)
+        // 订单号不同 → 不凭金额/时间合并
+        assertNull(
+            pickRelatedPendingForPage(
+                listOf(existing), NotificationRules.WECHAT, TxType.EXPENSE, 1290,
+                base + 24 * 3_600_000, "p:another-flow", orderId = "202610170002",
+            ),
+        )
+    }
+
+    @Test
+    fun `金额冲突只用于诊断_仍返回冲突条目但不参与合并`() {
+        val pool = listOf(pending(amount = 100))
+        val conflict = nearbyAmountConflict(pool, NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 2_000)
+        assertEquals(100L, conflict?.amountCents)
+        assertNull(pickRelatedPendingForPage(pool, NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 2_000))
+    }
+
+    @Test
+    fun `流程身份匹配不依赖来源包名_跨应用合并后的后续页面仍能并回`() {
+        // 页面先到、支付宝通知后到：条目保留了通知来源包名，但 flowId 仍是页面流程 p1。
+        // 同一流程的详情页（美团包名）必须凭 flowId 命中，不能再记一笔。
+        val existing = pending(
+            packageName = NotificationRules.ALIPAY,
+            amount = 1800,
+            flowId = "p:meituan-flow-1",
+            note = "支付方式 支付宝",
+        )
+        val hit = pickRelatedPendingForPage(
+            listOf(existing), NotificationRules.MEITUAN_TAKEOUT, TxType.EXPENSE, 1800,
+            base + 5 * 60_000, "p:meituan-flow-1",
+        )!!
+        assertEquals(1L, hit.pending.id)
+    }
+
+    @Test
+    fun `明确交易时间几乎一致_进程重启后仍认回同一笔`() {
+        // 进程重启后 flowId 变了，但详情页给出的交易时间与原条目几乎相同
+        val existing = pending(
+            amount = 1290,
+            timestamp = base,
+            createdAt = base + 120_000,
+            flowId = "p:old-flow",
+        )
+        val hit = pickByExplicitTime(
+            listOf(existing), NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 5_000, false,
+        )!!
+        assertEquals(1L, hit.pending.id)
+        // 时间差超过 30 秒：不因同额误并（可能是另一笔）
+        assertNull(
+            pickByExplicitTime(
+                listOf(existing), NotificationRules.WECHAT, TxType.EXPENSE, 1290,
+                base + EXPLICIT_TIME_MATCH_WINDOW_MS + 1, false,
+            ),
+        )
+        // 金额/方向/退款标记不同同样不认
+        assertNull(pickByExplicitTime(listOf(existing), NotificationRules.WECHAT, TxType.EXPENSE, 1291, base, false))
+        assertNull(pickByExplicitTime(listOf(existing), NotificationRules.WECHAT, TxType.INCOME, 1290, base, false))
+    }
+
+    @Test
     fun `通知侧仍然严格比金额_窗口内两笔不同金额不命中`() {
-        // 同来源、10s 窗口内的两笔不同金额：通知侧不允许金额错配（否则两笔会被并成一笔）
+        // 同来源、10s 窗口内的两笔不同金额：不允许金额错配（否则两笔会被并成一笔）
         val pool = listOf(pending(id = 1, amount = 100), pending(id = 2, amount = 200))
         assertNull(pickRelatedPending(pool, NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 3_000))
-        assertNull(
-            pickRelatedPending(pool, NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 3_000, allowAmountMismatch = false),
-        )
     }
 
     // ---------- 页面优先合并 ----------

@@ -273,4 +273,41 @@ class PageParseSupportTest {
             PageParseSupport.looksLikeOrderPendingPage(snapshot("支付成功", "¥19.38", "老王奶茶店")),
         )
     }
+
+    // ---------- 结构化节点：标签与金额是同一容器的兄弟节点 ----------
+
+    @Test
+    fun `结构化标签取金额_跳过中间的装饰节点`() {
+        val nodes = listOf(
+            PageNode(text = "", parentIndex = -1), // 容器
+            PageNode(text = "付款金额", parentIndex = 0),
+            PageNode(text = "", contentDescription = "箭头", parentIndex = 0),
+            PageNode(text = "¥12.80", parentIndex = 0),
+            PageNode(text = "优惠", parentIndex = 0),
+            PageNode(text = "¥2.00", parentIndex = 0),
+        )
+        val s = PageSnapshot(packageName = "com.test", nodes = nodes)
+        assertEquals("12.80", PageParseSupport.amountAfterLabel(s, listOf("付款金额", "金额")))
+        // 扁平文本的下一行版本同样能取到（两条路径口径一致）
+        assertEquals("12.80", PageParseSupport.amountAfterLabel(s.lines, listOf("付款金额", "金额")))
+    }
+
+    @Test
+    fun `结构化标签同行写法优先`() {
+        val s = PageSnapshot(
+            packageName = "com.test",
+            nodes = listOf(
+                PageNode(text = "", parentIndex = -1),
+                PageNode(text = "实付款 ¥19.38", parentIndex = 0),
+            ),
+        )
+        assertEquals("19.38", PageParseSupport.amountAfterLabel(s, listOf("实付款")))
+    }
+
+    @Test
+    fun `结构化标签找不到金额时回落到文本版`() {
+        val s = snapshot("付款金额", "说明文字", "¥8.80")
+        // 扁平文本版会向后看两行；结构化版同一父节点下找不到金额后也必须回落到它
+        assertEquals("8.80", PageParseSupport.amountAfterLabel(s, listOf("付款金额")))
+    }
 }
