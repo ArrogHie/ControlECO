@@ -323,6 +323,50 @@ object PageParseSupport {
     }
 
     /**
+     * 结构化版本的"标签 → 金额"：除了文本相邻，还利用控件层级找**同一父节点下的后续兄弟**。
+     *
+     * 真实页面里标签与金额经常是同一容器的两个子节点（`付款金额` + `¥12.80`），
+     * 中间可能夹着图标/说明节点；只按扁平文本的下一行找，会在多一列布局时取错。
+     * 找不到时回落到文本版本，不改变既有行为。
+     */
+    fun amountAfterLabel(snapshot: PageSnapshot, labels: List<String>): String? {
+        val nodes = snapshot.nodes
+        for (i in nodes.indices) {
+            val node = nodes[i]
+            val display = node.display
+            if (display.isEmpty()) continue
+            val label = labels.firstOrNull { display.contains(it) } ?: continue
+            val pos = display.indexOf(label)
+            val same = display.substring(pos + label.length).trim('：', ':', ' ', '\u00A0')
+            extractAmountToken(same)?.let { return it }
+            val parent = node.parentIndex
+            if (parent >= 0) {
+                var checked = 0
+                for (j in i + 1 until nodes.size) {
+                    val sibling = nodes[j]
+                    if (sibling.parentIndex != parent) continue
+                    checked++
+                    val text = sibling.display
+                    if (text.isEmpty()) continue
+                    if (labels.any { text.contains(it) }) break
+                    extractAmountToken(text)?.let { return it }
+                    if (checked >= 3) break
+                }
+            }
+        }
+        return amountAfterLabel(snapshot.lines, labels)
+    }
+
+    /** 从一段文本里取金额数值文本（去掉 ¥/元，保持与文本版一致） */
+    private fun extractAmountToken(text: String): String? {
+        if (text.isBlank()) return null
+        amountValuesIn(text).firstOrNull()?.let { return it }
+        yuanSuffixedAmount(text)?.let { return it }
+        val cleaned = text.trim().trimStart('¥', '￥', '+', '-', ' ').trimEnd('元').trim()
+        return cleaned.takeIf { isAmountLikeNode(it) }?.trimStart('¥', '￥')
+    }
+
+    /**
      * 无标签商户兜底：从锚点节点向后扫最多 5 个节点，取第一个"像名称"的文本。
      * 排除金额/状态/按钮/标签/其他标签的值节点。
      */

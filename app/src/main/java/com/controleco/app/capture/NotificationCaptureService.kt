@@ -61,6 +61,7 @@ class NotificationCaptureService : NotificationListenerService() {
         var text = snapshot.mergedText()
         var bigText = snapshot.bigText
         var postTime = sbn.notification.`when`
+        var systemPostTime = sbn.postTime
         var enriched = false
 
         // 折叠摘要补全：摘要无金额 → 同组子通知里找那条真正的账务明细
@@ -76,6 +77,7 @@ class NotificationCaptureService : NotificationListenerService() {
                 text = child.mergedText()
                 bigText = ""
                 postTime = child.postTime
+                systemPostTime = child.systemPostTime
                 enriched = true
                 AppLog.i("Ntf", "grouped summary enriched from child: ${text.take(160)}")
             }
@@ -89,11 +91,14 @@ class NotificationCaptureService : NotificationListenerService() {
             postTime = postTime,
             isDebugBuild = BuildConfig.DEBUG,
             groupEnriched = enriched,
+            notificationKey = sbn.key,
+            systemPostTime = systemPostTime,
         )
     }
 
     /** 一条通知的文本快照（与 GroupNotificationResolver 的纯数据类共用同一形态） */
-    private fun snapshotOf(sbn: StatusBarNotification): NotificationText {        val extras = sbn.notification.extras
+    private fun snapshotOf(sbn: StatusBarNotification): NotificationText {
+        val extras = sbn.notification.extras
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim().orEmpty()
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim().orEmpty()
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim().orEmpty()
@@ -121,6 +126,7 @@ class NotificationCaptureService : NotificationListenerService() {
             groupKey = sbn.groupKey,
             group = null,
             postTime = sbn.notification.`when`,
+            systemPostTime = sbn.postTime,
             title = title,
             text = NotificationText.joinDistinct(listOf(text, subText, summaryText) + detailLines),
             bigText = bigText,

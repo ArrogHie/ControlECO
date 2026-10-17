@@ -84,6 +84,41 @@ internal object CaptureDefaults {
         else -> "银行"
     }
 
+    /**
+     * 页面/银行补充支付工具后的"可信账户匹配"（纯函数，供回填测试）。
+     *
+     * 与 [accountId] 的区别：**匹配不到就返回 null，绝不回落第一个账户**。
+     * 银行卡工具还不允许回落"渠道账户"——否则招商银行卡的账会被改记到微信零钱。
+     * 只在账户确实能对上支付工具时，才允许自动刷新正式账单的账户。
+     */
+    fun trustedAccountId(
+        accounts: List<AccountEntity>,
+        sourcePackage: String,
+        instrumentLabel: String,
+    ): Long? {
+        if (instrumentLabel.isBlank()) return null
+        val channel = channelKeywordOf(sourcePackage)
+        val instrument = PaymentInstrumentParser.parse(instrumentLabel, channel) ?: return null
+        // 银行卡带尾号时，只接受尾号能唯一对上的账户；尾号对不上绝不按银行名猜——
+        // 同一家银行的多张卡余额不同，猜错会让账户余额与对账一起错。
+        if (instrument.kind == com.controleco.app.capture.page.InstrumentKind.BANK_CARD &&
+            instrument.tail.isNotEmpty()
+        ) {
+            return accounts.filter {
+                PaymentAccountResolver.accountTails(it.name).contains(instrument.tail)
+            }.singleOrNull()?.id
+        }
+        val match = PaymentAccountResolver.resolve(
+            accounts, instrument, instrument.channel.ifBlank { channel },
+        ) ?: return null
+        if (instrument.kind == com.controleco.app.capture.page.InstrumentKind.BANK_CARD &&
+            match.reason == PaymentAccountResolver.MatchReason.CHANNEL
+        ) {
+            return null
+        }
+        return match.accountId
+    }
+
     /** 是否为银行侧来源（短信前缀 / 云闪付 / 银行 App 推送包名）：决定交易来源标记与账户推测口径 */
     fun isBankSource(sourcePackage: String): Boolean =
         sourcePackage.startsWith(NotificationRules.SMS_SOURCE_PREFIX) ||

@@ -415,7 +415,7 @@ object AlipayPageParser : AppPageParser {
     }
 
     private fun confirmAmountText(snapshot: PageSnapshot): String? =
-        PageParseSupport.amountAfterLabel(snapshot.lines, listOf("付款金额", "支付金额", "金额"))
+        PageParseSupport.amountAfterLabel(snapshot, listOf("付款金额", "支付金额", "金额"))
             ?: PageParseSupport.pickPaidAmount(snapshot)
 
     private fun amountAt(snapshot: PageSnapshot, text: String?): Long? =

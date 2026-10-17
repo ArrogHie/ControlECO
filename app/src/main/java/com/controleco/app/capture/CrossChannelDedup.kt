@@ -81,4 +81,19 @@ internal object CrossChannelDedup {
             existing.isRefund == incoming.isRefund &&
             abs(existing.time - incoming.time) <= WINDOW_MS
     }
+
+    /**
+     * 支付类条目是否带有可核对的银行线索（银行名/卡尾号）。
+     *
+     * [isSameTransaction] 只回答"两笔在金额/方向/时间上是否吻合"；能否合并到银行侧
+     * 还必须有这条线索——只凭金额与时间接近合并，可能把两笔真实交易并成一笔。
+     */
+    fun hasBankEvidence(entryText: String, bankName: String, cardTail: String?): Boolean {
+        if (entryText.isBlank()) return false
+        val bankHit = BankLedgerRules.aliasesOf(bankName).any { alias ->
+            alias.length >= 2 && entryText.contains(alias)
+        }
+        val tailHit = !cardTail.isNullOrEmpty() && entryText.contains(cardTail)
+        return bankHit || tailHit
+    }
 }

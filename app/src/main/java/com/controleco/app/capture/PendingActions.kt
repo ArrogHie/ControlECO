@@ -1,5 +1,7 @@
 package com.controleco.app.capture
 
+import androidx.room.withTransaction
+import com.controleco.app.data.db.AccBookDatabase
 import com.controleco.app.data.db.MerchantRuleDao
 import com.controleco.app.data.db.PendingDao
 import com.controleco.app.data.db.PendingTransactionEntity
@@ -23,6 +25,7 @@ internal object PendingActions {
      * 返回 null 且不抛异常、不重复写账。
      */
     suspend fun confirm(
+        db: AccBookDatabase,
         txDao: TransactionDao,
         pendingDao: PendingDao,
         merchantRuleDao: MerchantRuleDao? = null,
@@ -35,33 +38,41 @@ internal object PendingActions {
         val externalId = "NTF:${item.dedupKey}"
         val counterpartyValue = counterparty.trim().ifBlank { item.counterparty }
         val txId = try {
-            txDao.insert(
-                TransactionEntity(
-                    type = item.type,
-                    amountCents = amountCents,
-                    categoryId = categoryId,
-                    accountId = accountId,
-                    timestamp = item.timestamp,
-                    note = item.note.ifBlank { item.ruleName },
-                    counterparty = counterpartyValue,
-                    source = CaptureDefaults.txSource(item.sourcePackage),
-                    externalId = externalId,
-                    refundMark = item.refundMark,
-                ),
-            )
+            db.withTransaction {
+                val id = txDao.insert(
+                    TransactionEntity(
+                        type = item.type,
+                        amountCents = amountCents,
+                        categoryId = categoryId,
+                        accountId = accountId,
+                        timestamp = item.timestamp,
+                        note = item.note.ifBlank { item.ruleName },
+                        counterparty = counterpartyValue,
+                        source = CaptureDefaults.txSource(item.sourcePackage),
+                        externalId = externalId,
+                        refundMark = item.refundMark,
+                        flowId = item.flowId,
+                    ),
+                )
+                pendingDao.deleteById(item.id)
+                id
+            }
         } catch (e: Exception) {
             if (e.message?.contains("UNIQUE", ignoreCase = true) == true) {
+                // 已经入过账（重复通知/双通道竞态）：清理残留待确认条目即可
+                pendingDao.deleteById(item.id)
                 AppLog.i("pending", "already recorded, skip duplicate externalId=$externalId")
                 null
             } else {
                 throw e
             }
         }
-        pendingDao.deleteById(item.id)
-        merchantRuleDao?.let {
-            MerchantRules.learn(it, item.type, categoryId, accountId, counterpartyValue, item.note)
+        if (txId != null) {
+            merchantRuleDao?.let {
+                MerchantRules.learn(it, item.type, categoryId, accountId, counterpartyValue, item.note)
+            }
+            AppLog.i("pending", "confirmed #${item.id} externalId=$externalId tx=$txId")
         }
-        AppLog.i("pending", "confirmed #${item.id} externalId=$externalId tx=$txId")
         return txId
     }
 
@@ -80,6 +91,7 @@ internal object PendingActions {
      * 返回 false = 找不到该笔交易（可能已被撤销），调用方只需静默收场。
      */
     suspend fun updateEntered(
+        db: AccBookDatabase,
         txDao: TransactionDao,
         pendingDao: PendingDao,
         merchantRuleDao: MerchantRuleDao? = null,
@@ -92,10 +104,17 @@ internal object PendingActions {
         val externalId = "NTF:${item.dedupKey}"
         val txId = txDao.findIdByExternalId(externalId) ?: return false
         val counterpartyValue = counterparty.trim().ifBlank { item.counterparty }
-        txDao.updateEnteredFields(txId, amountCents, categoryId, accountId, counterpartyValue)
-        // AUTO 条目同步：页面/银行通道后续富化以它为准，不能留旧值；并置位"用户已手改"
-        pendingDao.updateFromPage(item.id, amountCents, item.timestamp, counterpartyValue, item.note, item.ruleName)
-        pendingDao.markUserEdited(item.id)
+        // 用数据库里的最新备注/时间：卡片打开后页面可能又补了信息，用户只改了金额/商户，
+        // 不能拿打开卡片时的旧快照把后到的富化结果覆盖回去
+        val fresh = pendingDao.getById(item.id) ?: item
+        db.withTransaction {
+            txDao.updateEnteredFields(txId, amountCents, categoryId, accountId, counterpartyValue)
+            // AUTO 条目同步：页面/银行通道后续富化以它为准，不能留旧值；并置位"用户已手改"
+            pendingDao.updateFromPage(
+                item.id, amountCents, fresh.timestamp, counterpartyValue, fresh.note, fresh.ruleName,
+            )
+            pendingDao.markUserEdited(item.id)
+        }
         merchantRuleDao?.let {
             MerchantRules.learn(it, item.type, categoryId, accountId, counterpartyValue, item.note)
         }
@@ -104,11 +123,18 @@ internal object PendingActions {
     }
 
     /** 撤销已入账条目（悬浮卡「忽略」/ 通知「撤销」）：删除交易与对应 AUTO 条目，不留残影 */
-    suspend fun undoEntered(txDao: TransactionDao, pendingDao: PendingDao, dedupKey: String): Boolean {
+    suspend fun undoEntered(
+        db: AccBookDatabase,
+        txDao: TransactionDao,
+        pendingDao: PendingDao,
+        dedupKey: String,
+    ): Boolean {
         val externalId = "NTF:$dedupKey"
         val txId = txDao.findIdByExternalId(externalId)
-        if (txId != null) txDao.deleteById(txId)
-        pendingDao.deleteByDedupKey(dedupKey)
+        db.withTransaction {
+            if (txId != null) txDao.deleteById(txId)
+            pendingDao.deleteByDedupKey(dedupKey)
+        }
         AppLog.i("pending", "undo entered tx=#$txId externalId=$externalId")
         return txId != null
     }

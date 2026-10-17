@@ -2,6 +2,7 @@ package com.controleco.app.capture
 
 import com.controleco.app.capture.page.PageParseSupport
 import com.controleco.app.data.db.PendingTransactionEntity
+import com.controleco.app.data.db.RefundMark
 import com.controleco.app.data.db.TxType
 import kotlin.math.abs
 
@@ -10,12 +11,13 @@ import kotlin.math.abs
  *
  * 判定与合并规则做成纯函数（无 Android 依赖，可直接单测）：
  *
- * - 同一笔 = 同包名 + 同方向 + 两次捕获相隔 ≤ [SAME_ORDER_WINDOW_MS]；
- *   金额相同直接命中；金额不同时（通知误解析历史：支付宝 ¥1.00）只有候选唯一才认作同笔。
+ * - 同一笔 = 同包名 + 同方向 + 两次捕获相隔 ≤ [SAME_ORDER_WINDOW_MS]，且**金额必须相同**；
+ *   金额不同一律不自动合并——"候选唯一"不能证明是同一笔，宁可保留两条交给用户。
  * - 页面通道另有一层"页面重捕"判定（[pickRelatedPendingForPage]、[MEITUAN_RECAPTURE_WINDOW_MS]）：
  *   **只对美团外卖**——它的结果页会被弹窗干扰/重渲染而重新观察，按更长的窗口、严格同金额并回既有条目。
  * - 命中后**页面信息优先**：页面侧有商户口/支付方式/金额/时间，覆盖通知侧的稀疏值。
- * - **同金额的两笔独立交易不能被并成一笔**：页面候选带"流程标识"，标识不同即视为两笔。
+ * - **同金额的两笔独立交易不能被并成一笔**：页面候选带"支付流程标识"、通知候选带"通知实例标识"，
+ *   同类标识不同即视为两笔；不同通道之间的标识（页面 p: / 通知 n:）不互相阻塞。
  * - **用户手改过的字段不被覆盖**（[PendingTransactionEntity.userEdited]）。
  */
 
@@ -39,15 +41,11 @@ internal data class RelatedPending(
 )
 
 /**
- * 在合并池（待确认 + 自动入账条目）里找同一笔：同包名同方向、捕获时刻在窗口内，
- * 金额相同优先取时间最近的。
+ * 在合并池（待确认 + 自动入账条目）里找同一笔：同包名同方向、捕获时刻在窗口内、**金额相同**，
+ * 且流程/通知实例身份不冲突。金额不同一律不合并。
  *
- * [allowAmountMismatch] 只给"页面捕获"这一侧开：页面是权威来源，金额对不上时
- * （通知误解析历史：支付宝 ¥1.00）窗口内唯一候选即认作同笔、由页面金额覆盖。
- * 通知侧的捕获必须严格比金额——否则同 App 内 10s 内两笔金额不同的付款会被并成一笔，丢记录。
- *
- * [flowIdentity] 是本条候选所属"支付流程"的标识：既有条目若明确属于**另一个流程**
- * 则不参与合并（同额两笔独立交易的隔离）；无流程标识的既有条目（通知/银行侧创建）仍可跨渠道合并。
+ * [flowIdentity] 是本条候选所属的身份：页面流程标识（`p:…`）只与既有页面流程比较，
+ * 通知实例标识（`n:…`）只与既有通知实例比较；跨通道时另一侧的标识为空，不阻塞合并。
  */
 internal fun pickRelatedPending(
     candidates: List<PendingTransactionEntity>,
@@ -56,39 +54,89 @@ internal fun pickRelatedPending(
     amountCents: Long,
     captureAt: Long,
     windowMs: Long = SAME_ORDER_WINDOW_MS,
-    allowAmountMismatch: Boolean = false,
     flowIdentity: String? = null,
 ): RelatedPending? {
     val inWindow = candidates.filter {
         it.sourcePackage == packageName && it.type == type && abs(captureAt - it.createdAt) <= windowMs &&
-            flowCompatible(it.dedupKey, flowIdentity)
+            flowCompatible(it, flowIdentity)
     }
-    inWindow.filter { it.amountCents == amountCents }
+    return inWindow.filter { it.amountCents == amountCents }
         .minByOrNull { abs(captureAt - it.createdAt) }
-        ?.let { return RelatedPending(it, sameAmount = true) }
-    if (!allowAmountMismatch) return null
-    return inWindow.singleOrNull()?.let { RelatedPending(it, sameAmount = false) }
+        ?.let { RelatedPending(it, sameAmount = true) }
 }
 
 /**
- * 流程兼容判定：既有条目的流程标识为空（通知/银行侧创建，没有流程概念）→ 允许合并；
- * 有标识时必须与本次候选一致，否则视为**另一笔独立交易**（同额两笔各自成条，绝不并成一条）。
+ * 判断一条候选能否与既有条目视作同一笔（按"同类身份"比较）：
+ * - 既有页面流程标识非空：本条也是页面候选时必须相同，否则是另一笔；
+ * - 既有通知实例标识非空：本条也是通知候选时必须相同，否则是另一条通知；
+ * - 跨通道（页面 ⇄ 通知）时对侧字段为空，允许融合。
+ *
+ * 旧版本的去重键后缀（`@f1a2` 这类短标识）按页面流程兼容处理；通知历史条目没有身份，
+ * 只按 10s 窗口与严格同额参与合并（保守策略，不假设它属于任意新流程）。
  */
+internal fun flowCompatible(
+    existing: PendingTransactionEntity,
+    incomingIdentity: String?,
+): Boolean {
+    if (incomingIdentity.isNullOrEmpty()) return true
+    if (incomingIdentity.startsWith(BANK_ID_PREFIX)) {
+        val existingBank = entryBankInstanceId(existing)
+        return existingBank.isEmpty() || existingBank == incomingIdentity
+    }
+    if (incomingIdentity.startsWith(NOTIFICATION_ID_PREFIX)) {
+        val existingNotification = entryNotificationInstanceId(existing)
+        return existingNotification.isEmpty() || existingNotification == incomingIdentity
+    }
+    val existingFlow = entryFlowId(existing)
+    return existingFlow.isEmpty() || existingFlow == incomingIdentity
+}
+
+/** 兼容旧测试/调用点的两参数形态：只比较去重键里的后缀。 */
 internal fun flowCompatible(existingDedupKey: String, incomingFlowIdentity: String?): Boolean {
     if (incomingFlowIdentity.isNullOrEmpty()) return true
     val existing = flowIdentityOf(existingDedupKey)
-    return existing.isEmpty() || existing == incomingFlowIdentity
+    if (incomingFlowIdentity.startsWith(BANK_ID_PREFIX)) {
+        return existing.isEmpty() || existing == incomingFlowIdentity
+    }
+    if (incomingFlowIdentity.startsWith(NOTIFICATION_ID_PREFIX)) {
+        val existingNotification = existing.takeIf { it.startsWith(NOTIFICATION_ID_PREFIX) }.orEmpty()
+        return existingNotification.isEmpty() || existingNotification == incomingFlowIdentity
+    }
+    val existingFlow = existing.takeIf { !it.startsWith(NOTIFICATION_ID_PREFIX) && !it.startsWith(BANK_ID_PREFIX) }.orEmpty()
+    return existingFlow.isEmpty() || existingFlow == incomingFlowIdentity
+}
+
+/** 既有条目的页面流程标识：优先新列，旧版本页面键的后缀兜底。 */
+internal fun entryFlowId(pending: PendingTransactionEntity): String {
+    if (pending.flowId.isNotBlank()) return pending.flowId
+    val suffix = flowIdentityOf(pending.dedupKey)
+    return suffix.takeIf {
+        it.isNotEmpty() && !it.startsWith(NOTIFICATION_ID_PREFIX) && !it.startsWith(BANK_ID_PREFIX)
+    }.orEmpty()
+}
+
+/** 既有条目的通知实例标识：优先新列，通知去重键后缀兜底。 */
+internal fun entryNotificationInstanceId(pending: PendingTransactionEntity): String {
+    if (pending.notificationInstanceId.isNotBlank()) return pending.notificationInstanceId
+    val suffix = flowIdentityOf(pending.dedupKey)
+    return suffix.takeIf { it.startsWith(NOTIFICATION_ID_PREFIX) }.orEmpty()
+}
+
+/** 既有条目的银行事件标识：优先新列，银行去重键后缀兜底。 */
+internal fun entryBankInstanceId(pending: PendingTransactionEntity): String {
+    if (pending.bankInstanceId.isNotBlank()) return pending.bankInstanceId
+    val suffix = flowIdentityOf(pending.dedupKey)
+    return suffix.takeIf { it.startsWith(BANK_ID_PREFIX) }.orEmpty()
 }
 
 /**
- * 页面通道的"同一笔"判定，三层：
- * 1. 同一支付流程内的后续页面（如结果页之后又打开账单详情）：[flowIdentity] 相同的既有条目
- *    直接认作同笔（金额必须一致，不受时间窗口限制）；
- * 2. 跨通道窗口（10s，允许金额不一致）——通知误解析金额时由页面金额覆盖；
- * 3. 美团外卖的重捕窗口（[MEITUAN_RECAPTURE_WINDOW_MS]，**严格同金额**）——只对美团外卖生效。
+ * 页面通道的"同一笔"判定，四层（全部要求金额相同）：
+ * 0. 同一订单号（最强证据，忽略时间窗口）；
+ * 1. 同一支付流程内的后续页面（结果页之后又打开账单详情）：[flowIdentity] 相同的既有条目；
+ * 2. 跨通道窗口（10s）；
+ * 3. 美团外卖的重捕窗口（[MEITUAN_RECAPTURE_WINDOW_MS]）——只对美团外卖生效。
  *
- * 重捕窗口必须严格比金额：窗口内两笔**不同金额**的付款绝不能并成一笔（丢记录）。
- * 同额的**两笔独立交易**由 [flowIdentity] 隔离：既有条目属于另一流程时不参与合并。
+ * 金额不同时**没有任何一层**允许合并：页面来源优先不能替代"是否同一笔"的判定。
  */
 internal fun pickRelatedPendingForPage(
     candidates: List<PendingTransactionEntity>,
@@ -97,16 +145,24 @@ internal fun pickRelatedPendingForPage(
     amountCents: Long,
     captureAt: Long,
     flowIdentity: String? = null,
+    orderId: String? = null,
 ): RelatedPending? {
-    if (!flowIdentity.isNullOrEmpty()) {
+    if (!orderId.isNullOrBlank()) {
         candidates.firstOrNull {
             it.sourcePackage == packageName && it.type == type && it.amountCents == amountCents &&
-                flowIdentityOf(it.dedupKey) == flowIdentity
+                it.orderId.isNotBlank() && it.orderId == orderId
+        }?.let { return RelatedPending(it, sameAmount = true) }
+    }
+    if (!flowIdentity.isNullOrEmpty()) {
+        // 同一页面流程的后续页面可能落在"跨应用合并后保留了通知来源"的条目上
+        // （页面先到、通知后到），此时 sourcePackage 可能不同；流程身份本身已足够强。
+        candidates.firstOrNull {
+            it.type == type && it.amountCents == amountCents && entryFlowId(it) == flowIdentity
         }?.let { return RelatedPending(it, sameAmount = true) }
     }
     pickRelatedPending(
         candidates, packageName, type, amountCents, captureAt,
-        allowAmountMismatch = true, flowIdentity = flowIdentity,
+        flowIdentity = flowIdentity,
     )?.let { return it }
     if (packageName != NotificationRules.MEITUAN_TAKEOUT) return null
     return pickRelatedPending(
@@ -114,6 +170,47 @@ internal fun pickRelatedPendingForPage(
         windowMs = MEITUAN_RECAPTURE_WINDOW_MS, flowIdentity = flowIdentity,
     )
 }
+
+/** 页面候选带明确交易时间时，与既有条目匹配的窄窗口（进程重启后重新打开同一详情页的防重） */
+internal const val EXPLICIT_TIME_MATCH_WINDOW_MS = 30_000L
+
+/**
+ * 页面候选带**明确交易时间**时的同笔判定：同来源/同方向/同金额、退款标记一致，
+ * 且交易时间相差 ≤ [EXPLICIT_TIME_MATCH_WINDOW_MS]。
+ *
+ * 用途：进程重启后 page flow 身份已丢失，用户再打开同一笔的账单详情页时，
+ * 不能因为 flowId 对不上就新建一条。窗口刻意收紧到 30 秒（同一笔的详情页交易时间应与
+ * 原捕获时间几乎相同；两笔同额真实交易在同一 30 秒内且时间戳完全接近属于极小概率）。
+ */
+internal fun pickByExplicitTime(
+    candidates: List<PendingTransactionEntity>,
+    packageName: String,
+    type: TxType,
+    amountCents: Long,
+    txTime: Long,
+    isRefund: Boolean,
+): RelatedPending? = candidates.firstOrNull {
+    it.sourcePackage == packageName && it.type == type && it.amountCents == amountCents &&
+        (it.refundMark == RefundMark.REFUND_INCOME) == isRefund &&
+        abs(txTime - it.timestamp) <= EXPLICIT_TIME_MATCH_WINDOW_MS
+}?.let { RelatedPending(it, sameAmount = true) }
+
+/**
+ * 金额冲突候选：同包名/同方向、时间接近但金额不同的既有条目。
+ * 只用于诊断日志（说明"为什么没有合并"），不参与任何自动合并。
+ */
+internal fun nearbyAmountConflict(
+    candidates: List<PendingTransactionEntity>,
+    packageName: String,
+    type: TxType,
+    amountCents: Long,
+    captureAt: Long,
+    windowMs: Long = SAME_ORDER_WINDOW_MS,
+): PendingTransactionEntity? = candidates.firstOrNull {
+    it.sourcePackage == packageName && it.type == type && it.amountCents != amountCents &&
+        abs(captureAt - it.createdAt) <= windowMs
+}
+
 
 /** 页面优先合并后的字段值 */
 internal data class PageMerge(
@@ -131,7 +228,7 @@ internal data class DedupKey(
     val type: String,
     val amountCents: Long,
     val minute: Long,
-    /** 同一分钟内同一来源的同额交易：无后缀 = 第一笔，带 `@xxx` = 另一笔独立交易的流程标识 */
+    /** 同一分钟内同一来源的同额交易：新数据一律带 `@<身份>`；无后缀只存在于旧版本记录 */
     val flowIdentity: String = "",
 )
 
@@ -150,8 +247,8 @@ internal fun parseDedupKey(key: String): DedupKey? {
 }
 
 /**
- * 去重键里的流程标识（`…|12345@f1a2` → `f1a2`；无后缀为空串 = 该分钟桶里的第一笔）。
- * 返回值与调用方传入的 [flowCompatible] / [DedupKeyAllocator] 标识**同一形态**（都带不带 `@` 一致），
+ * 去重键里的身份后缀（`…|12345@p:uuid` → `p:uuid`；无后缀为空串 = 旧版本记录/无身份来源）。
+ * 返回值与调用方传入的 [flowCompatible] 标识**同一形态**（都带前缀、不带 `@`），
  * 避免比较时两边形态不一致导致隔离失效。
  */
 internal fun flowIdentityOf(dedupKey: String): String {
@@ -173,63 +270,14 @@ internal fun dedupKeyWithAmount(key: String, amountCents: Long): String? {
 }
 
 /**
- * 在同一分钟桶内按"流程标识"分配去重键（纯逻辑，便于单测）。
- *
- * 背景：去重键的分钟桶保证"同一笔只入一次"，但会把"同一分钟内两笔同额交易"键成同一个值，
- * 第二笔会被唯一索引吞掉。这里按流程标识区分：同一流程复用同一个键；
- * 不同流程（用户确实又付了一笔）在键尾追加 `@<流程标识>`，两笔都能落账。
- */
-internal class DedupKeyAllocator(
-    private val ttlMs: Long = 5 * 60_000L,
-    private val capacity: Int = 128,
-    private val clock: () -> Long = System::currentTimeMillis,
-) {
-    private val owners = LinkedHashMap<String, Pair<String, Long>>()
-
-    fun allocate(baseKey: String, flowIdentity: String?): String = synchronized(this) {
-        val now = clock()
-        evictExpired(now)
-        val identity = flowIdentity.orEmpty()
-        if (identity.isEmpty()) return baseKey
-        val owner = owners[baseKey]
-        if (owner == null || owner.first == identity) {
-            remember(baseKey, identity, now)
-            return baseKey
-        }
-        val suffixed = "$baseKey@$identity"
-        remember(suffixed, identity, now)
-        suffixed
-    }
-
-    /** 键已释放（条目被丢弃/确认）：允许后来者复用同一个键 */
-    fun release(key: String) = synchronized(this) { owners.remove(key) }
-
-    private fun remember(key: String, identity: String, now: Long) {
-        owners.remove(key)
-        owners[key] = identity to now
-        while (owners.size > capacity) {
-            val eldest = owners.keys.firstOrNull() ?: break
-            owners.remove(eldest)
-        }
-    }
-
-    private fun evictExpired(now: Long) {
-        val iterator = owners.entries.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
-            if (now - entry.value.second > ttlMs) iterator.remove()
-        }
-    }
-}
-
-/**
  * 页面信息优先的字段合并：页面有值则覆盖（商户/金额/时间/支付工具），页面没有的保留通知侧原值；
  * 支付方式并入备注（页面独有信息）。
  *
  * 两道防护：
  * 1. **纯金额不能覆盖已有商户**——页面解析偶发把金额节点当商户
  *    （真实事故：碰一碰支付页"￥"与"20.06"分节点渲染，合并回填把"鸿润福连锁超市"改成了"20.06"）；
- * 2. **用户手改过（userEdited）时不覆盖金额/商户/时间**——用户输入优先于自动解析。
+ * 2. **用户手改过（userEdited）时所有可见字段保持既有值**，只补空白支付工具——
+ *    用户输入优先于自动解析，且不允许自动拼装备注导致两处不一致。
  */
 internal fun mergePageInfo(
     existing: PendingTransactionEntity,
@@ -242,7 +290,7 @@ internal fun mergePageInfo(
     pageInstrument: String = "",
 ): PageMerge {
     val baseNote = pageNote.ifBlank { existing.note }
-    val note = buildString {
+    val mergedNote = buildString {
         append(baseNote)
         if (pagePaymentMethod != null && !baseNote.contains(pagePaymentMethod)) {
             if (isNotEmpty()) append(" · ")
@@ -250,12 +298,13 @@ internal fun mergePageInfo(
         }
     }.take(300)
     if (existing.userEdited) {
-        // 用户改过：只补空白字段，不动金额、时间、商户
+        // 用户改过：金额/时间/商户/备注/规则名都保持既有值，只补空白字段。
+        // 备注不能再用页面内容重新拼装——否则正式账单与待确认条目的备注会不一致。
         return PageMerge(
             amountCents = existing.amountCents,
             timestamp = existing.timestamp,
             counterparty = existing.counterparty,
-            note = note,
+            note = existing.note,
             ruleName = existing.ruleName,
             paymentInstrument = existing.paymentInstrument.ifBlank { pageInstrument },
         )
@@ -267,7 +316,7 @@ internal fun mergePageInfo(
         amountCents = pageAmountCents,
         timestamp = pageTxTime ?: existing.timestamp,
         counterparty = usableCounterparty ?: existing.counterparty,
-        note = note,
+        note = mergedNote,
         ruleName = pageRuleName.ifBlank { existing.ruleName },
         paymentInstrument = pageInstrument.ifBlank { existing.paymentInstrument },
     )

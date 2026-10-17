@@ -114,6 +114,17 @@ interface TransactionDao {
     @Query("SELECT id FROM transactions WHERE externalId = :externalId LIMIT 1")
     suspend fun findIdByExternalId(externalId: String): Long?
 
+    /**
+     * 页面补充了可信支付方式后重新匹配账户：只更新账户，不动金额/分类/商户（用户编辑保护由调用方判断）。
+     * 账户余额与统计由 Room 的 Flow 自动刷新。
+     */
+    @Query("UPDATE transactions SET accountId = :accountId WHERE externalId = :externalId")
+    suspend fun updateAccountByExternalId(externalId: String, accountId: Long)
+
+    /** 页面通道回填时把支付流程标识写到正式交易（可追踪"这笔账属于哪次支付流程"） */
+    @Query("UPDATE transactions SET flowId = :flowId WHERE externalId = :externalId AND flowId = ''")
+    suspend fun updateFlowIdByExternalId(externalId: String, flowId: String)
+
     /** 悬浮卡编辑同步：金额/分类/账户/商户回写已入账的交易（「忽略」与「撤销」走删除） */
     @Query(
         """UPDATE transactions
@@ -265,6 +276,9 @@ interface PendingDao {
     @Query("SELECT COUNT(*) FROM pending_transactions WHERE dedupKey = :dedupKey")
     suspend fun countByDedupKey(dedupKey: String): Int
 
+    @Query("SELECT * FROM pending_transactions WHERE dedupKey = :dedupKey LIMIT 1")
+    suspend fun findByDedupKey(dedupKey: String): PendingTransactionEntity?
+
     @Query("SELECT * FROM pending_transactions WHERE id = :id")
     suspend fun getById(id: Long): PendingTransactionEntity?
 
@@ -297,6 +311,38 @@ interface PendingDao {
     /** 用户手改过该笔：后续自动富化不再覆盖金额/商户/时间（用户输入优先） */
     @Query("UPDATE pending_transactions SET userEdited = 1 WHERE id = :id")
     suspend fun markUserEdited(id: Long)
+
+    /** 页面融合时补记支付流程标识（已有值不覆盖；跨渠道条目允许同时保留通知实例标识） */
+    @Query("UPDATE pending_transactions SET flowId = :flowId WHERE id = :id AND flowId = ''")
+    suspend fun updateFlowIdIfBlank(id: Long, flowId: String)
+
+    /** 通知融合时补记通知实例标识（已有值不覆盖） */
+    @Query("UPDATE pending_transactions SET notificationInstanceId = :instanceId WHERE id = :id AND notificationInstanceId = ''")
+    suspend fun updateNotificationInstanceIfBlank(id: Long, instanceId: String)
+
+    /** 银行侧融合时补记银行事件标识（已有值不覆盖） */
+    @Query("UPDATE pending_transactions SET bankInstanceId = :instanceId WHERE id = :id AND bankInstanceId = ''")
+    suspend fun updateBankInstanceIfBlank(id: Long, instanceId: String)
+
+    /** 页面融合时补记订单号（已有值不覆盖） */
+    @Query("UPDATE pending_transactions SET orderId = :orderId WHERE id = :id AND orderId = ''")
+    suspend fun updateOrderIdIfBlank(id: Long, orderId: String)
+
+    /** 同一通知实例的既有条目：跨过时间窗口也能确认是"同一条通知的更新"，避免重复入队 */
+    @Query(
+        """SELECT * FROM pending_transactions
+           WHERE notificationInstanceId = :instanceId AND status IN ('PENDING', 'AUTO')
+           ORDER BY createdAt DESC LIMIT 1""",
+    )
+    suspend fun findByNotificationInstance(instanceId: String): PendingTransactionEntity?
+
+    /** 同一银行事件（同一条短信/推送）的既有条目：跨过时间窗口也能确认是重复投递 */
+    @Query(
+        """SELECT * FROM pending_transactions
+           WHERE bankInstanceId = :instanceId AND status IN ('PENDING', 'AUTO')
+           ORDER BY createdAt DESC LIMIT 1""",
+    )
+    suspend fun findByBankInstance(instanceId: String): PendingTransactionEntity?
 
     /** 金额待补录回填：写金额并重算去重键（来源段/方向段/分钟桶不变） */
     @Query("UPDATE pending_transactions SET amountCents = :amountCents, dedupKey = :dedupKey WHERE id = :id")

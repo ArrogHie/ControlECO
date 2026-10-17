@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import androidx.room.withTransaction
 import com.controleco.app.AccBookApp
 import com.controleco.app.BuildConfig
 import com.controleco.app.capture.overlay.canSyncOverlayEdits
@@ -15,13 +16,14 @@ import com.controleco.app.capture.overlay.dismissOutcome
 import com.controleco.app.capture.overlay.OVERLAY_DELAY_MS
 import com.controleco.app.capture.overlay.OverlayConditions
 import com.controleco.app.capture.overlay.shouldShowOverlay
+import com.controleco.app.capture.NotificationRules.ParsedNotification
 import com.controleco.app.capture.page.PageCandidate
-import com.controleco.app.capture.page.PageFlow
 import com.controleco.app.capture.page.PageFlowTracker
 import com.controleco.app.capture.page.PageParseResult
 import com.controleco.app.capture.page.PageParserRegistry
 import com.controleco.app.capture.page.PageScene
 import com.controleco.app.capture.page.PageSnapshot
+import com.controleco.app.data.db.AccBookDatabase
 import com.controleco.app.data.db.AccountDao
 import com.controleco.app.data.db.AccountEntity
 import com.controleco.app.data.db.CaptureChannel
@@ -122,13 +124,8 @@ object CaptureCenter {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val recentKeys = LinkedHashMap<String, Long>()
 
-    /**
-     * 去重键分配：同一分钟内同来源同金额的第二笔独立交易会拿到带流程后缀的键
-     * （否则第二笔会被 dedupKey 唯一索引吞掉，见 DedupKeyAllocator）。
-     */
-    private val dedupKeyAllocator = DedupKeyAllocator()
-
     private lateinit var appContext: Context
+    private lateinit var db: AccBookDatabase
     private lateinit var txDao: TransactionDao
     private lateinit var captureDao: CaptureDao
     private lateinit var pendingDao: PendingDao
@@ -168,6 +165,7 @@ object CaptureCenter {
     fun init(context: Context) {
         appContext = context.applicationContext
         val db = (appContext as AccBookApp).db
+        this.db = db
         txDao = db.transactionDao()
         captureDao = db.captureDao()
         pendingDao = db.pendingDao()
@@ -405,9 +403,15 @@ object CaptureCenter {
         text: String,
         bigText: String,
         hint: NotificationRules.DirectionHint,
+        notificationKey: String? = null,
+        eventStamp: Long = 0L,
     ) {
         val keyTime = if (postTime > 0) postTime else System.currentTimeMillis()
-        val dedupKey = NotificationRules.dedupKey(packageName, hint.type, false, 0L, keyTime)
+        val identity = notificationInstanceId(notificationKey, eventStamp, hint.type, false)
+        val dedupKey = dedupKeyWithIdentity(
+            NotificationRules.dedupKey(packageName, hint.type, false, 0L, keyTime),
+            identity,
+        )
         val pendingId = pendingDao.insert(
             PendingTransactionEntity(
                 type = hint.type,
@@ -418,6 +422,7 @@ object CaptureCenter {
                 ruleName = hint.ruleName,
                 dedupKey = dedupKey,
                 rawNotificationId = rawId,
+                notificationInstanceId = identity.orEmpty(),
             ),
         )
         captureDao.updateMatch(rawId, hint.ruleName + "·金额待补", true)
@@ -537,7 +542,7 @@ object CaptureCenter {
                 .onFailure { AppLog.w("Ntf", "undo entry delete failed", it) }
             if (dedupKey.isNotBlank()) {
                 pendingDao.deleteByDedupKey(dedupKey)
-                dedupKeyAllocator.release(dedupKey)
+                if (dedupKey.isNotBlank()) AppLog.d("pending", "entry removed key=$dedupKey")
                 cancelCaptureNotification(entryNotifId(dedupKey))
                 if (ConfirmCardWindow.showingPendingId > 0 &&
                     ConfirmCardWindow.showingPendingId == pendingIdOfDedup(dedupKey)
@@ -563,7 +568,7 @@ object CaptureCenter {
                 pendingDao.deleteByDedupKey(dedupKey)
             }
             // 条目已丢弃：释放去重键，同分钟桶里的下一笔真实交易可以复用
-            if (dedupKey.isNotBlank()) dedupKeyAllocator.release(dedupKey)
+            if (dedupKey.isNotBlank()) AppLog.d("pending", "pending removed key=$dedupKey")
             cancelCaptureNotification(pendingNotifId(dedupKey))
             if (ConfirmCardWindow.showingPendingId == pendingId) {
                 mainHandler.post { ConfirmCardWindow.dismissConfirm() }
@@ -602,9 +607,9 @@ object CaptureCenter {
                     return@launch
                 }
                 if (pendingDao.countByDedupKey(newKey) > 0) {
-                    // 同笔的完整捕获已入队：占位条退场（键释放，允许后续同分钟桶复用）
+                    // 同笔的完整捕获已入队：占位条退场
                     pendingDao.deleteById(pendingId)
-                    dedupKeyAllocator.release(stub.dedupKey)
+                    AppLog.d("pending", "stub superseded key=${stub.dedupKey}")
                     AppLog.i("Ntf", "amount stub superseded by existing entry key=$newKey")
                     onResult(AmountUpdateResult.NotFound)
                     return@launch
@@ -877,7 +882,7 @@ object CaptureCenter {
         withStrip: Boolean,
     ) {
         val ok = runCatching {
-            PendingActions.updateEntered(txDao, pendingDao, merchantRuleDao, pending, categoryId, accountId, counterparty, amountCents)
+            PendingActions.updateEntered(db, txDao, pendingDao, merchantRuleDao, pending, categoryId, accountId, counterparty, amountCents)
         }.onFailure { AppLog.e("Overlay", "sync entered edits failed", it) }.getOrDefault(false)
         if (!ok) {
             toast("这笔已被撤销，未更新")
@@ -889,7 +894,7 @@ object CaptureCenter {
             mainHandler.post {
                 ConfirmCardWindow.showSaved(pending.type, amountCents) {
                     scope.launch {
-                        PendingActions.undoEntered(txDao, pendingDao, pending.dedupKey)
+                        PendingActions.undoEntered(db, txDao, pendingDao, pending.dedupKey)
                         toast("已撤销")
                     }
                 }
@@ -899,7 +904,7 @@ object CaptureCenter {
 
     /** 已入账卡片的「忽略」：删除这笔账（含 AUTO 条目），一条点击纠错 */
     private suspend fun ignoreEntered(pending: PendingTransactionEntity) {
-        val removed = PendingActions.undoEntered(txDao, pendingDao, pending.dedupKey)
+        val removed = PendingActions.undoEntered(db, txDao, pendingDao, pending.dedupKey)
         pendingDao.deleteById(pending.id)
         cancelCaptureNotification(entryNotifId(pending.dedupKey))
         toast(if (removed) "已忽略，这笔未记账" else "这笔已被撤销")
@@ -915,7 +920,7 @@ object CaptureCenter {
         counterparty: String,
     ) {
         val txId = try {
-            PendingActions.confirm(txDao, pendingDao, merchantRuleDao, pending, categoryId, accountId, counterparty, amountCents)
+            PendingActions.confirm(db, txDao, pendingDao, merchantRuleDao, pending, categoryId, accountId, counterparty, amountCents)
         } catch (e: Exception) {
             AppLog.e("Overlay", "confirm from overlay failed", e)
             toast("入账失败：${e.message ?: "未知错误"}")
@@ -940,7 +945,7 @@ object CaptureCenter {
     /** 卡片「忽略」：丢弃待确认条目（误报纠错，一条点击） */
     private suspend fun ignoreFromOverlay(pendingId: Long, dedupKey: String) {
         PendingActions.discard(pendingDao, pendingId)
-        if (dedupKey.isNotBlank()) dedupKeyAllocator.release(dedupKey)
+        if (dedupKey.isNotBlank()) AppLog.d("Overlay", "pending ignored key=$dedupKey")
         cancelCaptureNotification(pendingNotifId(dedupKey))
         AppLog.i("Overlay", "ignored from card #$pendingId")
     }
@@ -1260,6 +1265,8 @@ object CaptureCenter {
         postTime: Long,
         isDebugBuild: Boolean,
         groupEnriched: Boolean = false,
+        notificationKey: String? = null,
+        systemPostTime: Long = 0L,
     ) {
         _lastEventAt.value = System.currentTimeMillis()
 
@@ -1269,12 +1276,15 @@ object CaptureCenter {
         // debug 构建全量 Logcat（用户要求：便于真实样本测试与排查）
         AppLog.d("Ntf", "onPosted pkg=$packageName title=[$title] text=[$text] bigText=[$bigText] postTime=$postTime")
 
-        val key = "$packageName|$title|$text|$bigText"
+        // 重发抑制必须带通知实例与原始发布时间：应用更新同一条通知时两者不变；
+        // 另一笔同额交易通常换了实例或发布时间。旧逻辑只看文本，会把 10 秒内的第二笔同额交易静默吞掉。
+        val eventStamp = if (postTime > 0) postTime else systemPostTime
+        val key = "$packageName|${notificationKey.orEmpty()}|$eventStamp|$title|$text|$bigText"
         val now = SystemClock.elapsedRealtime()
         synchronized(recentKeys) {
             val prev = recentKeys[key]
             if (prev != null && now - prev < REPOST_WINDOW_MS) {
-                AppLog.d("Ntf", "skip repost (+${now - prev}ms) pkg=$packageName title=[$title]")
+                AppLog.d("Ntf", "skip repost (+${now - prev}ms) pkg=$packageName key=${notificationKey.orEmpty()}")
                 return
             }
             recentKeys[key] = now
@@ -1302,10 +1312,13 @@ object CaptureCenter {
 
         scope.launch {
             try {
+                // 通知的 when 不保证等于真实发布时间：零值/未来/一天前一概回落到系统 postTime/采集时刻，
+                // 避免异常时间污染分钟去重桶与账单日期
+                val sourceAt = resolveNotificationTime(postTime, systemPostTime, System.currentTimeMillis())
                 if (!interested) {
                     // 银行推送优先：签名闸门命中即走银行通道；未命中且是 debug 全量模式时，
                     // 仍留原始快照（扩规则的样本池），否则直接丢弃
-                    if (bankCandidate && handleBankPush(packageName, title, text, bigText, postTime)) return@launch
+                    if (bankCandidate && handleBankPush(packageName, title, text, bigText, sourceAt)) return@launch
                     if (!captureAll) return@launch
                     val rawOnlyId = captureDao.insert(
                         CapturedNotificationEntity(
@@ -1313,7 +1326,7 @@ object CaptureCenter {
                             title = title,
                             text = text,
                             bigText = bigText,
-                            postTime = postTime,
+                            postTime = sourceAt,
                         ),
                     )
                     AppLog.d("Ntf", "captured #$rawOnlyId (debug all) pkg=$packageName title=[$title]")
@@ -1325,63 +1338,77 @@ object CaptureCenter {
                         title = title,
                         text = text,
                         bigText = bigText,
-                        postTime = postTime,
+                        postTime = sourceAt,
                     ),
                 )
                 AppLog.d("Ntf", "captured #$rawId pkg=$packageName title=[$title]")
+                if (sourceAt != postTime) {
+                    AppLog.w("Ntf", "notification time abnormal postTime=$postTime -> $sourceAt pkg=$packageName")
+                }
 
                 if (!interested || !isCaptureEnabled()) return@launch
 
-                val parsed = NotificationRules.parse(packageName, title, text, bigText, postTime)
+                val parsed = NotificationRules.parse(packageName, title, text, bigText, sourceAt)
                 if (parsed == null) {
                     AppLog.d("Ntf", "no rule matched pkg=$packageName title=[$title] text=[$text]")
                     if (interested && isCaptureEnabled()) {
                         // 无金额的退款到账通知（微信折叠通知实测样本）→ 转退款关联提醒
                         if (NotificationRules.isAmountlessRefundNotice(packageName, title, text)) {
-                            handleRefundNotice(packageName, rawId, postTime, title, text, bigText)
+                            handleRefundNotice(packageName, rawId, sourceAt, title, text, bigText)
                             return@launch
                         }
                         // 方向可辨但金额缺失（如支付骨架通知）→ 入队 0 元条目 + 通知栏「输入金额」补录
                         val hint = NotificationRules.parseDirectionOnly(packageName, title, text, bigText)
                         if (hint != null && isAmountReplyEnabled()) {
-                            handleAmountMissing(packageName, rawId, postTime, title, text, bigText, hint)
+                            handleAmountMissing(
+                                packageName, rawId, sourceAt, title, text, bigText, hint,
+                                notificationKey = notificationKey, eventStamp = eventStamp,
+                            )
                         }
                     }
                     return@launch
                 }
                 // 同笔的"金额待补"占位条被完整捕获取代（占位条只用于兜底提醒，不保留）
-                supersedeAmountStubs(packageName, parsed.type, postTime)
-                // 溯源用来源时刻：通知的 when 偶有异常值，退回落库时刻（只影响展示，不回写通知流程）
-                val sourceAt = if (postTime > 0) postTime else System.currentTimeMillis()
+                supersedeAmountStubs(packageName, parsed.type, sourceAt)
+                // 通知实例身份：同一条通知的更新共享；另一条同额通知即使同分钟也不会被并掉
+                val notificationIdentity = notificationInstanceId(
+                    notificationKey, eventStamp, parsed.type, parsed.isRefund,
+                )
+                val dedupKey = dedupKeyWithIdentity(parsed.dedupKey, notificationIdentity)
+                // 同一条通知的旧条目可能已经跨过 10s 窗口：按持久化实例身份直接认作重复。
+                // 但金额/方向不同说明这是同一条通知被更新成了另一笔（或待补金额已回填），
+                // 不能因为实例相同就吞掉——继续走融合/入队。
+                val sameInstance = notificationIdentity?.let { pendingDao.findByNotificationInstance(it) }
+                val sameTransaction = sameInstance != null &&
+                    sameInstance.amountCents == parsed.amountCents &&
+                    sameInstance.type == parsed.type &&
+                    (sameInstance.refundMark == RefundMark.REFUND_INCOME) == parsed.isRefund
+                if (sameInstance != null && sameTransaction) {
+                    AppLog.d("Ntf", "skip duplicate notification instance #${sameInstance.id} dedup=$dedupKey")
+                    traceCapture(
+                        channel = CaptureChannel.NOTIFICATION,
+                        packageName = packageName,
+                        title = title, text = text, bigText = bigText,
+                        capturedAt = sourceAt,
+                        matchedRule = parsed.ruleName,
+                        type = parsed.type,
+                        amountCents = parsed.amountCents,
+                        note = parsed.note,
+                        dedupKey = sameInstance.dedupKey,
+                        outcome = TraceOutcome.SKIPPED_DUPLICATE,
+                    )
+                    return@launch
+                }
                 // 跨通道去重（10s 窗口）：页面通道先捕获/自动入账了同一笔 → 通知侧信息更少，不覆盖。
                 // 通知侧严格比金额：同 App 内 10s 内两笔金额不同的付款不能被并成一笔（丢记录）
+                val mergeable = pendingDao.getMergeable()
                 val related = pickRelatedPending(
-                    pendingDao.getMergeable(), packageName, parsed.type, parsed.amountCents,
-                    System.currentTimeMillis(),
+                    mergeable, packageName, parsed.type, parsed.amountCents,
+                    System.currentTimeMillis(), flowIdentity = notificationIdentity,
                 )
                 if (related != null) {
-                    AppLog.d("Ntf", "skip duplicate ${parsed.dedupKey} (page side won, related #${related.pending.id})")
-                    // 通知 → 页面 方向的补充：页面先到时只补页面缺失的字段（更接近真实交易时刻的发布时间），
-                    // 绝不覆盖页面已确认的金额/商户/支付方式，也不产生第二条账目
-                    val fixedTime = mergeNotificationInfo(related.pending, sourceAt)
-                    val enrichedPending = related.pending
-                    if (fixedTime != null) {
-                        pendingDao.updateFromPage(
-                            enrichedPending.id, enrichedPending.amountCents, fixedTime,
-                            enrichedPending.counterparty, enrichedPending.note, enrichedPending.ruleName,
-                        )
-                        if (enrichedPending.status == PendingStatus.AUTO) {
-                            txDao.updateCapturedByExternalId(
-                                "NTF:${enrichedPending.dedupKey}",
-                                enrichedPending.amountCents,
-                                fixedTime,
-                                enrichedPending.counterparty,
-                                enrichedPending.note,
-                            )
-                        }
-                        AppLog.i("Ntf", "enriched page entry #${enrichedPending.id} with notification time")
-                        refreshCardIfShowing(enrichedPending.id)
-                    }
+                    AppLog.d("Ntf", "skip duplicate ${dedupKey} (page side won, related #${related.pending.id})")
+                    mergeNotificationIntoExisting(related.pending, parsed, notificationIdentity, sourceAt)
                     traceCapture(
                         channel = CaptureChannel.NOTIFICATION,
                         packageName = packageName,
@@ -1396,18 +1423,53 @@ object CaptureCenter {
                     )
                     return@launch
                 }
+                nearbyAmountConflict(
+                    mergeable, packageName, parsed.type, parsed.amountCents,
+                    System.currentTimeMillis(),
+                )?.let { conflict ->
+                    AppLog.i(
+                        "Ntf",
+                        "amount conflict kept separate: notify=${Money.formatYuan(parsed.amountCents)} " +
+                            "existing=${Money.formatYuan(conflict.amountCents)} #${conflict.id} ${parsed.ruleName}",
+                    )
+                }
+                // 跨应用链路（电商/外卖页面 + 微信/支付宝/银行动账）：只有页面披露的支付渠道
+                // 能与通知来源对上时才认作同一笔；证据不足保持独立记录
+                val crossApp = findCrossAppRelatedForNotification(
+                    packageName, parsed.type, parsed.amountCents, parsed.isRefund,
+                    parsed.ruleName, parsed.note, sourceAt, notificationIdentity, mergeable,
+                )
+                if (crossApp != null) {
+                    AppLog.i("Ntf", "cross-app link ${parsed.ruleName} -> #${crossApp.id} ${crossApp.sourcePackage}")
+                    mergeNotificationIntoExisting(crossApp, parsed, notificationIdentity, sourceAt)
+                    captureDao.updateMatch(rawId, parsed.ruleName + "·跨应用关联", true)
+                    traceCapture(
+                        channel = CaptureChannel.NOTIFICATION,
+                        packageName = packageName,
+                        title = title, text = text, bigText = bigText,
+                        capturedAt = sourceAt,
+                        matchedRule = parsed.ruleName,
+                        type = parsed.type,
+                        amountCents = parsed.amountCents,
+                        note = parsed.note,
+                        dedupKey = crossApp.dedupKey,
+                        outcome = TraceOutcome.SKIPPED_DUPLICATE,
+                    )
+                    return@launch
+                }
                 // 入账方式：任一"入账"开关开启即先直接入账（三种方式全关才退回待确认的完全手动模式）
                 if (directEntryEnabled()) {
                     val entered = enterEntry(
                         type = parsed.type,
                         amountCents = parsed.amountCents,
-                        timestamp = postTime,
+                        timestamp = sourceAt,
                         counterparty = "",
                         note = parsed.note,
                         sourcePackage = packageName,
-                        dedupKey = parsed.dedupKey,
+                        dedupKey = dedupKey,
                         ruleName = parsed.ruleName,
                         isRefund = parsed.isRefund,
+                        notificationInstanceId = notificationIdentity.orEmpty(),
                     )
                     if (entered != null) {
                         captureDao.updateMatch(rawId, parsed.ruleName, true)
@@ -1425,7 +1487,7 @@ object CaptureCenter {
                             type = parsed.type,
                             amountCents = parsed.amountCents,
                             note = parsed.note,
-                            dedupKey = parsed.dedupKey,
+                            dedupKey = dedupKey,
                             outcome = TraceOutcome.AUTO_ENTRY,
                         )
                         announceEntry(
@@ -1435,7 +1497,7 @@ object CaptureCenter {
                             amountCents = parsed.amountCents,
                             sourceLabel = NotificationRules.sourceLabel(packageName),
                             counterparty = "",
-                            dedupKey = parsed.dedupKey,
+                            dedupKey = dedupKey,
                         )
                         return@launch
                     }
@@ -1444,13 +1506,14 @@ object CaptureCenter {
                     PendingTransactionEntity(
                         type = parsed.type,
                         amountCents = parsed.amountCents,
-                        timestamp = postTime,
+                        timestamp = sourceAt,
                         note = parsed.note,
                         sourcePackage = packageName,
                         ruleName = parsed.ruleName,
-                        dedupKey = parsed.dedupKey,
+                        dedupKey = dedupKey,
                         rawNotificationId = rawId,
                         refundMark = if (parsed.isRefund) RefundMark.REFUND_INCOME else RefundMark.NONE,
+                        notificationInstanceId = notificationIdentity.orEmpty(),
                     ),
                 )
                 captureDao.updateMatch(rawId, parsed.ruleName, true)
@@ -1468,7 +1531,7 @@ object CaptureCenter {
                     type = parsed.type,
                     amountCents = parsed.amountCents,
                     note = parsed.note,
-                    dedupKey = parsed.dedupKey,
+                    dedupKey = dedupKey,
                     outcome = TraceOutcome.PENDING,
                 )
                 announceCapture(
@@ -1478,7 +1541,7 @@ object CaptureCenter {
                     sourceLabel = NotificationRules.sourceLabel(packageName),
                     counterparty = "",
                     paymentMethod = null,
-                    dedupKey = parsed.dedupKey,
+                    dedupKey = dedupKey,
                     ruleName = parsed.ruleName,
                     txTime = null,
                     note = parsed.note,
@@ -1569,13 +1632,38 @@ object CaptureCenter {
         eventTime: Long,
         channel: CaptureChannel,
     ) {
-        val sourceAt = if (eventTime > 0) eventTime else System.currentTimeMillis()
+        val sourceAt = sanitizeEventTime(eventTime, System.currentTimeMillis())
+        // 银行事件身份：同一条短信/推送重复投递共享；同分钟同额的两笔真实动账互不覆盖
+        val bankIdentity = bankInstanceId(
+            ledger.sourceKey, sourceAt, ledger.type, ledger.amountCents, ledger.isRefund, ledger.cardTail,
+        )
+        val dedupKey = dedupKeyWithIdentity(ledger.dedupKey, bankIdentity)
+        val sameInstance = pendingDao.findByBankInstance(bankIdentity)
+        if (sameInstance != null) {
+            AppLog.d("Sms", "skip duplicate bank event #${sameInstance.id} key=$dedupKey")
+            traceCapture(
+                channel = channel,
+                packageName = ledger.sourceKey,
+                title = if (channel == CaptureChannel.SMS) "银行短信" else "银行推送",
+                text = ledger.note,
+                bigText = "",
+                capturedAt = sourceAt,
+                matchedRule = ledger.ruleName,
+                type = ledger.type,
+                amountCents = ledger.amountCents,
+                counterparty = ledger.merchant,
+                note = ledger.note,
+                dedupKey = sameInstance.dedupKey,
+                outcome = TraceOutcome.SKIPPED_DUPLICATE,
+            )
+            return
+        }
 
-        // 跨通道归并（±130s）：支付侧（微信/支付宝）已捕获同笔 → 银行侧只补充账户线索，
-        // 不再产生第二条（真实场景：银行卡绑定微信支付一笔，支付通知 + 银行短信同时到）
-        val related = findCrossChannelPending(ledger, sourceAt)
+        // 跨通道归并（±130s）：支付侧已捕获同笔 → 银行侧只补充账户线索，
+        // 不再产生第二条。跨应用关联必须有页面披露的银行卡线索，金额+时间不够。
+        val related = findCrossChannelPending(ledger, sourceAt, bankIdentity)
         if (related != null) {
-            mergeBankInfoIntoPending(related, ledger)
+            mergeBankInfoIntoPending(related, ledger, bankIdentity)
             // 同笔的悬浮卡正在展示时同步刷新（银行侧只补账户线索）；没在展示就补试一次弹卡
             refreshCardIfShowing(related.id)
             retryCardIfNoCard(related.id)
@@ -1607,11 +1695,12 @@ object CaptureCenter {
                 counterparty = ledger.merchant,
                 note = ledger.note,
                 sourcePackage = ledger.sourceKey,
-                dedupKey = ledger.dedupKey,
+                dedupKey = dedupKey,
                 ruleName = ledger.ruleName,
                 isRefund = ledger.isRefund,
                 source = TxSource.BANK,
                 bankName = ledger.bankName,
+                notificationInstanceId = bankIdentity,
             )
             if (entered != null) {
                 captureDao.updateMatch(rawId, ledger.ruleName, true)
@@ -1632,7 +1721,7 @@ object CaptureCenter {
                     amountCents = ledger.amountCents,
                     counterparty = ledger.merchant,
                     note = ledger.note,
-                    dedupKey = ledger.dedupKey,
+                    dedupKey = dedupKey,
                     outcome = TraceOutcome.AUTO_ENTRY,
                 )
                 announceEntry(
@@ -1642,7 +1731,7 @@ object CaptureCenter {
                     amountCents = ledger.amountCents,
                     sourceLabel = ledger.displayLabel,
                     counterparty = ledger.merchant,
-                    dedupKey = ledger.dedupKey,
+                    dedupKey = dedupKey,
                 )
                 return
             }
@@ -1657,9 +1746,10 @@ object CaptureCenter {
                 note = ledger.note,
                 sourcePackage = ledger.sourceKey,
                 ruleName = ledger.ruleName,
-                dedupKey = ledger.dedupKey,
+                dedupKey = dedupKey,
                 rawNotificationId = rawId,
                 refundMark = if (ledger.isRefund) RefundMark.REFUND_INCOME else RefundMark.NONE,
+                notificationInstanceId = bankIdentity,
             ),
         )
         captureDao.updateMatch(rawId, ledger.ruleName, true)
@@ -1680,7 +1770,7 @@ object CaptureCenter {
             amountCents = ledger.amountCents,
             counterparty = ledger.merchant,
             note = ledger.note,
-            dedupKey = ledger.dedupKey,
+            dedupKey = dedupKey,
             outcome = TraceOutcome.PENDING,
         )
         announceCapture(
@@ -1690,7 +1780,7 @@ object CaptureCenter {
             sourceLabel = ledger.displayLabel,
             counterparty = ledger.merchant,
             paymentMethod = null,
-            dedupKey = ledger.dedupKey,
+            dedupKey = dedupKey,
             ruleName = ledger.ruleName,
             txTime = sourceAt,
             note = ledger.note,
@@ -1698,11 +1788,39 @@ object CaptureCenter {
         )
     }
 
-    /** 跨通道归并候选：合并池里"通道类别相异（支付类⇄银行类）且特征全等"的同笔条目 */
+    /**
+     * 跨通道归并候选：只在有**可核对线索**时认作同一笔。
+     *
+     * - 电商/外卖页面：页面支付方式必须能对上银行名/卡尾号（[CrossAppLinker]）；
+     * - 微信/支付宝条目：条目备注或支付方式里必须出现该银行名/卡尾号；
+     * - 金额相同、时间接近但没有任何银行线索 → 不归并（两笔真实交易并成一笔 = 丢记录）。
+     * 多个候选同时命中视为证据不足，保持独立记录。
+     */
     private suspend fun findCrossChannelPending(
         ledger: BankLedgerRules.BankLedger,
         eventTime: Long,
+        bankIdentity: String,
     ): PendingTransactionEntity? {
+        val bankEvidence = CrossAppLinker.Evidence(
+            sourcePackage = ledger.sourceKey,
+            amountCents = ledger.amountCents,
+            type = ledger.type,
+            isRefund = ledger.isRefund,
+            time = eventTime,
+            counterparty = ledger.merchant,
+            instrument = ledger.accountLabel,
+            note = ledger.note,
+            ruleName = ledger.ruleName,
+        )
+        val mergeable = pendingDao.getMergeable().filter { flowCompatible(it, bankIdentity) }
+        val pageCandidates = mergeable.filter { it.sourcePackage in NotificationRules.checkoutPackages }
+            .filter { CrossAppLinker.isSamePurchase(pageEvidenceOf(it), bankEvidence) }
+        if (pageCandidates.size == 1) return pageCandidates.single()
+        if (pageCandidates.size > 1) {
+            AppLog.w("Sms", "cross-app ambiguous (${pageCandidates.size} page entries), keep separate ${ledger.ruleName}")
+            return null
+        }
+
         val incoming = CrossChannelDedup.Signature(
             amountCents = ledger.amountCents,
             type = ledger.type,
@@ -1710,7 +1828,7 @@ object CaptureCenter {
             source = ledger.sourceKey,
             time = eventTime,
         )
-        return pendingDao.getMergeable().firstOrNull { candidate ->
+        val payCandidates = mergeable.filter { candidate ->
             CrossChannelDedup.isSameTransaction(
                 CrossChannelDedup.signatureOf(
                     amountCents = candidate.amountCents,
@@ -1720,56 +1838,229 @@ object CaptureCenter {
                     time = candidate.timestamp,
                 ),
                 incoming,
-            )
+            ) && payEntryLinksBank(candidate, ledger)
         }
+        if (payCandidates.size == 1) return payCandidates.single()
+        if (payCandidates.size > 1) {
+            AppLog.w("Sms", "bank link ambiguous (${payCandidates.size} payment entries), keep separate ${ledger.ruleName}")
+        } else if (mergeable.any { it.amountCents == ledger.amountCents && it.type == ledger.type }) {
+            AppLog.i("Sms", "bank entry kept separate (no bank/card evidence) ${ledger.ruleName}")
+        }
+        return null
+    }
+
+    /** 支付类条目里是否出现了银行侧可核对的线索（银行名或卡尾号） */
+    private fun payEntryLinksBank(
+        candidate: PendingTransactionEntity,
+        ledger: BankLedgerRules.BankLedger,
+    ): Boolean {
+        val text = listOf(candidate.paymentInstrument, candidate.counterparty, candidate.note)
+            .filter { it.isNotBlank() }.joinToString(" ")
+        return CrossChannelDedup.hasBankEvidence(text, ledger.bankName, ledger.cardTail)
     }
 
     /**
-     * 银行侧信息并入既有条目：支付侧信息更全（商户/支付方式），只追加银行侧独有的账户线索
-     * （"银行 工商银行(1234)"），不改金额/时间/方向（金额全等才可能命中）；
-     * 银行侧的卡信息同时写进支付工具列（页面没给出支付工具时用它做账户匹配）。
-     * 用户手动改过的条目只补账户线索，不动金额/商户。
-     * 目标若是自动入账条目，同步回填交易本身（与页面回填同一路径）。
+     * 银行侧信息并入既有条目：支付侧信息更全（商户/支付方式），页面未手改时追加银行侧账户线索
+     * （"银行 工商银行(1234)"），不改金额/时间/方向（金额全等才可能命中）。
+     * 用户手动改过的条目只记录银行事件身份，不改备注/商户/账户。
+     * 目标若是自动入账条目，同步回填交易本身，并在能唯一匹配账户时更新账户。
      */
     private suspend fun mergeBankInfoIntoPending(
         existing: PendingTransactionEntity,
         ledger: BankLedgerRules.BankLedger,
+        bankIdentity: String,
     ) {
         val extra = "银行 ${ledger.accountLabel}"
-        val note = if (existing.note.contains(ledger.accountLabel)) {
-            existing.note
-        } else {
-            (if (existing.note.isBlank()) extra else "${existing.note} · $extra").take(300)
+        val note = when {
+            existing.userEdited -> existing.note
+            existing.note.contains(ledger.accountLabel) -> existing.note
+            existing.note.isBlank() -> extra
+            else -> "${existing.note} · $extra".take(300)
         }
         val counterparty = existing.counterparty.ifBlank { ledger.merchant }
-        pendingDao.updateFromPage(
-            existing.id,
-            existing.amountCents,
-            existing.timestamp,
-            counterparty,
-            note,
-            existing.ruleName,
-        )
-        if (existing.paymentInstrument.isBlank()) {
-            pendingDao.updatePaymentInstrument(existing.id, ledger.accountLabel)
-        }
-        if (existing.status == PendingStatus.AUTO && !existing.userEdited) {
-            txDao.updateCapturedByExternalId(
-                "NTF:${existing.dedupKey}",
+        val instrument = existing.paymentInstrument.ifBlank { ledger.accountLabel }
+        db.withTransaction {
+            pendingDao.updateFromPage(
+                existing.id,
                 existing.amountCents,
                 existing.timestamp,
                 counterparty,
                 note,
+                existing.ruleName,
             )
+            if (existing.paymentInstrument.isBlank()) {
+                pendingDao.updatePaymentInstrument(existing.id, instrument)
+            }
+            pendingDao.updateBankInstanceIfBlank(existing.id, bankIdentity)
+            if (existing.status == PendingStatus.AUTO && !existing.userEdited) {
+                txDao.updateCapturedByExternalId(
+                    "NTF:${existing.dedupKey}",
+                    existing.amountCents,
+                    existing.timestamp,
+                    counterparty,
+                    note,
+                )
+                syncAutoEntryAccount(existing, instrument)
+            }
         }
         AppLog.i(
             "Sms",
             "merged bank info into " +
                 (if (existing.status == PendingStatus.AUTO) "auto entry" else "pending") +
                 " #${existing.id} ${ledger.ruleName} 账户=${ledger.accountLabel}" +
-                (if (existing.userEdited) " [用户已手改，仅补账户线索]" else ""),
+                (if (existing.userEdited) " [用户已手改，仅记录银行身份]" else ""),
         )
     }
+
+    /**
+     * 页面/银行补充可信支付工具后，重新匹配正式账单的账户。
+     * 只在唯一/明确匹配时更新；银行卡工具不允许回落"渠道账户"（否则会把招商银行卡的账记到微信零钱）。
+     */
+    private suspend fun syncAutoEntryAccount(existing: PendingTransactionEntity, instrumentLabel: String) {
+        if (instrumentLabel.isBlank()) return
+        val accountId = CaptureDefaults.trustedAccountId(
+            accountDao.getAll(), existing.sourcePackage, instrumentLabel,
+        ) ?: return
+        txDao.updateAccountByExternalId("NTF:${existing.dedupKey}", accountId)
+        AppLog.i("Page", "account updated #${existing.id} ${existing.sourcePackage} -> #$accountId ($instrumentLabel)")
+    }
+
+    /**
+     * 通知 → 页面方向的补充：页面先到时只补页面缺失的字段（更接近真实交易时刻的发布时间），
+     * 绝不覆盖页面已确认的金额/商户/支付方式；同时补记通知实例身份。
+     */
+    private suspend fun mergeNotificationIntoExisting(
+        existing: PendingTransactionEntity,
+        parsed: ParsedNotification,
+        notificationIdentity: String?,
+        notificationTime: Long,
+    ) {
+        val fixedTime = mergeNotificationInfo(existing, notificationTime)
+        db.withTransaction {
+            if (fixedTime != null) {
+                pendingDao.updateFromPage(
+                    existing.id, existing.amountCents, fixedTime,
+                    existing.counterparty, existing.note, existing.ruleName,
+                )
+                if (existing.status == PendingStatus.AUTO) {
+                    txDao.updateCapturedByExternalId(
+                        "NTF:${existing.dedupKey}",
+                        existing.amountCents,
+                        fixedTime,
+                        existing.counterparty,
+                        existing.note,
+                    )
+                }
+            }
+            if (!notificationIdentity.isNullOrEmpty()) {
+                pendingDao.updateNotificationInstanceIfBlank(existing.id, notificationIdentity)
+            }
+        }
+        if (fixedTime != null) {
+            AppLog.i("Ntf", "enriched entry #${existing.id} with notification time")
+            refreshCardIfShowing(existing.id)
+        }
+        AppLog.d("Ntf", "notification merged into #${existing.id} rule=${parsed.ruleName} identity=$notificationIdentity")
+    }
+
+    /**
+     * 通知路径的跨应用关联：既有条目必须是电商/外卖页面，且页面支付方式能对上通知来源。
+     * 没有渠道线索、或候选不唯一时不合并（安全优先）。
+     */
+    private suspend fun findCrossAppRelatedForNotification(
+        packageName: String,
+        type: TxType,
+        amountCents: Long,
+        isRefund: Boolean,
+        ruleName: String,
+        note: String,
+        eventTime: Long,
+        notificationIdentity: String?,
+        mergeable: List<PendingTransactionEntity>,
+    ): PendingTransactionEntity? {
+        if (packageName in NotificationRules.checkoutPackages) return null
+        if (CrossChannelDedup.channelClass(packageName) == CrossChannelDedup.ChannelClass.UNKNOWN) return null
+        val incoming = CrossAppLinker.Evidence(
+            sourcePackage = packageName,
+            amountCents = amountCents,
+            type = type,
+            isRefund = isRefund,
+            time = eventTime,
+            note = note,
+            ruleName = ruleName,
+        )
+        val candidates = mergeable.filter { candidate ->
+            candidate.sourcePackage in NotificationRules.checkoutPackages &&
+                flowCompatible(candidate, notificationIdentity) &&
+                CrossAppLinker.isSamePurchase(pageEvidenceOf(candidate), incoming)
+        }
+        if (candidates.size > 1) {
+            AppLog.w("Ntf", "cross-app ambiguous (${candidates.size} page entries), keep separate $ruleName")
+            return null
+        }
+        return candidates.singleOrNull()
+    }
+
+    /**
+     * 页面路径的跨应用关联：页面是电商/外卖页时，找同一时间窗内、金额方向一致的支付/银行条目；
+     * 页面支付方式必须能对上该来源，且该条目还没有被另一个页面流程占用。
+     */
+    private suspend fun findCrossAppRelatedForPage(
+        packageName: String,
+        candidate: PageCandidate,
+        pageFlowIdentity: String,
+        capturedAt: Long,
+        mergeable: List<PendingTransactionEntity>,
+    ): PendingTransactionEntity? {
+        if (packageName !in NotificationRules.checkoutPackages) return null
+        val pageEvidence = pageEvidenceOf(candidate, packageName, capturedAt)
+        val candidates = mergeable.filter { existing ->
+            existing.sourcePackage != packageName &&
+                CrossChannelDedup.channelClass(existing.sourcePackage) != CrossChannelDedup.ChannelClass.UNKNOWN &&
+                flowCompatible(existing, pageFlowIdentity) &&
+                kotlin.math.abs(existing.timestamp - pageEvidence.time) <= CrossAppLinker.WINDOW_MS &&
+                CrossAppLinker.isSamePurchase(pageEvidence, pendingEvidenceOf(existing))
+        }
+        if (candidates.size > 1) {
+            AppLog.w("Page", "cross-app ambiguous (${candidates.size} notification entries), keep separate ${candidate.ruleName}")
+            return null
+        }
+        return candidates.singleOrNull()
+    }
+
+    private fun pageEvidenceOf(pending: PendingTransactionEntity): CrossAppLinker.Evidence =
+        CrossAppLinker.Evidence(
+            sourcePackage = pending.sourcePackage,
+            amountCents = pending.amountCents,
+            type = pending.type,
+            isRefund = pending.refundMark == RefundMark.REFUND_INCOME,
+            time = pending.timestamp,
+            counterparty = pending.counterparty,
+            instrument = pending.paymentInstrument,
+            note = pending.note,
+            ruleName = pending.ruleName,
+            orderId = pending.orderId,
+        )
+
+    private fun pendingEvidenceOf(pending: PendingTransactionEntity): CrossAppLinker.Evidence =
+        pageEvidenceOf(pending)
+
+    private fun pageEvidenceOf(
+        candidate: PageCandidate,
+        sourcePackage: String,
+        capturedAt: Long,
+    ): CrossAppLinker.Evidence = CrossAppLinker.Evidence(
+        sourcePackage = sourcePackage,
+        amountCents = candidate.amountCents,
+        type = candidate.type,
+        isRefund = candidate.isRefund,
+        time = candidate.txTime ?: capturedAt,
+        counterparty = candidate.counterparty,
+        instrument = candidate.instrument?.label ?: candidate.paymentMethod.orEmpty(),
+        note = candidate.note,
+        ruleName = candidate.ruleName,
+        orderId = candidate.orderId.orEmpty(),
+    )
 
     // ---------- 退款关联提醒（无金额退款通知） ----------
 
@@ -1858,6 +2149,16 @@ object CaptureCenter {
         val flow = flows.flow(packageName)
         val result = PageParserRegistry.parse(snapshot, flow)
         val candidate = (result as? PageParseResult.Candidate)?.candidate
+        // 用户离开了上一笔的结果页（桌面/聊天/列表/其它页面）：之后再次出现同一结果页才可能是新的一笔。
+        // 只在终结态生效，重复采样同一结果页不会触发新流程（见 PageFlow.markEmitted）。
+        if (result is PageParseResult.NotATradePage ||
+            (result is PageParseResult.SceneOnly && result.scene == PageScene.LIST)
+        ) {
+            // 加载中/网络异常这类过渡页不算"离开"：否则结果页重渲染后会被当成新的一笔
+            if (!looksLikeTransientPage(snapshot)) {
+                flow.noteLeftTradePage(capturedAt)
+            }
+        }
 
         val interesting = candidate != null || isInterestingPage(snapshot, result)
         if (!interesting && !captureAll) {
@@ -1915,17 +2216,51 @@ object CaptureCenter {
 
         // 同笔的"金额待补"占位条被完整页面捕获取代（占位条只用于兜底提醒，不保留）
         supersedeAmountStubs(packageName, candidate.type, capturedAt)
-        // 去重键：同分钟同额的第二笔独立交易加流程后缀，避免被唯一索引吞掉
-        val flowIdentity = flowIdentityFor(flow, snapshot)
-        val dedupKey = dedupKeyAllocator.allocate(candidate.dedupKey, flowIdentity)
+        // 去重键：页面候选首次生成就带流程身份（p:<uuid>），持久化后不再依赖内存分配器；
+        // 同一流程复用同一个键，不同流程即使同分钟同额也不会互相覆盖。
+        val flowIdentity = flow.flowInstanceId
+        val dedupKey = dedupKeyWithIdentity(candidate.dedupKey, flowIdentity)
 
-        // 融合（页面 → 通知 / 同流程的后续页面）：命中即合并，不产生第二条
+        // 融合（页面 → 通知 / 同流程的后续页面）：命中即合并，不产生第二条。
+        // 金额不同一律不合并；先按订单号/流程身份找，再走 10s 窗口。
         val mergeable = pendingDao.getMergeable()
         val related = pickRelatedPendingForPage(
             mergeable, packageName, candidate.type, candidate.amountCents, capturedAt, flowIdentity,
+            orderId = candidate.orderId,
         )
         if (related != null) {
-            mergePageIntoExisting(related, candidate, rawId, snapshotText, capturedAt)
+            mergePageIntoExisting(related, candidate, rawId, snapshotText, capturedAt, flowIdentity)
+            return
+        }
+        // 页面明确给出交易时间（账单详情页）：进程重启后 flowId 已变化，仍按"同来源+同方向+同额+
+        // 交易时间几乎一致"认回既有条目，避免重新打开同一笔详情时重复入账（CR-002/T18）
+        if (candidate.scene == PageScene.TRANSACTION_DETAIL && candidate.txTime != null) {
+            pickByExplicitTime(
+                mergeable, packageName, candidate.type, candidate.amountCents,
+                candidate.txTime, candidate.isRefund,
+            )?.let { sameByTime ->
+                AppLog.i("Page", "same transaction by explicit time #${sameByTime.pending.id} ${candidate.ruleName}")
+                mergePageIntoExisting(sameByTime, candidate, rawId, snapshotText, capturedAt, flowIdentity)
+                return
+            }
+        }
+        nearbyAmountConflict(
+            mergeable, packageName, candidate.type, candidate.amountCents, capturedAt,
+        )?.let { conflict ->
+            AppLog.i(
+                "Page",
+                "amount conflict kept separate: page=${Money.formatYuan(candidate.amountCents)} " +
+                    "existing=${Money.formatYuan(conflict.amountCents)} #${conflict.id} ${candidate.ruleName}",
+            )
+        }
+        // 跨应用：电商/外卖页面 + 微信/支付宝通知/银行动账。只有页面支付方式能对上来源才合并。
+        val crossApp = findCrossAppRelatedForPage(packageName, candidate, flowIdentity, capturedAt, mergeable)
+        if (crossApp != null) {
+            AppLog.i("Page", "cross-app link ${candidate.ruleName} -> #${crossApp.id} ${crossApp.sourcePackage}")
+            mergePageIntoExisting(
+                RelatedPending(crossApp, sameAmount = true),
+                candidate, rawId, snapshotText, capturedAt, flowIdentity,
+            )
             return
         }
 
@@ -1943,6 +2278,8 @@ object CaptureCenter {
                 isRefund = candidate.isRefund,
                 source = CaptureDefaults.txSource(packageName),
                 paymentInstrument = candidate.instrument?.label,
+                flowId = flowIdentity,
+                orderId = candidate.orderId.orEmpty(),
             )
             if (entered != null) {
                 captureDao.updateMatch(rawId, candidate.ruleName, true)
@@ -1992,6 +2329,8 @@ object CaptureCenter {
                 rawNotificationId = rawId,
                 refundMark = if (candidate.isRefund) RefundMark.REFUND_INCOME else RefundMark.NONE,
                 paymentInstrument = candidate.instrument?.label.orEmpty(),
+                flowId = flowIdentity,
+                orderId = candidate.orderId.orEmpty(),
             ),
         )
         captureDao.updateMatch(rawId, candidate.ruleName, true)
@@ -2041,6 +2380,7 @@ object CaptureCenter {
         rawId: Long,
         snapshotText: String,
         capturedAt: Long,
+        pageFlowIdentity: String,
     ) {
         val existing = related.pending
         val merged = mergePageInfo(
@@ -2053,29 +2393,38 @@ object CaptureCenter {
             pageRuleName = candidate.ruleName,
             pageInstrument = candidate.instrument?.label.orEmpty(),
         )
-        pendingDao.updateFromPage(
-            existing.id, merged.amountCents, merged.timestamp, merged.counterparty, merged.note, merged.ruleName,
-        )
-        if (merged.paymentInstrument.isNotBlank() && merged.paymentInstrument != existing.paymentInstrument) {
-            pendingDao.updatePaymentInstrument(existing.id, merged.paymentInstrument)
-        }
         val autoEntered = existing.status == PendingStatus.AUTO
-        if (autoEntered && !existing.userEdited) {
-            // 自动入账的那笔：把页面信息同步回交易本身
-            txDao.updateCapturedByExternalId(
-                "NTF:${existing.dedupKey}",
-                merged.amountCents,
-                merged.timestamp,
-                merged.counterparty,
-                merged.note,
+        db.withTransaction {
+            pendingDao.updateFromPage(
+                existing.id, merged.amountCents, merged.timestamp, merged.counterparty, merged.note, merged.ruleName,
             )
+            if (merged.paymentInstrument.isNotBlank() && merged.paymentInstrument != existing.paymentInstrument) {
+                pendingDao.updatePaymentInstrument(existing.id, merged.paymentInstrument)
+            }
+            pendingDao.updateFlowIdIfBlank(existing.id, pageFlowIdentity)
+            candidate.orderId?.takeIf { it.isNotBlank() }?.let {
+                pendingDao.updateOrderIdIfBlank(existing.id, it)
+            }
+            if (autoEntered && !existing.userEdited) {
+                // 自动入账的那笔：把页面信息同步回交易本身，并补上流程标识/账户
+                txDao.updateCapturedByExternalId(
+                    "NTF:${existing.dedupKey}",
+                    merged.amountCents,
+                    merged.timestamp,
+                    merged.counterparty,
+                    merged.note,
+                )
+                txDao.updateFlowIdByExternalId("NTF:${existing.dedupKey}", pageFlowIdentity)
+                if (merged.paymentInstrument.isNotBlank()) {
+                    syncAutoEntryAccount(existing, merged.paymentInstrument)
+                }
+            }
+            captureDao.updateMatch(rawId, candidate.ruleName, true)
         }
-        captureDao.updateMatch(rawId, candidate.ruleName, true)
         AppLog.i(
             "Page",
             (if (autoEntered) "filled auto entry #" else "merged page info into pending #") +
                 "${existing.id} ${candidate.ruleName} ${Money.formatYuan(candidate.amountCents)}" +
-                (if (related.sameAmount) "" else " (原金额 ${Money.formatYuan(existing.amountCents)}，页面金额为准)") +
                 (if (existing.userEdited) " [用户已手改，仅补空白]" else ""),
         )
         // 溯源：本页捕获的字段是**合并后真正生效的值**，附上页面原始快照，
@@ -2100,12 +2449,20 @@ object CaptureCenter {
         retryCardIfNoCard(existing.id)
     }
 
+    /** 过渡页（加载/网络异常/空白）不构成"用户已离开结果页"的证据 */
+    private fun looksLikeTransientPage(snapshot: PageSnapshot): Boolean {
+        if (snapshot.lines.size < 3) return true
+        val joined = snapshot.joined
+        return listOf("加载中", "正在加载", "请稍候", "网络异常", "网络不给力", "重试", "刷新中").any {
+            joined.contains(it)
+        }
+    }
+
     /**
      * 页面是否值得进捕获日志（未匹配样本池）：解析器判定的交易场景，或页面命中交易锚点。
      * 聊天/朋友圈等噪音页不进库，避免捕获日志被无障碍事件刷爆。
      */
-    private fun isInterestingPage(snapshot: PageSnapshot, result: PageParseResult): Boolean {
-        if (result is PageParseResult.SceneOnly && result.scene != PageScene.UNKNOWN) return true
+    private fun isInterestingPage(snapshot: PageSnapshot, result: PageParseResult): Boolean {        if (result is PageParseResult.SceneOnly && result.scene != PageScene.UNKNOWN) return true
         val joined = snapshot.joined
         return pageInterestingMarkers.any { joined.contains(it) }
     }
@@ -2114,12 +2471,6 @@ object CaptureCenter {
         "支付成功", "付款成功", "交易成功", "支付完成", "账单详情", "交易详情", "订单详情",
         "收款成功", "退款成功", "转账成功", "付款方式", "支付方式", "交易单号", "订单编号",
     )
-
-    /** 页面候选的流程标识：同一次支付流程内的多张页面共享，另一笔同额交易必然不同 */
-    private fun flowIdentityFor(flow: PageFlow, snapshot: PageSnapshot): String {
-        val raw = "${flow.pageKey}|w${snapshot.windowId}"
-        return "f" + Integer.toHexString(raw.hashCode())
-    }
 
     /** 直接入账结果：新交易 id + 对应的 AUTO 条目 id（卡片与通知都按它们工作） */
     private data class Entered(val txId: Long, val pendingId: Long)
@@ -2151,6 +2502,9 @@ object CaptureCenter {
         source: TxSource = TxSource.NOTIFICATION,
         bankName: String? = null,
         paymentInstrument: String? = null,
+        flowId: String = "",
+        notificationInstanceId: String = "",
+        orderId: String = "",
     ): Entered? {
         val learned = merchantRuleDao.getAll()
         val categories = categoryDao.getAll()
@@ -2181,35 +2535,47 @@ object CaptureCenter {
             return null
         }
         return try {
-            val txId = txDao.insert(
-                TransactionEntity(
-                    type = type,
-                    amountCents = amountCents,
-                    categoryId = categoryId,
-                    accountId = accountId,
-                    timestamp = timestamp,
-                    note = note.ifBlank { ruleName },
-                    counterparty = counterparty,
-                    source = source,
-                    externalId = "NTF:$dedupKey",
-                    refundMark = if (isRefund) RefundMark.REFUND_INCOME else RefundMark.NONE,
-                ),
-            )
-            val pendingId = pendingDao.insert(
-                PendingTransactionEntity(
-                    type = type,
-                    amountCents = amountCents,
-                    timestamp = timestamp,
-                    counterparty = counterparty,
-                    note = note,
-                    sourcePackage = sourcePackage,
-                    ruleName = ruleName,
-                    dedupKey = dedupKey,
-                    refundMark = if (isRefund) RefundMark.REFUND_INCOME else RefundMark.NONE,
-                    status = PendingStatus.AUTO,
-                    paymentInstrument = paymentInstrument.orEmpty(),
-                ),
-            )
+            // 正式交易与 AUTO 关联条目必须在同一事务里写入：任一步失败整体回滚，
+            // 不会留下"有账单、没有关联条目"或相反的半成品状态。
+            val (txId, pendingId) = db.withTransaction {
+                val insertedTxId = txDao.insert(
+                    TransactionEntity(
+                        type = type,
+                        amountCents = amountCents,
+                        categoryId = categoryId,
+                        accountId = accountId,
+                        timestamp = timestamp,
+                        note = note.ifBlank { ruleName },
+                        counterparty = counterparty,
+                        source = source,
+                        externalId = "NTF:$dedupKey",
+                        refundMark = if (isRefund) RefundMark.REFUND_INCOME else RefundMark.NONE,
+                        flowId = flowId,
+                    ),
+                )
+                val insertedPendingId = pendingDao.insert(
+                    PendingTransactionEntity(
+                        type = type,
+                        amountCents = amountCents,
+                        timestamp = timestamp,
+                        counterparty = counterparty,
+                        note = note,
+                        sourcePackage = sourcePackage,
+                        ruleName = ruleName,
+                        dedupKey = dedupKey,
+                        refundMark = if (isRefund) RefundMark.REFUND_INCOME else RefundMark.NONE,
+                        status = PendingStatus.AUTO,
+                        paymentInstrument = paymentInstrument.orEmpty(),
+                        flowId = flowId,
+                        notificationInstanceId = notificationInstanceId,
+                        orderId = orderId,
+                    ),
+                )
+                // dedupKey 唯一索引冲突时 @Insert(IGNORE) 返回 -1：必须回滚交易插入，
+                // 不能把冲突静默当成成功（CR-008）
+                requireEntryAssociation(insertedPendingId)
+                insertedTxId to insertedPendingId
+            }
             AppLog.i(
                 "Ntf",
                 "entered #$txId ${Money.formatYuan(amountCents)} dedup=$dedupKey" +
@@ -2217,11 +2583,21 @@ object CaptureCenter {
             )
             Entered(txId, pendingId)
         } catch (e: Exception) {
-            // externalId 唯一索引冲突 = 这笔已经入过账（重复通知/双通道）：找回原交易，卡片/通知仍可用
-            if (e.message?.contains("UNIQUE", ignoreCase = true) == true) {
+            // externalId/待确认键唯一索引冲突 = 这笔已经入过账（重复通知/双通道）：
+            // 找回原交易与关联条目，卡片/通知仍可用
+            if (e is EntryAssociationException || e.message?.contains("UNIQUE", ignoreCase = true) == true) {
                 val existing = txDao.findIdByExternalId("NTF:$dedupKey")
-                AppLog.i("Ntf", "direct entry skipped (already recorded) dedup=$dedupKey existing=$existing")
-                if (existing != null) Entered(existing, -1L) else null
+                val existingPending = pendingDao.findByDedupKey(dedupKey)
+                AppLog.i(
+                    "Ntf",
+                    "direct entry skipped (already recorded) dedup=$dedupKey " +
+                        "tx=$existing pending=${existingPending?.id}",
+                )
+                if (existing != null || existingPending != null) {
+                    Entered(existing ?: -1L, existingPending?.id ?: -1L)
+                } else {
+                    null
+                }
             } else {
                 AppLog.w("Ntf", "direct entry failed, fallback to pending", e)
                 null

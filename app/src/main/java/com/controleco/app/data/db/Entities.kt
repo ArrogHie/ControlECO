@@ -78,6 +78,12 @@ data class TransactionEntity(
     /** 外部单号（微信交易单号/支付宝交易号/捕获去重键），用于账单重复导入与捕获去重；手动记录为 null */
     val externalId: String? = null,
     val refundMark: RefundMark = RefundMark.NONE,
+    /**
+     * 页面捕获的支付流程标识（仅自动捕获的账单有值）：同一笔交易从结果页到详情页共享同一个值，
+     * 便于事后追踪"这笔账属于哪一次支付流程"。通知/短信/手动记录为空串。
+     */
+    @ColumnInfo(defaultValue = "")
+    val flowId: String = "",
     val createdAt: Long = System.currentTimeMillis(),
 )
 
@@ -228,6 +234,27 @@ data class PendingTransactionEntity(
      */
     @ColumnInfo(defaultValue = "0")
     val userEdited: Boolean = false,
+    /**
+     * 本笔所属的页面支付流程标识（`p:<uuid>`）。由页面解析器在整条支付流程内共享：
+     * 同一笔的确认页/结果页/详情页相同，另一笔同额交易必然不同。通知/短信侧为空。
+     */
+    @ColumnInfo(defaultValue = "")
+    val flowId: String = "",
+    /**
+     * 通知实例标识（`n:<摘要>`）：同一个 StatusBarNotification 的重复回调/更新相同，
+     * 另一条即使在同分钟同额也必然不同。用于隔离"纯通知模式下的两笔同额交易"。
+     */
+    @ColumnInfo(defaultValue = "")
+    val notificationInstanceId: String = "",
+    /**
+     * 银行事件标识（`b:<摘要>`）：同一条短信/银行推送重复投递相同。
+     * 与通知实例分开存，一笔交易可以同时关联"支付通知实例"和"银行动账事件"。
+     */
+    @ColumnInfo(defaultValue = "")
+    val bankInstanceId: String = "",
+    /** 页面解析出的交易单号/订单号（可获得时）：跨渠道关联的最强证据之一 */
+    @ColumnInfo(defaultValue = "")
+    val orderId: String = "",
     val status: PendingStatus = PendingStatus.PENDING,
     val createdAt: Long = System.currentTimeMillis(),
 )

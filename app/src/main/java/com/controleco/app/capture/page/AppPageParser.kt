@@ -61,6 +61,16 @@ sealed interface PageParseResult {
  */
 class PageFlow(val packageName: String, internal val startedAt: Long) {
 
+    /**
+     * 本次支付流程的稳定身份（`p:<uuid>`）。
+     *
+     * 不能用"包名 + 开始时刻 + 窗口 id"之类的短哈希：同一秒内的两笔、同一窗口内的重试都可能碰撞；
+     * 窗口 id 还会随弹层/活动切换变化，不能作为交易身份。UUID 在整个流程生命周期内不变，
+     * 只有明确开启新流程时才重新生成（见 [resetForNewFlow]）。
+     */
+    var flowInstanceId: String = newFlowInstanceId()
+        private set
+
     /** 当前流程状态 */
     var tradeState: TradeState = TradeState.UNKNOWN
         private set
@@ -99,6 +109,10 @@ class PageFlow(val packageName: String, internal val startedAt: Long) {
     var emitSeq: Int = 0
         private set
 
+    /** 结果页生成后，用户是否已经离开交易页面（再次看到同一结果页 = 新的一笔） */
+    private var leftResultAfterTerminal = false
+    private var leftAt: Long = 0L
+
     internal var updatedAt: Long = startedAt
 
     val hasConfirmContext: Boolean
@@ -116,7 +130,9 @@ class PageFlow(val packageName: String, internal val startedAt: Long) {
         instrument: PaymentInstrument?,
         atMillis: Long,
     ) {
-        if (tradeState == TradeState.SUCCESS || tradeState == TradeState.REFUND) resetForNewFlow()
+        // 上一笔已成功/失败/取消/退款后再次进入收银台：用户重新付了一笔，开启新流程。
+        // 连续的 PENDING 事件是同一张收银台的重复采样，不能反复换身份。
+        if (tradeState != TradeState.UNKNOWN && tradeState != TradeState.PENDING) resetForNewFlow()
         tradeState = TradeState.PENDING
         scene = PageScene.PAYMENT_CONFIRM
         if (amountCents != null && amountCents > 0) confirmAmountCents = amountCents
@@ -126,8 +142,8 @@ class PageFlow(val packageName: String, internal val startedAt: Long) {
     }
 
     /**
-     * 新交易开始：清掉上一笔的累积信息与"已生成"标记。
-     * 触发的典型时点：再次出现收银台/确认页（用户重新付了一笔）、上一笔已完成后又出现成功页。
+     * 新交易开始：清掉上一笔的累积信息、重新生成流程身份。
+     * 触发的典型时点：再次出现收银台、上一笔完成后离开页面又重新看到结果页。
      */
     fun resetForNewFlow() {
         tradeState = TradeState.UNKNOWN
@@ -138,6 +154,24 @@ class PageFlow(val packageName: String, internal val startedAt: Long) {
         anchorTime = null
         successInstrument = null
         emittedPages.clear()
+        flowInstanceId = newFlowInstanceId()
+        leftResultAfterTerminal = false
+        leftAt = 0L
+        emitSeq = 0
+    }
+
+    /**
+     * 记录"用户已经离开上一笔的交易结果页"。
+     *
+     * 没有收银台的支付路径（付款在别的窗口/应用完成，再回到本应用结果页）只能靠这个信号
+     * 区分"同一结果页的重复回调"与"用户离开后又完成的一笔"：
+     * 只有结果页已终结、且确实看到过别的页面之后再出现的同一结果页，才允许生成新候选。
+     */
+    fun noteLeftTradePage(atMillis: Long) {
+        if (tradeState == TradeState.SUCCESS || tradeState == TradeState.REFUND) {
+            leftResultAfterTerminal = true
+            leftAt = atMillis
+        }
     }
 
     fun noteScene(scene: PageScene, state: TradeState) {
@@ -156,15 +190,37 @@ class PageFlow(val packageName: String, internal val startedAt: Long) {
     /**
      * 登记一次候选生成。返回本次生成的次序（0 = 本流程第一笔）。
      * 同一页面实例重复调用返回 -1（调用方据此跳过）。
+     *
+     * 例外：上一笔已终结、用户离开过结果页、随后又出现**同一张结果页**——这是新的一笔
+     * （典型场景：没有收银台页，付款后回到同一成功页），此时先重置流程再登记。
      */
     fun markEmitted(pageKey: String): Int {
-        if (!emittedPages.add(pageKey)) return -1
+        if (emittedPages.contains(pageKey)) {
+            val canStartNewFlow = (tradeState == TradeState.SUCCESS || tradeState == TradeState.REFUND) &&
+                leftResultAfterTerminal &&
+                updatedAt - leftAt >= RESULT_REENTRY_MIN_GAP_MS
+            if (!canStartNewFlow) return -1
+            resetForNewFlow()
+        }
+        emittedPages.add(pageKey)
+        leftResultAfterTerminal = false
         val seq = emitSeq
         emitSeq += 1
         return seq
     }
 
     val pageKey: String get() = "$packageName|$startedAt"
+
+    companion object {
+        /**
+         * 离开结果页后重新看到同一页面的最短间隔：过滤页面切换时的瞬时重复快照/加载页，
+         * 低于该间隔仍视为同一页面的重复回调。
+         */
+        const val RESULT_REENTRY_MIN_GAP_MS = 5_000L
+
+        /** 生成新的流程身份（完整 UUID，不用容易碰撞的短哈希） */
+        internal fun newFlowInstanceId(): String = "p:" + java.util.UUID.randomUUID().toString()
+    }
 }
 
 /**

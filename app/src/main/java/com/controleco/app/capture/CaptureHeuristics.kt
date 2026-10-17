@@ -15,6 +15,49 @@ import kotlin.math.abs
  */
 internal const val AUTO_ENTRY_DEDUP_WINDOW_MS = 60_000L
 
+/** 通知 `when` 的合理范围：早于 24 小时或晚于当前 5 分钟都视为异常值 */
+internal const val EVENT_TIME_MAX_AGE_MS = 24 * 3_600_000L
+internal const val EVENT_TIME_MAX_FUTURE_SKEW_MS = 5 * 60_000L
+
+/**
+ * 通知/短信事件时间的兜底（纯函数）：
+ * - `when <= 0`（部分应用不设置）、明显在未来、或早于一天前 → 用采集时刻；
+ * - 其余保留原值（交易可能发生在几分钟前，不能粗暴改成采集时刻）。
+ *
+ * 该值同时用于分钟去重桶与入账时间，避免零值/异常值把账记到 1970 年或未来。
+ */
+internal fun sanitizeEventTime(
+    rawEventTime: Long,
+    capturedAt: Long,
+    maxAgeMs: Long = EVENT_TIME_MAX_AGE_MS,
+    maxFutureSkewMs: Long = EVENT_TIME_MAX_FUTURE_SKEW_MS,
+): Long {
+    if (rawEventTime <= 0) return capturedAt
+    if (rawEventTime > capturedAt + maxFutureSkewMs) return capturedAt
+    if (rawEventTime < capturedAt - maxAgeMs) return capturedAt
+    return rawEventTime
+}
+
+/**
+ * 通知时间的优先级（纯函数）：
+ * 1. `notification.when` 合理 → 用它（显示时间，通常就是交易发生时刻）；
+ * 2. `when` 为 0/异常 → 用系统 `StatusBarNotification.postTime`；
+ * 3. 两者都不可用 → 采集时刻。
+ *
+ * 区分三者是为了避免零值/未来值污染分钟去重桶与账单日期，同时尽量保留真实交易时刻。
+ */
+internal fun resolveNotificationTime(
+    displayTime: Long,
+    systemPostTime: Long,
+    capturedAt: Long,
+): Long {
+    val display = sanitizeEventTime(displayTime, capturedAt)
+    if (displayTime > 0 && display == displayTime) return display
+    val posted = sanitizeEventTime(systemPostTime, capturedAt)
+    if (systemPostTime > 0 && posted == systemPostTime) return posted
+    return capturedAt
+}
+
 internal fun hasRecentSameEntry(
     candidates: List<PendingTransactionEntity>,
     sourcePackage: String,

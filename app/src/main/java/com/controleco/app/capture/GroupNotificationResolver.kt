@@ -19,6 +19,8 @@ data class NotificationText(
     val groupKey: String?,
     val group: String?,
     val postTime: Long,
+    /** 系统记录的发布时间（StatusBarNotification.postTime），`when` 异常时的可靠兜底 */
+    val systemPostTime: Long = 0L,
     val title: String = "",
     val text: String = "",
     val bigText: String = "",

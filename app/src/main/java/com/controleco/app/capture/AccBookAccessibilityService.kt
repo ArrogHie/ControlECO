@@ -15,6 +15,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import com.controleco.app.BuildConfig
 import com.controleco.app.capture.page.PageNode
+import com.controleco.app.capture.page.PageFlowTracker
 import com.controleco.app.capture.page.PageParserRegistry
 import com.controleco.app.capture.page.PageSnapshot
 import com.controleco.app.util.AppLog
@@ -141,10 +142,36 @@ class AccBookAccessibilityService : AccessibilityService() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>): Boolean = size > FINGERPRINT_CAP
     }
 
+    /**
+     * 唯一的采集任务令牌：排新一轮前先移除旧回调，避免服务重连/切换应用后
+     * 上一轮的补采任务在新会话里继续执行（旧实现会叠加多个 Handler 回调）。
+     */
+    private val collectRunnable = Runnable { collectCurrentPage() }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
+        resetSession()
         CaptureCenter.markA11yConnected(true)
         applyServiceInfo()
+    }
+
+    /** 服务重连/解绑时清掉所有会话内状态，防止旧补采任务与旧指纹影响新会话 */
+    private fun resetSession() {
+        handler.removeCallbacks(collectRunnable)
+        collectScheduledAt = 0L
+        pendingPkg = null
+        pendingClass = null
+        pendingEventType = 0
+        pendingEventTime = 0L
+        sampleRound = 0
+        lastContentHash = 0
+        stableRounds = 0
+        emptyRetries = 0
+        synchronized(recentFingerprints) { recentFingerprints.clear() }
+        activities.clear()
+        lastEventLogAt.clear()
+        // 服务重连后旧支付流程上下文已失效：清掉，避免新会话复用上一笔的金额/商户/流程身份
+        PageFlowTracker.shared.clear()
     }
 
     /**
@@ -172,17 +199,20 @@ class AccBookAccessibilityService : AccessibilityService() {
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
+        resetSession()
         CaptureCenter.markA11yConnected(false)
         return super.onUnbind(intent)
     }
 
     override fun onDestroy() {
+        resetSession()
         CaptureCenter.markA11yConnected(false)
         super.onDestroy()
     }
 
     override fun onInterrupt() {
         AppLog.w("Page", "a11y interrupted")
+        resetSession()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -232,10 +262,12 @@ class AccBookAccessibilityService : AccessibilityService() {
 
     private fun scheduleCollect(delayMs: Long) {
         val at = SystemClock.elapsedRealtime() + delayMs
-        // 已有更早的计划则不重复排程（事件风暴合并）
+        // 已有更早的计划则不重复排程（事件风暴合并）；更晚的计划会被新的更早计划取代，
+        // 旧回调必须先移除，否则同一轮会出现多个 collectCurrentPage 并发读树。
         if (collectScheduledAt != 0L && collectScheduledAt <= at) return
+        handler.removeCallbacks(collectRunnable)
         collectScheduledAt = at
-        handler.postDelayed({ collectCurrentPage() }, delayMs)
+        handler.postDelayed(collectRunnable, delayMs)
     }
 
     private fun collectCurrentPage() {

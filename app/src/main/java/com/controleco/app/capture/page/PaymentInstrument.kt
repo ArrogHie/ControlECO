@@ -18,6 +18,9 @@ enum class InstrumentKind {
 
     /** 其他支付工具（数字人民币钱包、Apple Pay…） */
     OTHER,
+
+    /** 只写了支付渠道名（"微信支付"/"支付宝"）：能确定走哪个 App，但确定不了具体钱包/银行卡 */
+    PAYMENT_CHANNEL,
 }
 
 /**
@@ -77,6 +80,20 @@ object PaymentInstrumentParser {
 
     /** 数字人民币/其他 */
     private val otherTools = listOf("数字人民币", "云闪付", "Apple Pay", "华为支付", "Huawei Pay")
+
+    /**
+     * 只写了渠道名的支付方式（电商收银台/结果页常见）：用于跨应用关联（页面显示"微信支付"
+     * ⇄ 微信通知），但**不能**据此推断具体账户（走微信零钱还是某张卡未知）。
+     */
+    private val channelPaymentAliases: List<Pair<String, String>> = listOf(
+        "微信支付" to "微信",
+        "支付宝支付" to "支付宝",
+        "支付宝" to "支付宝",
+        "云闪付" to "云闪付",
+        "京东支付" to "京东",
+        "美团支付" to "美团",
+        "抖音支付" to "抖音",
+    )
 
     /** 银行名（识别"哪家银行"用；不含"银行"二字也能匹配，如"招行"） */
     private val bankNames = listOf(
@@ -161,6 +178,18 @@ object PaymentInstrumentParser {
                 brand = other,
                 matchKeys = listOf(other, channel).filter { it.isNotBlank() }.distinct(),
             )
+        }
+        // 4.5) 只有支付渠道名（"微信支付"/"支付宝"）：可用于跨应用关联，不用于精确账户匹配
+        for ((alias, canonical) in channelPaymentAliases) {
+            if (compact.contains(alias)) {
+                return PaymentInstrument(
+                    raw = text,
+                    kind = InstrumentKind.PAYMENT_CHANNEL,
+                    channel = canonical,
+                    brand = canonical,
+                    matchKeys = listOf(canonical),
+                )
+            }
         }
         // 5) 只有卡种/尾号（如 "储蓄卡(8920)"）：仍可用于账户尾号匹配
         val cardWord = (creditCardWords + debitCardWords).firstOrNull { compact.contains(it) }

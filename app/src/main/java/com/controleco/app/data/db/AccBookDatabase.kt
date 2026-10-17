@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CaptureTraceEntity::class,
         MerchantRuleEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 abstract class AccBookDatabase : RoomDatabase() {
@@ -159,6 +159,25 @@ abstract class AccBookDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v10：交易身份与来源实例拆分（本轮正确性修复）。
+         * - `transactions.flowId`：页面支付流程标识，和 externalId（数据库幂等键）分开；
+         * - `pending_transactions.flowId`：同一页面流程的结果页/详情页共享；
+         * - `pending_transactions.notificationInstanceId`：同一条系统通知的更新共享，
+         *   不同通知实例即使同分钟同额也不合并；
+         * - `pending_transactions.orderId`：页面解析出的交易单号/订单号，跨渠道关联的强证据。
+         * 全部列都有默认值，历史账单与待确认条目原样保留；旧记录身份未知时按保守窗口匹配。
+         */
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transactions ADD COLUMN flowId TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE pending_transactions ADD COLUMN flowId TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE pending_transactions ADD COLUMN notificationInstanceId TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE pending_transactions ADD COLUMN bankInstanceId TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE pending_transactions ADD COLUMN orderId TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         @Volatile
         private var instance: AccBookDatabase? = null
 
@@ -171,7 +190,7 @@ abstract class AccBookDatabase : RoomDatabase() {
                 )
                     .addMigrations(
                         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
-                        MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+                        MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
                     )
                     .build().also { instance = it }
             }

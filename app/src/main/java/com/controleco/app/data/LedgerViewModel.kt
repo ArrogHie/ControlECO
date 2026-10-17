@@ -7,6 +7,7 @@ import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.room.withTransaction
 import com.controleco.app.AccBookApp
 import com.controleco.app.BuildConfig
 import com.controleco.app.capture.AccBookAccessibilityService
@@ -1145,7 +1146,7 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
-            PendingActions.confirm(txDao, pendingDao, merchantRuleDao, item, categoryId, accountId, counterparty)
+            PendingActions.confirm(db, txDao, pendingDao, merchantRuleDao, item, categoryId, accountId, counterparty)
         }
     }
 
@@ -1177,11 +1178,14 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                     source = CaptureDefaults.txSource(item.sourcePackage),
                     externalId = "NTF:${item.dedupKey}",
                     refundMark = item.refundMark,
+                    flowId = item.flowId,
                 )
             }
-            val ids = txDao.insertAllIgnore(entities)
-            val inserted = ids.count { it != -1L }
-            items.forEach { pendingDao.deleteById(it.id) }
+            val inserted = db.withTransaction {
+                val ids = txDao.insertAllIgnore(entities)
+                items.forEach { pendingDao.deleteById(it.id) }
+                ids.count { it != -1L }
+            }
             AppLog.i("pending", "confirmAll: ${items.size} items, inserted=$inserted")
         }
     }

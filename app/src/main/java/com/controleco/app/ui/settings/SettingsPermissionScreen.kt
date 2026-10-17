@@ -217,6 +217,7 @@ private fun A11ySection(vm: LedgerViewModel, resumeTick: Int, onOpenAccessibilit
         RowDivider()
         SwitchRow(
             title = "自动记录支付页面",
+            subtitle = "开启后页面识别出的已支付交易会自动入账/进入待确认；关闭只保留捕获日志，不入账",
             checked = captureOn,
             onCheckedChange = { vm.setA11yCaptureEnabled(it) },
         )

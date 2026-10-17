@@ -44,18 +44,21 @@ fun SettingsScreen(
         PaneCard {
             SwitchRow(
                 title = "入账提醒",
+                subtitle = "捕获后先记账，再发通知提醒（可在通知里撤销）",
                 checked = captureNotify,
                 onCheckedChange = { vm.setCaptureNotifyEnabled(it) },
             )
             RowDivider()
             SwitchRow(
                 title = "悬浮窗入账",
+                subtitle = "捕获后先记账，并弹出确认卡；改完关掉卡片即同步",
                 checked = overlayConfirm,
                 onCheckedChange = { vm.setOverlayConfirmEnabled(it) },
             )
             RowDivider()
             SwitchRow(
                 title = "自动入账",
+                subtitle = "捕获后直接记账、不打扰；开启时会关闭悬浮窗入账",
                 checked = autoEntry,
                 onCheckedChange = { vm.setAutoEntryEnabled(it) },
             )

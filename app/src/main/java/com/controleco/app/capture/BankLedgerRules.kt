@@ -191,12 +191,13 @@ object BankLedgerRules {
         var plain: Long? = null
         for (m in amountToken.findAll(text)) {
             val raw = m.groupValues[1]
+            val matched = m.value
             val before = text.substring(maxOf(0, m.range.first - 10), m.range.first)
-            val after = text.substring(m.range.last + 1, minOf(text.length, m.range.last + 3))
-            val hasCurrency = before.contains("¥") || before.contains("￥") ||
-                before.contains("人民币") || before.uppercase().contains("RMB") ||
-                after.contains("元") || after.contains("圆") ||
-                after.uppercase().startsWith("RMB")
+            // 币种标记必须从**整个匹配**判断：正则把 `人民币`/`¥`/`元` 都含在匹配区间内，
+            // 只看区间外会漏掉"人民币50元""¥50元"这类整数写法（余额/日期仍按 before 排除）
+            val hasCurrency = matched.contains("¥") || matched.contains("￥") ||
+                matched.contains("人民币") || matched.uppercase().contains("RMB") ||
+                matched.contains("元") || matched.contains("圆")
             // 带小数点的裸数字也认为是金额（银行动账短信里日期不会是 10.8 这种写法）
             if (!hasCurrency && !raw.contains('.')) continue
             val cents = Money.parseCents(raw) ?: continue

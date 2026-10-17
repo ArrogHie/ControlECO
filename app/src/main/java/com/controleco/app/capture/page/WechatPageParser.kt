@@ -185,7 +185,7 @@ object WechatPageParser : AppPageParser {
         }
 
         val amount = PageParseSupport.pickPaidAmount(snapshot, anchorIdx)
-            ?: PageParseSupport.amountAfterLabel(lines, listOf("付款金额", "金额"))
+            ?: PageParseSupport.amountAfterLabel(snapshot, listOf("付款金额", "金额"))
             ?: return PageParseResult.SceneOnly(PageScene.PAYMENT_SUCCESS, TradeState.SUCCESS, "微信成功页无金额")
         val amountCents = com.controleco.app.util.Money.parseCents(amount) ?: return PageParseResult.SceneOnly(
             PageScene.PAYMENT_SUCCESS, TradeState.SUCCESS, "微信成功页金额非法",
@@ -557,7 +557,7 @@ object WechatPageParser : AppPageParser {
     }
 
     private fun confirmAmount(snapshot: PageSnapshot): Long? {
-        val value = PageParseSupport.amountAfterLabel(snapshot.lines, listOf("付款金额", "支付金额", "金额"))
+        val value = PageParseSupport.amountAfterLabel(snapshot, listOf("付款金额", "支付金额", "金额"))
             ?: PageParseSupport.pickPaidAmount(snapshot) ?: return null
         return com.controleco.app.util.Money.parseCents(value)?.takeIf { it > 0 }
     }

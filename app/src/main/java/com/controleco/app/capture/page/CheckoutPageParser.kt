@@ -347,7 +347,7 @@ open class CheckoutPageParser(protected val profile: CheckoutProfile) : AppPageP
             PageParseSupport.yuanSuffixedAmount(line)?.let { return it }
         }
         PageParseSupport.amountAfterLabel(
-            snapshot.lines, listOf("实付款", "实际支付", "付款金额", "支付金额", "订单金额"),
+            snapshot, listOf("实付款", "实际支付", "付款金额", "支付金额", "订单金额"),
         )?.let { return it }
         return PageParseSupport.pickPaidAmount(snapshot, anchorIdx)
     }
@@ -402,7 +402,7 @@ open class CheckoutPageParser(protected val profile: CheckoutProfile) : AppPageP
 
     protected open fun confirmAmount(snapshot: PageSnapshot): Long? {
         val value = PageParseSupport.amountAfterLabel(
-            snapshot.lines, listOf("实付款", "付款金额", "订单金额", "合计", "金额"),
+            snapshot, listOf("实付款", "付款金额", "订单金额", "合计", "金额"),
         ) ?: PageParseSupport.pickPaidAmount(snapshot) ?: return null
         return Money.parseCents(value)?.takeIf { it > 0 }
     }
