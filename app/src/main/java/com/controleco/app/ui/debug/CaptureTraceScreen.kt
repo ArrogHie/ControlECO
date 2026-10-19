@@ -293,6 +293,7 @@ private fun outcomeLabel(outcome: TraceOutcome): String = when (outcome) {
     TraceOutcome.AUTO_ENTRY -> "自动入账"
     TraceOutcome.PENDING -> "待确认入账"
     TraceOutcome.MERGED_PAGE -> "页面合并回填"
+    TraceOutcome.MERGED_CROSS_APP -> "跨应用同一笔"
     TraceOutcome.MERGED_CROSS -> "跨通道归并"
     TraceOutcome.SKIPPED_DUPLICATE -> "重复捕获"
     TraceOutcome.REFUND_NOTICE -> "退款提醒"

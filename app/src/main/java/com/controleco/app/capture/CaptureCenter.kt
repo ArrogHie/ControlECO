@@ -1476,7 +1476,7 @@ object CaptureCenter {
                         amountCents = parsed.amountCents,
                         note = parsed.note,
                         dedupKey = crossApp.dedupKey,
-                        outcome = TraceOutcome.SKIPPED_DUPLICATE,
+                        outcome = TraceOutcome.MERGED_CROSS_APP,
                     )
                     return@launch
                 }
@@ -2014,19 +2014,36 @@ object CaptureCenter {
         )
         val candidates = mergeable.filter { candidate ->
             candidate.sourcePackage in NotificationRules.checkoutPackages &&
-                flowCompatible(candidate, notificationIdentity) &&
+                flowCompatible(candidate, notificationIdentity, packageName) &&
                 CrossAppLinker.isSamePurchase(pageEvidenceOf(candidate), incoming)
         }
         if (candidates.size > 1) {
             AppLog.w("Ntf", "cross-app ambiguous (${candidates.size} page entries), keep separate $ruleName")
             return null
         }
-        return candidates.singleOrNull()
+        return candidates.singleOrNull()?.also { hit ->
+            val reason = CrossAppLinker.linkReason(pageEvidenceOf(hit), incoming)
+            AppLog.i(
+                "Dedup",
+                "cross-app same transaction (notification): ${NotificationRules.sourceLabel(packageName)} " +
+                    "${Money.formatYuan(amountCents)} -> #${hit.id} ${hit.sourcePackage} reason=$reason",
+            )
+        }
     }
 
     /**
-     * 页面路径的跨应用关联：页面是电商/外卖页时，找同一时间窗内、金额方向一致的支付/银行条目；
-     * 页面支付方式必须能对上该来源，且该条目还没有被另一个页面流程占用。
+     * 页面路径的跨应用关联：**电商/外卖页面**与已捕获的支付应用（微信/支付宝）/银行条目是否同一笔。
+     *
+     * 真实链路只有一条方向：用户在微信/支付宝里付款 → 该通道先捕获 → 用户返回（或切回）
+     * 电商/外卖应用 → 商户结果页随后被捕获。因此这里只处理"本条是商户页、对侧是支付/银行"。
+     *
+     * 判重口径（2026-10-19 调整，见 [CrossAppLinker.linkReason]）：
+     * - 有明确渠道线索（页面写"微信支付/支付宝"、银行名/卡尾号）→ 130 秒内可关联；
+     * - 没有渠道线索时，两条链路在 [CrossAppLinker.SAME_AMOUNT_WINDOW_MS] 内捕获到
+     *   **完全相同金额**（如美团结果页 + 微信支付页/通知）即视为同一笔；
+     * - 两个商户页面之间、两个支付通知之间永不按同额合并；
+     * - 同一应用内的两笔同额订单由页面流程身份隔离（[flowCompatible] 按 incomingPackage 比较），
+     *   不需要在这里另加闸门。
      */
     private suspend fun findCrossAppRelatedForPage(
         packageName: String,
@@ -2037,18 +2054,53 @@ object CaptureCenter {
     ): PendingTransactionEntity? {
         if (packageName !in NotificationRules.checkoutPackages) return null
         val pageEvidence = pageEvidenceOf(candidate, packageName, capturedAt)
+
         val candidates = mergeable.filter { existing ->
             existing.sourcePackage != packageName &&
                 CrossChannelDedup.channelClass(existing.sourcePackage) != CrossChannelDedup.ChannelClass.UNKNOWN &&
-                flowCompatible(existing, pageFlowIdentity) &&
+                flowCompatible(existing, pageFlowIdentity, packageName) &&
                 kotlin.math.abs(existing.timestamp - pageEvidence.time) <= CrossAppLinker.WINDOW_MS &&
                 CrossAppLinker.isSamePurchase(pageEvidence, pendingEvidenceOf(existing))
         }
         if (candidates.size > 1) {
-            AppLog.w("Page", "cross-app ambiguous (${candidates.size} notification entries), keep separate ${candidate.ruleName}")
+            AppLog.w(
+                "Page",
+                "cross-app ambiguous (${candidates.size} entries: " +
+                    candidates.joinToString { it.sourcePackage } +
+                    "), keep separate ${candidate.ruleName}",
+            )
             return null
         }
-        return candidates.singleOrNull()
+        val hit = candidates.singleOrNull()
+        if (hit == null) {
+            // 诊断：窗口内有同额的另一条链路，但没有通过证据闸门（商户/渠道/流程冲突）。
+            // 这类"看起来像同一笔却没合并"的情形最容易在真机上被误判成漏判，必须留痕。
+            val nearMiss = mergeable.filter { existing ->
+                existing.sourcePackage != packageName &&
+                    existing.amountCents == candidate.amountCents && existing.type == candidate.type &&
+                    kotlin.math.abs(existing.timestamp - pageEvidence.time) <= CrossAppLinker.WINDOW_MS &&
+                    CrossChannelDedup.channelClass(existing.sourcePackage) !=
+                    CrossChannelDedup.ChannelClass.UNKNOWN
+            }
+            if (nearMiss.isNotEmpty()) {
+                AppLog.i(
+                    "Dedup",
+                    "cross-app same amount kept separate: page=${candidate.ruleName} " +
+                        "${Money.formatYuan(candidate.amountCents)} candidates=" +
+                        nearMiss.joinToString { "#${it.id}/${it.sourcePackage}" } +
+                        " pageFlow=$pageFlowIdentity",
+                )
+            }
+            return null
+        }
+        val reason = CrossAppLinker.linkReason(pageEvidence, pendingEvidenceOf(hit))
+        AppLog.i(
+            "Dedup",
+            "cross-app same transaction: page=${candidate.ruleName} ${Money.formatYuan(candidate.amountCents)} " +
+                "-> #${hit.id} ${hit.sourcePackage} reason=$reason " +
+                "pageFlow=$pageFlowIdentity",
+        )
+        return hit
     }
 
     private fun pageEvidenceOf(pending: PendingTransactionEntity): CrossAppLinker.Evidence =
@@ -2311,13 +2363,15 @@ object CaptureCenter {
                     "existing=${Money.formatYuan(conflict.amountCents)} #${conflict.id} ${candidate.ruleName}",
             )
         }
-        // 跨应用：电商/外卖页面 + 微信/支付宝通知/银行动账。只有页面支付方式能对上来源才合并。
+        // 跨应用：电商/外卖页面 + 微信/支付宝通知/银行动账。
+        // 明确渠道线索（130s）或同一笔记在两条链路上短时同额捕获（60s）都算同一笔。
         val crossApp = findCrossAppRelatedForPage(packageName, candidate, flowIdentity, capturedAt, mergeable)
         if (crossApp != null) {
             AppLog.i("Page", "cross-app link ${candidate.ruleName} -> #${crossApp.id} ${crossApp.sourcePackage}")
             mergePageIntoExisting(
                 RelatedPending(crossApp, sameAmount = true),
                 candidate, rawId, snapshotText, capturedAt, flowIdentity,
+                crossApp = true,
             )
             return
         }
@@ -2529,6 +2583,9 @@ object CaptureCenter {
      * 页面候选并入既有条目（页面信息优先）。
      * 覆盖金额/时间/商户/备注/支付工具；用户手改过的条目只补空白（见 mergePageInfo）；
      * 已自动入账的条目同步回填交易本身。
+     *
+     * [crossApp] = 本次是跨应用（商户页 ⇄ 支付应用页/通知）的同一笔：溯源里单独标记，
+     * 便于区分"同应用结果页/详情页回填"与"两个应用的对账结果"。
      */
     private suspend fun mergePageIntoExisting(
         related: RelatedPending,
@@ -2537,6 +2594,7 @@ object CaptureCenter {
         snapshotText: String,
         capturedAt: Long,
         pageFlowIdentity: String,
+        crossApp: Boolean = false,
     ) {
         val existing = related.pending
         val merged = mergePageInfo(
@@ -2598,7 +2656,7 @@ object CaptureCenter {
             counterparty = merged.counterparty,
             note = merged.note,
             dedupKey = existing.dedupKey,
-            outcome = TraceOutcome.MERGED_PAGE,
+            outcome = if (crossApp) TraceOutcome.MERGED_CROSS_APP else TraceOutcome.MERGED_PAGE,
         )
         // 页面富化：卡片在展示就刷新内容，没在展示就按"卡片优先"再试一次
         refreshCardIfShowing(existing.id)

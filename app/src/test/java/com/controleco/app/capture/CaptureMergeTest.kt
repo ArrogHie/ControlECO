@@ -748,6 +748,50 @@ class CaptureMergeTest {
         assertNull(dedupKeyWithAmount("com.tencent.mm|EXPENSE|678", 1280))
     }
 
+    // ---------- 跨应用链路身份（2026-10-19：美团微信支付被记两笔） ----------
+
+    @Test
+    fun `微信流程身份不再阻塞美团页面的跨应用融合`() {
+        // 真实事故：微信支付成功页先入账（flowId=p:wechat），随后美团结果页（p:meituan）到达。
+        // 两个流程身份按包名生成、永不相等；旧实现直接判"不同流程" → 美团页再记一笔。
+        // 跨应用时身份不构成否定证据（同笔与否由金额/渠道/商户判定）。
+        val wechatEntry = pending(
+            packageName = NotificationRules.WECHAT,
+            amount = 1920,
+            timestamp = base,
+            createdAt = base,
+            flowId = "p:wechat",
+            note = "支付方式 微信支付",
+        )
+        assertTrue(
+            flowCompatible(wechatEntry, "p:meituan", NotificationRules.MEITUAN_TAKEOUT),
+        )
+        // 同应用仍然要按流程隔离（两笔同额订单不能互并）
+        assertFalse(
+            flowCompatible(wechatEntry, "p:another-wechat-flow", NotificationRules.WECHAT),
+        )
+        assertTrue(
+            flowCompatible(wechatEntry, "p:wechat", NotificationRules.WECHAT),
+        )
+    }
+
+    @Test
+    fun `旧记录的通知实例身份不阻塞另一个应用的页面融合`() {
+        // 通知条目的 n: 身份只属于通知侧；页面到达时按页面自己的流程判断
+        val notificationEntry = pending(
+            packageName = NotificationRules.WECHAT,
+            amount = 1920,
+            createdAt = base,
+            notificationInstanceId = "n:abc",
+        )
+        assertTrue(
+            flowCompatible(notificationEntry, "p:meituan", NotificationRules.MEITUAN_TAKEOUT),
+        )
+        // 同一条通知的重复回调仍按实例身份约束
+        assertFalse(flowCompatible(notificationEntry, "n:other", NotificationRules.WECHAT))
+        assertTrue(flowCompatible(notificationEntry, "n:abc", NotificationRules.WECHAT))
+    }
+
     // ---------- 自动入账前的重复预检（±60s 数据库校验） ----------
 
     @Test

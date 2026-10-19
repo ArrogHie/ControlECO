@@ -60,7 +60,7 @@ internal fun pickRelatedPending(
     val inWindow = candidates.filter {
         it.status != PendingStatus.ASK &&
             it.sourcePackage == packageName && it.type == type && abs(captureAt - it.createdAt) <= windowMs &&
-            flowCompatible(it, flowIdentity)
+            flowCompatible(it, flowIdentity, packageName)
     }
     return inWindow.filter { it.amountCents == amountCents }
         .minByOrNull { abs(captureAt - it.createdAt) }
@@ -69,7 +69,8 @@ internal fun pickRelatedPending(
 
 /**
  * 判断一条候选能否与既有条目视作同一笔（按"同类身份"比较）：
- * - 既有页面流程标识非空：本条也是页面候选时必须相同，否则是另一笔；
+ * - 页面流程标识只在**同一个应用**内有意义：微信的 `p:xxx` 与美团的 `p:yyy` 按包名分别生成，
+ *   跨应用时身份不同不能证明是两笔（真实链路：微信/支付宝先捕获，用户返回后电商页再捕获）；
  * - 既有通知实例标识非空：本条也是通知候选时必须相同，否则是另一条通知；
  * - 跨通道（页面 ⇄ 通知）时对侧字段为空，允许融合。
  *
@@ -79,6 +80,8 @@ internal fun pickRelatedPending(
 internal fun flowCompatible(
     existing: PendingTransactionEntity,
     incomingIdentity: String?,
+    /** 本条候选的来源包名：页面流程身份按应用分别生成，只与同应用的既有流程比较 */
+    incomingPackage: String? = null,
 ): Boolean {
     if (incomingIdentity.isNullOrEmpty()) return true
     if (incomingIdentity.startsWith(BANK_ID_PREFIX)) {
@@ -89,6 +92,8 @@ internal fun flowCompatible(
         val existingNotification = entryNotificationInstanceId(existing)
         return existingNotification.isEmpty() || existingNotification == incomingIdentity
     }
+    // 跨应用：身份作用域是各自的应用，不能拿微信流程去否定美团结果页
+    if (!incomingPackage.isNullOrBlank() && incomingPackage != existing.sourcePackage) return true
     val existingFlow = entryFlowId(existing)
     return existingFlow.isEmpty() || existingFlow == incomingIdentity
 }

@@ -130,6 +130,13 @@ enum class TraceOutcome {
     /** 页面信息合并：同笔已由另一通道入账/入队，本次捕获把页面富化信息回填过去 */
     MERGED_PAGE,
 
+    /**
+     * 跨应用同一笔：电商/外卖页面与支付应用（微信/支付宝）页面/通知被判定为同一笔
+     * （明确渠道线索，或两条链路短时同额）。与 [MERGED_PAGE] 分开是为了在溯源里
+     * 一眼看出"这笔是两个应用的对账结果"，而不是同一应用内的结果页/详情页回填。
+     */
+    MERGED_CROSS_APP,
+
     /** 跨通道归并：同笔已由另一通道（支付类⇄银行类）捕获，本次银行侧信息并入既有条目 */
     MERGED_CROSS,
 
@@ -239,6 +246,9 @@ data class PendingTransactionEntity(
     /**
      * 本笔所属的页面支付流程标识（`p:<uuid>`）。由页面解析器在整条支付流程内共享：
      * 同一笔的确认页/结果页/详情页相同，另一笔同额交易必然不同。通知/短信侧为空。
+     *
+     * 注意它的作用域是**单个应用**：微信的 `p:xxx` 与美团的 `p:yyy` 永不相等，
+     * 跨应用合并时不能用它否定"同一笔"（见 CaptureMerge.flowCompatible 的 incomingPackage）。
      */
     @ColumnInfo(defaultValue = "")
     val flowId: String = "",
