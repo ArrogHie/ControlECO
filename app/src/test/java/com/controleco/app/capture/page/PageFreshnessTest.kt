@@ -2,6 +2,7 @@ package com.controleco.app.capture.page
 
 import com.controleco.app.capture.NotificationRules
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDateTime
@@ -71,7 +72,8 @@ class PageFreshnessTest {
         for ((key, old) in samples) {
             val pkg = key.substringBefore('#')
             val result = parse(pkg, old)
-            assertTrue("$key 的旧账单不该成单（实际：$result）", result is PageParseResult.SceneOnly)
+            // 旧账单不生成候选；支付宝不再识别详情页，因此返回 NotATradePage 而不是 SceneOnly
+            assertFalse("$key 的旧账单不该成单（实际：$result）", result is PageParseResult.Candidate)
         }
     }
 

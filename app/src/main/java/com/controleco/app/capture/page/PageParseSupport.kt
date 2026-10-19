@@ -208,6 +208,82 @@ object PageParseSupport {
             prev != '-' && prev != '－' && prev != '−' && prev != '减' && prev != '惠'
         }?.groupValues?.get(1)
 
+    /** 带符号的独立金额节点（页首的 `-12.35` / `+12.35` 这类账单金额写法） */
+    data class SignedAmount(val cents: Long, val negative: Boolean)
+
+    /**
+     * 解析**带符号**的独立金额节点：`-12.35` / `−12.35` / `-¥12.35` / `+12.35`。
+     *
+     * 只接受整行就是一个金额的节点（[isAmountLikeNode]），且必须显式带正负号：
+     * 无符号金额交给各解析器原有的文字方向判断，避免把普通金额误判成收入。
+     * 返回值永远是绝对值（分），符号单独放在 [SignedAmount.negative]。
+     */
+    fun signedStandaloneAmount(text: String): SignedAmount? {
+        val t = text.trim()
+        if (!isAmountLikeNode(t)) return null
+        val negative = t.startsWith("-") || t.startsWith("−") || t.startsWith("－")
+        val positive = t.startsWith("+")
+        if (!negative && !positive) return null
+        val value = t.trimStart('-', '−', '－', '+', ' ', '　')
+            .trimStart('¥', '￥')
+            .trimEnd('元')
+            .trim()
+        val cents = Money.parseCents(value) ?: return null
+        if (cents == 0L) return null
+        return SignedAmount(cents, negative)
+    }
+
+    /**
+     * 锚点邻域金额：金额必须出现在锚点行或紧邻的 [radius] 行内，
+     * 且邻域里只能有**一个不同金额**；出现两个及以上不同金额视为歧义（返回 null）。
+     *
+     * 这是"收款到账页"必须使用的结果页金额判据：聊天页的历史转账气泡里也可能有
+     * `已收款` 这类锚点词，但锚点本身没有金额，邻域扫描会拒绝整页第一笔金额兜底。
+     */
+    fun amountNearAnchor(lines: List<String>, anchorIndex: Int, radius: Int = 1): String? {
+        if (anchorIndex !in lines.indices) return null
+        val lo = maxOf(0, anchorIndex - radius)
+        val hi = minOf(lines.size - 1, anchorIndex + radius)
+        // 按分归并（5.2 与 5.20 是同一个金额），保留第一次出现的原文
+        val distinct = LinkedHashMap<Long, String>()
+        for (i in lo..hi) {
+            // 大字号金额常被渲染成「￥」「9.17」两个节点：货币符号行与其后一行合并取数
+            if (lines[i].trim() == "¥" || lines[i].trim() == "￥") {
+                val token = standaloneAmountToken(lines.getOrNull(i + 1).orEmpty())
+                val cents = token?.let { Money.parseCents(it) }
+                if (token != null && cents != null && cents != 0L) {
+                    distinct.putIfAbsent(kotlin.math.abs(cents), token)
+                }
+                continue
+            }
+            for (token in amountTokensIn(lines[i])) {
+                val cents = Money.parseCents(token) ?: continue
+                if (cents == 0L) continue
+                distinct.putIfAbsent(kotlin.math.abs(cents), token)
+            }
+        }
+        return if (distinct.size == 1) distinct.values.first() else null
+    }
+
+    /** 整行就是一个金额节点时返回数值文本（去掉符号/¥/元）；不是纯金额行返回 null */
+    private fun standaloneAmountToken(line: String): String? {
+        val t = line.trim()
+        if (!isAmountLikeNode(t)) return null
+        val token = t.trimStart('-', '−', '－', '+', ' ', '　')
+            .trimStart('¥', '￥')
+            .trimEnd('元')
+            .trim()
+        return token.takeIf { Money.parseCents(it) != null }
+    }
+
+    /** 一行里可用于锚点邻域比较的金额原文（¥ 金额、独立金额节点、元后缀金额） */
+    private fun amountTokensIn(line: String): List<String> {
+        val values = amountValuesIn(line)
+        if (values.isNotEmpty()) return values
+        standaloneAmountToken(line)?.let { return listOf(it) }
+        return listOfNotNull(yuanSuffixedAmount(line))
+    }
+
     /** 行内第一个"元"结尾的金额（无 ¥ 前缀的写法："支付成功 12.80元"） */
     fun yuanSuffixedAmount(line: String): String? = bareNumberWithYuan.find(line)?.groupValues?.get(1)
 
@@ -436,6 +512,22 @@ object PageParseSupport {
     }
 
     // ---------- 页面形状闸门 ----------
+
+    /**
+     * 聊天会话页判定：聊天页会渲染历史转账/红包气泡（含 `已收款`、`已领取` 等结果词），
+     * 但它们不是本次交易结果。判据取聊天页独有的**组合**特征：
+     * - 会话标题/菜单（`聊天信息`）+ 输入栏特征（`按住说话`/`听写`/`更多功能按钮`）任一；
+     * - 或输入栏至少两个特征同时出现（键盘/语音/扩展面板）。
+     *
+     * 单独的 `已收款`/`已领取` 永远不能证明这是一张结果页。
+     */
+    fun looksLikeChatPage(snapshot: PageSnapshot): Boolean {
+        val joined = snapshot.joined
+        val header = joined.contains("聊天信息") || joined.contains("聊天设置")
+        val inputMarkers = listOf("按住说话", "听写", "更多功能按钮")
+        val inputHits = inputMarkers.count { joined.contains(it) }
+        return (header && inputHits >= 1) || inputHits >= 2
+    }
 
     /**
      * 页面形状闸门：拒掉"应用主界面 / 消息流 / 列表页"里的伪锚点（含历史账单预览）。

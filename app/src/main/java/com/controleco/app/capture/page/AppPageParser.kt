@@ -93,7 +93,7 @@ class PageFlow(val packageName: String, internal val startedAt: Long) {
 
     /**
      * 支付确认时刻（墙钟）：成功页若没有交易时间，用它比"捕获时刻"更接近真实支付时间
-     * （与参考实现"支付锚点"同一思路：只在同一天内使用）。
+     * （与"支付锚点"同一思路：只在同一天内使用）。
      */
     var anchorTime: Long? = null
         private set

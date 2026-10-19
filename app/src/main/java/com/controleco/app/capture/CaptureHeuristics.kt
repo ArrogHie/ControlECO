@@ -100,6 +100,23 @@ internal fun entryModeFix(
 }
 
 /**
+ * 同包名的次要窗口是否纳入页面快照（纯函数，便于单测）。
+ *
+ * 无障碍服务除活动窗口外还会枚举同包名的其余应用窗口（支付结果页可能是 dialog）；
+ * 这里收**用户可见**且满足任一条件的窗口：
+ * - 聚焦或活动：普通对话框/结果页；
+ * - [largeVisible]：大尺寸可见覆盖层（红包封面/部分支付覆盖页）通常不是 focused/active，
+ *   但它是当前页面的主体，必须采集；小尺寸微信浮窗/APK 文件仍排除。
+ * 活动窗口本身不经过这里，始终采集。
+ */
+internal fun shouldCollectSecondaryWindow(
+    visible: Boolean,
+    focused: Boolean,
+    active: Boolean,
+    largeVisible: Boolean = false,
+): Boolean = visible && (focused || active || largeVisible)
+
+/**
  * 捕获到账单后是否"先直接入账"（纯函数，便于单测）。
  *
  * 定稿语义：三种入账方式（入账提醒 / 悬浮窗入账 / 自动入账）任一开启，捕获即先入账——

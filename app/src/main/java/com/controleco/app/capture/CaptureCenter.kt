@@ -113,6 +113,9 @@ object CaptureCenter {
     private const val REPOST_WINDOW_MS = 10_000L
     private const val RECENT_KEY_CAP = 256
 
+    /** 红包询问卡的延迟：封面页没有支付保护层，尽快弹出，避免用户已经领完/离开 */
+    private const val RED_PACKET_PROMPT_DELAY_MS = 600L
+
     /** 捕获日志保留策略 */
     private const val KEEP_DAYS = 7L
     private const val KEEP_ROWS = 2_000
@@ -123,6 +126,9 @@ object CaptureCenter {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mainHandler = Handler(Looper.getMainLooper())
     private val recentKeys = LinkedHashMap<String, Long>()
+
+    /** 稳定页面去重：带页面交易时间的结果页在短 TTL 内只处理一次（跨流程重置也有效） */
+    private val recentPageCache = RecentPageCache()
 
     private lateinit var appContext: Context
     private lateinit var db: AccBookDatabase
@@ -706,11 +712,17 @@ object CaptureCenter {
      * 可能还是支付保护/安全键盘等系统弹层，等 3 秒后再看用户到底在哪）。
      * 不满足时把原因写进 [lastOverlayDecision]，权限页/日志可直接回看"为什么没弹卡"。
      */
-    private fun overlayConditionsOk(sourcePackage: String, requireForegroundMatch: Boolean): Boolean {
+    private fun overlayConditionsOk(
+        sourcePackage: String,
+        requireForegroundMatch: Boolean,
+        forcePrompt: Boolean = false,
+    ): Boolean {
         val pm = appContext.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
         val km = appContext.getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
         val fg = foregroundPackage
-        val enabled = isOverlayConfirmEnabled()
+        // 红包确认卡是"用户必须做选择"的提示，不受「悬浮窗入账」开关约束；
+        // 仍然要求悬浮窗权限、屏幕点亮、非锁屏、非本应用前台（这些是系统硬条件）。
+        val enabled = forcePrompt || isOverlayConfirmEnabled()
         val canDraw = Settings.canDrawOverlays(appContext)
         val screenOn = pm.isInteractive
         val locked = km.isKeyguardLocked
@@ -754,6 +766,7 @@ object CaptureCenter {
      * false：待确认条目（金额待补 / 无可推测分类 / 三个开关全关的完全手动模式）。
      * 延迟 [OVERLAY_DELAY_MS] 再弹：支付保护层在支付页停留期会拦截悬浮窗（阶段三旧结论），
      * 延迟后重新判定条件与条目（可能已被处理）；`addView` 失败同样回落通知。
+     * 红包询问卡（[askMode]）用更短的 [RED_PACKET_PROMPT_DELAY_MS]：封面页没有支付保护层。
      */
     private suspend fun tryShowConfirmCard(
         pending: PendingTransactionEntity,
@@ -762,12 +775,14 @@ object CaptureCenter {
         sourceLabel: String,
         counterparty: String,
         dedupKey: String,
+        forcePrompt: Boolean = false,
+        askMode: Boolean = false,
     ): Boolean {
         // 预检只判"硬条件"（开关/权限/本应用前台/屏幕），不看前台匹配：支付完成瞬间的前台窗口
         // 可能还是支付保护/安全键盘等系统弹层，等 3 秒后再看用户到底在哪（实测：预检查前台匹配会把卡拒掉）
-        if (!overlayConditionsOk(pending.sourcePackage, requireForegroundMatch = false)) return false
-        delay(OVERLAY_DELAY_MS)
-        if (!overlayConditionsOk(pending.sourcePackage, requireForegroundMatch = true)) return false
+        if (!overlayConditionsOk(pending.sourcePackage, requireForegroundMatch = false, forcePrompt = forcePrompt)) return false
+        delay(if (askMode) RED_PACKET_PROMPT_DELAY_MS else OVERLAY_DELAY_MS)
+        if (!overlayConditionsOk(pending.sourcePackage, requireForegroundMatch = true, forcePrompt = forcePrompt)) return false
         // 延迟期间条目可能已被确认/丢弃/被同笔富化改写（dedupKey 变化即视为已处理）
         val fresh = pendingDao.getById(pending.id)
         if (fresh == null || fresh.dedupKey != dedupKey) {
@@ -777,7 +792,10 @@ object CaptureCenter {
         val categories = categoryDao.getAll()
         val accounts = accountDao.getAll()
         val learned = merchantRuleDao.getAll()
-        val shown = showCardOnMain(fresh, categories, accounts, learned, alreadyEntered, isRefund, sourceLabel, counterparty, dedupKey)
+        val shown = showCardOnMain(
+            fresh, categories, accounts, learned, alreadyEntered, askMode,
+            isRefund, sourceLabel, counterparty, dedupKey,
+        )
         lastOverlayDecision = if (shown) "已弹出" else "系统拦截了悬浮窗（支付保护等）"
         AppLog.i("Overlay", if (shown) "confirm card shown for #${pending.id}" else "confirm card unavailable, fallback to notification")
         return shown
@@ -814,6 +832,7 @@ object CaptureCenter {
         accounts: List<com.controleco.app.data.db.AccountEntity>,
         learned: List<com.controleco.app.data.db.MerchantRuleEntity>,
         alreadyEntered: Boolean,
+        askMode: Boolean,
         isRefund: Boolean,
         sourceLabel: String,
         counterparty: String,
@@ -826,6 +845,7 @@ object CaptureCenter {
                 accounts = accounts,
                 learnedRules = learned,
                 alreadyEntered = alreadyEntered,
+                askMode = askMode,
                 onConfirm = { amountCents, categoryId, accountId, counterpartyText ->
                     // 已入账模式：「保存」= 同步修改（细条可撤销整笔）；待确认模式：「记一笔」= 入账
                     mainHandler.post { ConfirmCardWindow.dismissConfirm() }
@@ -856,6 +876,9 @@ object CaptureCenter {
                         } else {
                             AppLog.i("Overlay", "card dismissed -> entry kept #${pending.id} (edited=${snapshot.edited})")
                         }
+                    } else if (askMode) {
+                        // 红包询问卡：关闭/超时都只收起卡片，绝不入账；条目继续留在待确认列表。
+                        AppLog.i("Overlay", "ask card dismissed -> keep pending #${pending.id}")
                     } else if (dismissOutcome(snapshot) == DismissOutcome.ENTER && catId != null && accId != null) {
                         // 待确认条目：关闭 = 视为入账（旧语义）
                         AppLog.i("Overlay", "card dismissed -> enter #${pending.id} ${Money.formatYuan(snapshot.amountCents)}")
@@ -2182,6 +2205,7 @@ object CaptureCenter {
                 "page matched pkg=$packageName rule=${candidate.ruleName} scene=${candidate.scene} " +
                     "state=${candidate.tradeState} ${Money.formatYuan(candidate.amountCents)} " +
                     "收款方=${candidate.counterparty} 支付方式=${candidate.paymentMethod ?: "-"} " +
+                    "ask=${candidate.requiresUserConfirmation} " +
                     "texts=[${snapshotText.take(logLimit)}]",
             )
         } else {
@@ -2214,6 +2238,38 @@ object CaptureCenter {
             return
         }
 
+        // 微信红包领取页：不走自动入账/融合，落 ASK 待确认并弹悬浮卡让用户决定。
+        // 放在融合与入账之前，确保自动入账开关开着也不会把红包猜成账。
+        if (candidate.requiresUserConfirmation) {
+            queueUserConfirmation(candidate, packageName, rawId, snapshotText, capturedAt)
+            return
+        }
+
+        // 稳定页面去重：带页面交易时间的候选（收款到账页/详情页）在短 TTL 内只处理一次。
+        // 交易时间不随捕获分钟/流程重置变化，避免同一页面在下一分钟或重新走一笔后被再次入账。
+        // 没有交易时间的成功页不缓存：两笔同额真实交易的页面文本可能完全相同，需由流程身份区分。
+        val pageTxTime = candidate.txTime
+        if (pageTxTime != null && pageTxTime > 0 &&
+            recentPageCache.markIfDuplicate(
+                stablePageKey(
+                    packageName = packageName,
+                    type = candidate.type,
+                    isRefund = candidate.isRefund,
+                    ruleName = candidate.ruleName,
+                    amountCents = candidate.amountCents,
+                    txTime = pageTxTime,
+                ),
+            )
+        ) {
+            captureDao.updateMatch(rawId, candidate.ruleName, false)
+            AppLog.i(
+                "Page",
+                "skip duplicate stable page pkg=$packageName rule=${candidate.ruleName} " +
+                    "${Money.formatYuan(candidate.amountCents)} txTime=$pageTxTime",
+            )
+            return
+        }
+
         // 同笔的"金额待补"占位条被完整页面捕获取代（占位条只用于兜底提醒，不保留）
         supersedeAmountStubs(packageName, candidate.type, capturedAt)
         // 去重键：页面候选首次生成就带流程身份（p:<uuid>），持久化后不再依赖内存分配器；
@@ -2222,11 +2278,13 @@ object CaptureCenter {
         val dedupKey = dedupKeyWithIdentity(candidate.dedupKey, flowIdentity)
 
         // 融合（页面 → 通知 / 同流程的后续页面）：命中即合并，不产生第二条。
-        // 金额不同一律不合并；先按订单号/流程身份找，再走 10s 窗口。
+        // 金额不同一律不合并（CR-003）：页面金额是否锚定只说明该金额可信，
+        // 不能证明 5.20 与 7.50 是同一笔；金额不同的页面独立成条，交由用户确认。
         val mergeable = pendingDao.getMergeable()
         val related = pickRelatedPendingForPage(
             mergeable, packageName, candidate.type, candidate.amountCents, capturedAt, flowIdentity,
             orderId = candidate.orderId,
+            txTime = candidate.txTime,
         )
         if (related != null) {
             mergePageIntoExisting(related, candidate, rawId, snapshotText, capturedAt, flowIdentity)
@@ -2316,6 +2374,9 @@ object CaptureCenter {
             }
         }
 
+        // enterEntry 返回 null（最近同额预检命中/无可推测账户）时仍插入 pending：
+        // 60 秒内的两笔真实同额交易（如两笔 1.00）必须保留为待确认，不能丢——
+        // 真正的"同一稳定页面重复"已由上面的 recentPageCache 在融合/入账前拦掉。
         val pendingId = pendingDao.insert(
             PendingTransactionEntity(
                 type = candidate.type,
@@ -2366,6 +2427,101 @@ object CaptureCenter {
             txTime = candidate.txTime,
             note = candidate.note,
             pendingId = pendingId,
+        )
+    }
+
+    /**
+     * 微信红包领取页：落一条 ASK 待确认条目并弹悬浮卡询问用户。
+     *
+     * 红包不再自动记账：金额只作为卡片预填值，用户点「记一笔」才入账，
+     * 点「忽略」删除条目，关闭/超时只收起卡片（条目留在待确认列表）。
+     * ASK 不进入跨通道合并池，因此不会被同额转账/收款自动认领。
+     * 卡片弹不出来（无悬浮窗权限/前台不匹配/被支付保护层拦截）时回落横幅通知。
+     */
+    private suspend fun queueUserConfirmation(
+        candidate: PageCandidate,
+        packageName: String,
+        rawId: Long,
+        snapshotText: String,
+        capturedAt: Long,
+    ) {
+        // 每次询问用独立身份：同一分钟、同额的两个红包不会撞去重键，也不会与页面流程互相认领。
+        val promptIdentity = "r:" + java.util.UUID.randomUUID().toString()
+        val dedupKey = dedupKeyWithIdentity(candidate.dedupKey, promptIdentity)
+        val pendingId = pendingDao.insert(
+            PendingTransactionEntity(
+                type = candidate.type,
+                amountCents = candidate.amountCents,
+                timestamp = capturedAt,
+                counterparty = candidate.counterparty,
+                note = candidate.note,
+                sourcePackage = packageName,
+                ruleName = candidate.ruleName,
+                dedupKey = dedupKey,
+                rawNotificationId = rawId,
+                paymentInstrument = candidate.instrument?.label.orEmpty(),
+                flowId = promptIdentity,
+                orderId = candidate.orderId.orEmpty(),
+                status = PendingStatus.ASK,
+            ),
+        )
+        if (pendingId <= 0) {
+            captureDao.updateMatch(rawId, candidate.ruleName, false)
+            AppLog.w("Page", "user confirmation queue failed: ${candidate.ruleName} key=$dedupKey")
+            return
+        }
+        captureDao.updateMatch(rawId, candidate.ruleName, true)
+        AppLog.i(
+            "Page",
+            "queued red packet confirmation: #$pendingId ${candidate.ruleName} " +
+                "${Money.formatYuan(candidate.amountCents)} 对方=${candidate.counterparty} " +
+                "ask=${candidate.requiresUserConfirmation}",
+        )
+        traceCapture(
+            channel = CaptureChannel.A11Y,
+            packageName = packageName,
+            title = "页面快照",
+            text = snapshotText,
+            bigText = "",
+            capturedAt = capturedAt,
+            matchedRule = candidate.ruleName,
+            type = candidate.type,
+            amountCents = candidate.amountCents,
+            counterparty = candidate.counterparty,
+            note = candidate.note,
+            dedupKey = dedupKey,
+            outcome = TraceOutcome.PENDING,
+        )
+        val pending = pendingDao.getById(pendingId) ?: return
+        val shown = tryShowConfirmCard(
+            pending = pending,
+            alreadyEntered = false,
+            isRefund = false,
+            sourceLabel = candidate.sourceLabel,
+            counterparty = candidate.counterparty,
+            dedupKey = dedupKey,
+            forcePrompt = true,
+            askMode = true,
+        )
+        if (!shown) {
+            // 延迟期间条目可能已被用户处理；只对仍然存在的条目发兜底提醒。
+            if (pendingDao.getById(pending.id) != null) postUserConfirmationNotification(pending)
+        }
+    }
+
+    /** 红包询问卡无法展示时的兜底：点击进待确认列表，附「忽略」动作 */
+    private fun postUserConfirmationNotification(pending: PendingTransactionEntity) {
+        val text = if (pending.amountCents > 0) {
+            "检测到红包 ${Money.formatYuan(pending.amountCents)} · 点击确认是否记账"
+        } else {
+            "检测到红包领取页 · 点击补录金额或忽略"
+        }
+        postCaptureNotification(
+            "微信红包待确认",
+            text,
+            ROUTE_PENDING,
+            pendingNotifId(pending.dedupKey),
+            action = ignoreAction(IgnoreTarget(pending.id, pending.dedupKey)),
         )
     }
 

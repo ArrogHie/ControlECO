@@ -28,6 +28,20 @@ class NotificationRulesTest {
     }
 
     @Test
+    fun `红包领取类通知不自动入账`() {
+        // 红包改由领取页悬浮卡确认；通知侧不能把“红包到账/你领取了”当普通收入。
+        assertNull(parse(NotificationRules.WECHAT, "微信", "你领取了对方的红包"))
+        assertNull(parse(NotificationRules.WECHAT, "微信支付", "红包到账5.20元"))
+        assertNull(parse(NotificationRules.WECHAT, "微信支付", "微信红包收款5.20元"))
+        assertNull(NotificationRules.parseDirectionOnly(NotificationRules.WECHAT, "微信", "你领取了对方的红包"))
+        // 普通转账/收款通知不受影响
+        assertEquals(
+            TxType.INCOME,
+            parse(NotificationRules.WECHAT, "微信支付", "微信支付收款0.01元（朋友到账）")?.type,
+        )
+    }
+
+    @Test
     fun `wechat income with colon`() {
         val r = parse(NotificationRules.WECHAT, "微信支付", "收款入账：10.00元\n存入零钱")!!
         assertEquals(TxType.INCOME, r.type)
@@ -54,6 +68,35 @@ class NotificationRulesTest {
         assertEquals(TxType.INCOME, r.type)
         assertEquals(100L, r.amountCents)
         assertEquals("支付宝", r.sourceLabel)
+    }
+
+    @Test
+    fun `alipay receive code payment is income`() {
+        // 真实样本（2026-10-18）：收钱码收款通知只有"向你付款"，没有"收款"，
+        // 旧规则只命中泛化的"付款"，把 2.00 元收款记成了支出
+        val r = parse(NotificationRules.ALIPAY, "收钱码", "收钱码 倩蕾通过扫码向你付款2.00元")!!
+        assertEquals(TxType.INCOME, r.type)
+        assertEquals(200L, r.amountCents)
+        assertEquals("支付宝·收款/入账", r.ruleName)
+        assertEquals("com.eg.android.AlipayGphone|INCOME|200|${postTime / 60_000}", r.dedupKey)
+    }
+
+    @Test
+    fun `receive code without amount yields income direction`() {
+        val hint = NotificationRules.parseDirectionOnly(
+            NotificationRules.ALIPAY,
+            "收钱码",
+            "倩蕾通过扫码向你付款",
+        )!!
+        assertEquals(TxType.INCOME, hint.type)
+    }
+
+    @Test
+    fun `transfer to someone else remains expense`() {
+        // "向张三付款"是支出；只有"向你付款/付款给你"才是入账
+        val r = parse(NotificationRules.ALIPAY, "转账提醒", "你向张三付款10.00元")!!
+        assertEquals(TxType.EXPENSE, r.type)
+        assertEquals(1000L, r.amountCents)
     }
 
     @Test

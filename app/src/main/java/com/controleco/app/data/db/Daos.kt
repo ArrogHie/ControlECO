@@ -282,16 +282,16 @@ interface PendingDao {
     @Query("SELECT * FROM pending_transactions WHERE id = :id")
     suspend fun getById(id: Long): PendingTransactionEntity?
 
-    @Query("SELECT * FROM pending_transactions WHERE status = 'PENDING' ORDER BY createdAt DESC")
+    @Query("SELECT * FROM pending_transactions WHERE status IN ('PENDING', 'ASK') ORDER BY createdAt DESC")
     fun observePending(): Flow<List<PendingTransactionEntity>>
 
-    @Query("SELECT COUNT(*) FROM pending_transactions WHERE status = 'PENDING'")
+    @Query("SELECT COUNT(*) FROM pending_transactions WHERE status IN ('PENDING', 'ASK')")
     fun observeCount(): Flow<Int>
 
-    @Query("SELECT * FROM pending_transactions WHERE status = 'PENDING'")
+    @Query("SELECT * FROM pending_transactions WHERE status IN ('PENDING', 'ASK')")
     suspend fun getAllPending(): List<PendingTransactionEntity>
 
-    /** 跨通道合并池：待确认 + 自动入账条目（AUTO 只用于页面信息回填，不进列表） */
+    /** 跨通道合并池：待确认 + 自动入账条目（AUTO 只用于页面信息回填，不进列表）；ASK 必须由用户决定 */
     @Query("SELECT * FROM pending_transactions WHERE status IN ('PENDING', 'AUTO') ORDER BY createdAt DESC LIMIT 200")
     suspend fun getMergeable(): List<PendingTransactionEntity>
 

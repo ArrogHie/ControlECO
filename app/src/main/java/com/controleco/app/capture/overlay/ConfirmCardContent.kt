@@ -189,16 +189,19 @@ internal class ConfirmCardState {
  * 底部确认卡内容（全部用应用自己的设计语言：白卡 + hairline 边框 + 大圆角，
  * 分类/账户均为下拉选择（并排一行），金额用 tabular 数字排版；整体字号紧凑，避免遮挡支付页）。
  *
- * 两种模式：
+ * 三种模式：
  * - [alreadyEntered] = true（悬浮窗入账的常态）：**这笔已经入账了**——卡片是"改/删"入口，
  *   标题写明"已记入"，改完关掉卡片即同步，点「忽略」删除这笔；
  * - [alreadyEntered] = false（待确认条目）：旧语义——点 ✕/空白 = 关闭时按卡内值入账，
- *   「忽略」= 不入账，「记一笔」= 以当前值入账。
+ *   「忽略」= 不入账，「记一笔」= 以当前值入账；
+ * - [askMode] = true（微信红包领取页）覆盖上述关闭语义：卡片只是询问，
+ *   **只有点「记一笔」才入账**；关闭/超时都不会入账，条目继续留在待确认列表。
  */
 @Composable
 internal fun ConfirmCardContent(
     state: ConfirmCardState,
     alreadyEntered: Boolean = false,
+    askMode: Boolean = false,
     onConfirm: (amountCents: Long, categoryId: Long, accountId: Long, counterparty: String) -> Unit,
     onIgnore: () -> Unit,
     onDismiss: () -> Unit,
@@ -209,7 +212,8 @@ internal fun ConfirmCardContent(
     Box(
         Modifier
             .fillMaxSize()
-            // 上面全屏透明区：点按 = 关闭卡片（视为入账；不入账请点卡内「忽略」）。indication=null 避免整屏水波纹
+            // 上面全屏透明区：点按 = 关闭卡片（普通待确认卡视为入账；ASK 询问卡只收起、不进账）。
+            // indication=null 避免整屏水波纹
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -239,7 +243,11 @@ internal fun ConfirmCardContent(
                             state.type == TxType.EXPENSE -> "支出"
                             else -> "收入"
                         }
-                        val title = if (alreadyEntered) "已记入一笔$kind" else "捕获到一笔$kind"
+                        val title = when {
+                            askMode -> "检测到红包，是否记账？"
+                            alreadyEntered -> "已记入一笔$kind"
+                            else -> "捕获到一笔$kind"
+                        }
                         val titleColor = when {
                             state.isRefund -> colors.warning
                             state.type == TxType.INCOME -> colors.income
@@ -259,7 +267,11 @@ internal fun ConfirmCardContent(
                         IconButton(onClick = onDismiss) {
                             Icon(
                                 Icons.Filled.Close,
-                                contentDescription = if (alreadyEntered) "关闭（保留这笔）" else "关闭并入账",
+                                contentDescription = when {
+                                    askMode -> "关闭（不会入账，保留待确认）"
+                                    alreadyEntered -> "关闭（保留这笔）"
+                                    else -> "关闭并入账"
+                                },
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(20.dp),
                             )
@@ -293,6 +305,13 @@ internal fun ConfirmCardContent(
                             "金额缺失：直接在金额栏补录，或在待确认列表里补",
                             style = MaterialTheme.typography.labelSmall,
                             color = colors.warning,
+                        )
+                    }
+                    if (askMode) {
+                        Text(
+                            "确认是真实红包请点「记一笔」；不是请点「忽略」。关闭卡片不会入账。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
 

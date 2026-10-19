@@ -5,6 +5,7 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -352,6 +353,23 @@ class AccBookAccessibilityService : AccessibilityService() {
                     if (window.id == activeWindowId) continue
                     val windowRoot = window.root ?: continue
                     if (windowRoot.packageName?.toString() != pkg) continue
+                    // 窗口对象本身没有"对用户可见"API（只有节点有）：用窗口根节点的
+                    // isVisibleToUser 作为等价判据。除聚焦/活动窗口外，红包封面这类
+                    // 大尺寸可见覆盖层通常不是 focused/active，但它是当前页面主体，必须采集；
+                    // 小尺寸浮窗（微信浮窗/APK 文件）仍排除。
+                    val bounds = Rect()
+                    window.getBoundsInScreen(bounds)
+                    val metrics = resources.displayMetrics
+                    val windowArea = bounds.width().toLong() * bounds.height()
+                    val screenArea = metrics.widthPixels.toLong() * metrics.heightPixels
+                    val largeVisible = screenArea > 0 && windowArea * 2 >= screenArea
+                    if (!shouldCollectSecondaryWindow(
+                            visible = windowRoot.isVisibleToUser,
+                            focused = window.isFocused,
+                            active = window.isActive,
+                            largeVisible = largeVisible,
+                        )
+                    ) continue
                     collectNode(windowRoot, 0, -1, nodes)
                 }
             }.onFailure { AppLog.w("Page", "windows enumerate failed", it) }

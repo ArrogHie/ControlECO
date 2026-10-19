@@ -1,6 +1,7 @@
 package com.controleco.app.capture
 
 import com.controleco.app.capture.page.PageParseSupport
+import com.controleco.app.data.db.PendingStatus
 import com.controleco.app.data.db.PendingTransactionEntity
 import com.controleco.app.data.db.RefundMark
 import com.controleco.app.data.db.TxType
@@ -42,7 +43,7 @@ internal data class RelatedPending(
 
 /**
  * 在合并池（待确认 + 自动入账条目）里找同一笔：同包名同方向、捕获时刻在窗口内、**金额相同**，
- * 且流程/通知实例身份不冲突。金额不同一律不合并。
+ * 且流程/通知实例身份不冲突。金额不同一律不合并——"窗口内候选唯一"不能证明是同一笔。
  *
  * [flowIdentity] 是本条候选所属的身份：页面流程标识（`p:…`）只与既有页面流程比较，
  * 通知实例标识（`n:…`）只与既有通知实例比较；跨通道时另一侧的标识为空，不阻塞合并。
@@ -57,7 +58,8 @@ internal fun pickRelatedPending(
     flowIdentity: String? = null,
 ): RelatedPending? {
     val inWindow = candidates.filter {
-        it.sourcePackage == packageName && it.type == type && abs(captureAt - it.createdAt) <= windowMs &&
+        it.status != PendingStatus.ASK &&
+            it.sourcePackage == packageName && it.type == type && abs(captureAt - it.createdAt) <= windowMs &&
             flowCompatible(it, flowIdentity)
     }
     return inWindow.filter { it.amountCents == amountCents }
@@ -137,6 +139,12 @@ internal fun entryBankInstanceId(pending: PendingTransactionEntity): String {
  * 3. 美团外卖的重捕窗口（[MEITUAN_RECAPTURE_WINDOW_MS]）——只对美团外卖生效。
  *
  * 金额不同时**没有任何一层**允许合并：页面来源优先不能替代"是否同一笔"的判定。
+ * 金额是否被锚定（[com.controleco.app.capture.page.PageCandidate.amountAnchored]）只说明
+ * 页面金额可信，不能证明两条金额不同的记录是同一笔——5.20 的真实收款绝不能被 7.50 覆盖。
+ *
+ * 微信红包领取页产生的 ASK 待确认条目**不参与任何自动融合**（[PendingStatus.ASK] 不在
+ * `getMergeable()` 池里，这里也显式排除）：红包是否真实、金额多少都由用户确认，
+ * 不能被同额转账/收款自动认领；用户确认后待确认条目即删除，也不会留下可融合的残影。
  */
 internal fun pickRelatedPendingForPage(
     candidates: List<PendingTransactionEntity>,
@@ -146,9 +154,19 @@ internal fun pickRelatedPendingForPage(
     captureAt: Long,
     flowIdentity: String? = null,
     orderId: String? = null,
+    txTime: Long? = null,
 ): RelatedPending? {
+    val pool = candidates.filter { it.status != PendingStatus.ASK }
+    // 页面明确交易时间：同一笔的重复观察/进程重启后重新打开同一收款页，
+    // 数据库里已有同额同时间的条目时直接回并，不能再走 pending（避免重复待确认/弹卡）。
+    if (txTime != null && txTime > 0) {
+        pool.firstOrNull {
+            it.sourcePackage == packageName && it.type == type && it.amountCents == amountCents &&
+                it.timestamp > 0 && kotlin.math.abs(txTime - it.timestamp) <= PAGE_TIME_MATCH_WINDOW_MS
+        }?.let { return RelatedPending(it, sameAmount = true) }
+    }
     if (!orderId.isNullOrBlank()) {
-        candidates.firstOrNull {
+        pool.firstOrNull {
             it.sourcePackage == packageName && it.type == type && it.amountCents == amountCents &&
                 it.orderId.isNotBlank() && it.orderId == orderId
         }?.let { return RelatedPending(it, sameAmount = true) }
@@ -156,23 +174,32 @@ internal fun pickRelatedPendingForPage(
     if (!flowIdentity.isNullOrEmpty()) {
         // 同一页面流程的后续页面可能落在"跨应用合并后保留了通知来源"的条目上
         // （页面先到、通知后到），此时 sourcePackage 可能不同；流程身份本身已足够强。
-        candidates.firstOrNull {
+        pool.firstOrNull {
             it.type == type && it.amountCents == amountCents && entryFlowId(it) == flowIdentity
         }?.let { return RelatedPending(it, sameAmount = true) }
     }
     pickRelatedPending(
-        candidates, packageName, type, amountCents, captureAt,
+        pool, packageName, type, amountCents, captureAt,
         flowIdentity = flowIdentity,
     )?.let { return it }
     if (packageName != NotificationRules.MEITUAN_TAKEOUT) return null
     return pickRelatedPending(
-        candidates, packageName, type, amountCents, captureAt,
+        pool, packageName, type, amountCents, captureAt,
         windowMs = MEITUAN_RECAPTURE_WINDOW_MS, flowIdentity = flowIdentity,
     )
 }
 
 /** 页面候选带明确交易时间时，与既有条目匹配的窄窗口（进程重启后重新打开同一详情页的防重） */
 internal const val EXPLICIT_TIME_MATCH_WINDOW_MS = 30_000L
+
+/**
+ * 页面候选的"交易时间 → 既有条目时间戳"回并窗口（收款页/红包页通用）。
+ *
+ * 收款页的页面交易时间精确到秒，但旧捕获可能把 captureTime 当时间戳，两者通常仍在一分钟内；
+ * 同额同时间在 60 秒内回并，避免重新打开同一收款页时插一条重复 pending。
+ * 两笔真实同额交易的交易时间相差 60 秒以上才可能是独立两笔，不能在这里吞掉。
+ */
+internal const val PAGE_TIME_MATCH_WINDOW_MS = 60_000L
 
 /**
  * 页面候选带**明确交易时间**时的同笔判定：同来源/同方向/同金额、退款标记一致，

@@ -1152,8 +1152,11 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun confirmAllPending() {
         viewModelScope.launch(Dispatchers.IO) {
-            // 只确认金额完整的条目；金额待补的必须逐条补录或丢弃
-            val items = pendingDao.getAllPending().filter { it.amountCents > 0 }
+            // 只确认金额完整且非 ASK 的条目：ASK（微信红包待确认）必须由用户逐条明确决定，
+            // 不能被「全部确认」批量入账；金额待补的也必须逐条补录或丢弃。
+            val items = pendingDao.getAllPending().filter {
+                it.status == com.controleco.app.data.db.PendingStatus.PENDING && it.amountCents > 0
+            }
             if (items.isEmpty()) return@launch
             val cats = categoryDao.getAll()
             val accs = accountDao.getAll()

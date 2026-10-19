@@ -47,6 +47,7 @@ import com.controleco.app.data.LedgerViewModel
 import com.controleco.app.ui.theme.accBook
 import com.controleco.app.data.db.AccountEntity
 import com.controleco.app.data.db.CategoryEntity
+import com.controleco.app.data.db.PendingStatus
 import com.controleco.app.data.db.PendingTransactionEntity
 import com.controleco.app.data.db.TxType
 import com.controleco.app.ui.common.DropdownSelector
@@ -64,6 +65,8 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
     var amountEditing by remember { mutableStateOf<PendingTransactionEntity?>(null) }
     var confirmAllAsk by remember { mutableStateOf(false) }
     val amountMissing = pending.count { it.amountCents <= 0 }
+    val confirmableCount = pending.count { it.status != PendingStatus.ASK && it.amountCents > 0 }
+    val askCount = pending.count { it.status == PendingStatus.ASK }
     val context = LocalContext.current
 
     Scaffold(
@@ -74,7 +77,7 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回") }
                 },
                 actions = {
-                    if (pending.any { it.amountCents > 0 }) {
+                    if (confirmableCount > 0) {
                         TextButton(onClick = { confirmAllAsk = true }) { Text("全部确认") }
                     }
                 },
@@ -96,6 +99,16 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                         Text(
                             "有 $amountMissing 条金额待补录：点「补金额」输入，" +
                                 "或从通知栏通知直接回复（「全部确认」会跳过它们）",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.accBook.warning,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+                if (askCount > 0) {
+                    item {
+                        Text(
+                            "有 $askCount 条微信红包待确认：请逐条确认是否记账，不参与「全部确认」。",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.accBook.warning,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -150,7 +163,7 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
             onDismissRequest = { confirmAllAsk = false },
             title = { Text("全部确认") },
             text = {
-                val confirmable = pending.count { it.amountCents > 0 }
+                val confirmable = pending.count { it.status != PendingStatus.ASK && it.amountCents > 0 }
                 Text(
                     "将把 $confirmable 条按默认分类（其他）与推测账户入账，之后可在流水中修改。" +
                         if (amountMissing > 0) "另有 $amountMissing 条金额待补录，不会被确认。" else "",

@@ -222,50 +222,94 @@ class PaymentPageParserTest {
     }
 
     // ---------- 支付宝 ----------
+    //
+    // 证据门槛：只保留有支付宝真机样本的付款成功页。收款/转账/退款/详情页在支付宝侧
+    // 没有可追溯的页面快照，收入与退款由通知/短信通道负责；这些页面在本解析器里必须
+    // 返回 NotATradePage，避免无依据的页面识别再次引入误账。
 
     @Test
-    fun `支付宝付款成功页_同行标签提取`() {
+    fun `支付宝成功页_货币符号与实付金额拆成两个节点_取标题后第一个金额`() {
+        // 真实样本（2026-10-18）：实付 9.17 被渲染成「￥」「9.17」两个节点，
+        // 后面的 ￥9.27 是订单原价、-￥0.10 是碰一下立减；旧逻辑跳过了拆分的实付，记成 9.27
         val r = candidate(
             NotificationRules.ALIPAY,
-            listOf("付款成功", "¥14.90", "收款方：某某百货", "付款方式：余额宝"),
+            listOf(
+                "支付成功", "回首页", "￥", "9.17", "获得森林能量", "鸿润福连锁超市",
+                "￥9.27", "碰一下立减", "-￥0.10", "付款方式", "中国银行储蓄卡(****)",
+                "恭喜你获得600葵花籽", "去领取", "稍等片刻", "完成",
+            ),
         )
         assertEquals(TxType.EXPENSE, r.type)
-        assertEquals(1490L, r.amountCents)
-        assertEquals("某某百货", r.counterparty)
-        assertEquals("余额宝", r.paymentMethod)
+        assertEquals(917L, r.amountCents)
+        assertEquals("鸿润福连锁超市", r.counterparty)
+        assertEquals("中国银行储蓄卡(****)", r.paymentMethod)
+        assertEquals(PageScene.PAYMENT_SUCCESS, r.scene)
         assertEquals("支付宝·付款成功页", r.ruleName)
     }
 
     @Test
-    fun `支付宝账单详情页_实付优先于订单金额`() {
+    fun `支付宝成功页_标题自带实付且后续有红包优惠_仍取标题内金额`() {
+        // 另一张真实版式：标题与实付同一节点，订单金额 22.20 与红包 -2.50 都在其后
         val r = candidate(
             NotificationRules.ALIPAY,
             listOf(
-                "账单详情", "¥19.38", "商户全称", "拼多多平台商户", "订单金额", "¥25.00",
-                "优惠", "-¥5.62", "付款方式", "中国银行储蓄卡(8920)", "创建时间", "2026-10-06 12:30:00",
-                "商户订单号", "2026100622001400001234567890",
+                "支付成功￥19.70", "支付成功", "19.70", "订单金额", "￥22.20",
+                "红包", "-￥2.50", "付款方式", "支付宝小荷包(某人的小荷包)", "完成", "回首页",
             ),
         )
-        assertEquals(1938L, r.amountCents)
-        assertEquals("拼多多平台商户", r.counterparty)
-        assertEquals("中国银行储蓄卡(8920)", r.paymentMethod)
-        assertEquals("中国银行", r.instrument?.brand)
-        assertEquals("8920", r.instrument?.tail)
+        assertEquals(TxType.EXPENSE, r.type)
+        assertEquals(1970L, r.amountCents)
+        assertEquals(PageScene.PAYMENT_SUCCESS, r.scene)
     }
 
     @Test
-    fun `支付宝退款页_收入且带退款标记`() {
-        val r = candidate(NotificationRules.ALIPAY, listOf("退款成功", "¥14.90", "退款金额", "收款方", "某某百货"))
-        assertEquals(TxType.INCOME, r.type)
-        assertTrue(r.isRefund)
-        assertEquals(1490L, r.amountCents)
+    fun `支付宝首页账单预览_不是动账结果页不生成候选`() {
+        // 真实样本（2026-10-18）：首页的「用支付宝收钱码，收款到账有提醒」只是营销文案，
+        // 账单预览里的 ¥9.17 曾被当成收款到账记了一笔收入
+        val r = parse(
+            NotificationRules.ALIPAY,
+            listOf(
+                "ArrogHie", "189******35", "卡包", "用支付宝收钱码，收款到账有提醒", "去完成",
+                "支付宝会员", "116积分待领取", "账单", "鸿润福连锁超…¥9.17", "总资产",
+                "余额", "余额宝", "喂小鱼", "花呗", "兴趣消费交流", "蚂蚁保", "芝麻信用",
+                "银行卡", "查询建行卡余额", "余利宝", "网商贷", "网商银行", "我的民生保障",
+                "首页", "理财", "视频", "消息", "我的",
+            ),
+        )
+        assertTrue(r is PageParseResult.NotATradePage)
     }
 
     @Test
-    fun `支付宝确认付款页_不生成候选`() {
+    fun `支付宝历史账单详情页_即使出现支付成功也不生成候选`() {
+        // 历史账单正文的“支付成功”是状态字段，不是新的一笔
+        val r = parse(
+            NotificationRules.ALIPAY,
+            listOf(
+                "支付成功", "￥9.17", "当前状态", "支付成功",
+                "创建时间", "2026-10-17 22:14:00", "交易单号", "2026101722001400001",
+            ),
+        )
+        assertTrue(r is PageParseResult.NotATradePage)
+    }
+
+    @Test
+    fun `支付宝收款到账页_无支付宝真机样例_不生成候选`() {
+        // 收款页规则来自微信真机样例，支付宝侧没有页面快照；收入由通知/短信通道负责
+        val r = parse(NotificationRules.ALIPAY, listOf("收款到账", "￥", "9.17", "已存入余额", "完成"))
+        assertTrue(r is PageParseResult.NotATradePage)
+    }
+
+    @Test
+    fun `支付宝退款页_无支付宝真机样例_不生成候选`() {
+        // 退款语义有真实通知样例，但退款页面没有；页面侧不再猜
+        val r = parse(NotificationRules.ALIPAY, listOf("退款成功", "¥14.90", "退款金额", "收款方", "某某百货"))
+        assertTrue(r is PageParseResult.NotATradePage)
+    }
+
+    @Test
+    fun `支付宝收银台页_不是动账结果页_不生成候选`() {
         val r = parse(NotificationRules.ALIPAY, listOf("确认付款", "¥14.90", "付款方式 余额宝", "立即付款"))
-        assertTrue(r is PageParseResult.SceneOnly)
-        assertEquals(PageScene.PAYMENT_CONFIRM, (r as PageParseResult.SceneOnly).scene)
+        assertTrue(r is PageParseResult.NotATradePage)
     }
 
     // ---------- 云闪付 ----------
@@ -311,7 +355,8 @@ class PaymentPageParserTest {
 
     @Test
     fun `零元实付页不生成候选`() {
-        val r = parse(NotificationRules.ALIPAY, listOf("付款成功", "¥0.00", "订单金额", "¥0.00", "付款方式", "余额宝"))
+        // 真实样本：支付成功￥0.00 / 订单金额￥0.01 / 支付遇财神 -￥0.01
+        val r = parse(NotificationRules.ALIPAY, listOf("支付成功￥0.00", "订单金额", "¥0.01", "付款方式", "余额宝"))
         assertTrue(r is PageParseResult.SceneOnly)
     }
 

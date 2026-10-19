@@ -75,6 +75,7 @@ internal object ConfirmCardWindow {
         accounts: List<AccountEntity>,
         learnedRules: List<com.controleco.app.data.db.MerchantRuleEntity> = emptyList(),
         alreadyEntered: Boolean = false,
+        askMode: Boolean = false,
         onConfirm: (amountCents: Long, categoryId: Long, accountId: Long, counterparty: String) -> Unit,
         onIgnore: () -> Unit,
         onDismiss: (DismissSnapshot) -> Unit,
@@ -90,6 +91,7 @@ internal object ConfirmCardWindow {
             ConfirmCardContent(
                 state = state,
                 alreadyEntered = alreadyEntered,
+                askMode = askMode,
                 onConfirm = { amountCents, categoryId, accountId, counterparty ->
                     onConfirm(amountCents, categoryId, accountId, counterparty)
                 },

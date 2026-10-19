@@ -199,6 +199,21 @@ object NotificationRules {
     fun isNoise(text: String): Boolean =
         confirmPhrases.none { text.contains(it) } && noiseKeywords.any { text.contains(it) }
 
+    /**
+     * 微信红包类通知：不自动入账。
+     *
+     * 红包已改为“领取页弹卡由用户确认”，通知侧也不能再把它当普通收款/到账：
+     * “红包到账5.20元”会命中收入金额正则，“你领取了…红包”会命中方向词，
+     * 若不拦截就会绕过页面确认直接生成账目。只拦明确的红包语义，不影响普通转账/收款通知。
+     */
+    private val redPacketNoticeMarkers = listOf(
+        "红包到账", "收到红包", "你领取了", "对方领取了", "红包已存入", "红包存入",
+        "开红包", "红包封面", "红包收款", "领取红包",
+    )
+
+    fun isRedPacketNotice(text: String): Boolean =
+        text.contains("红包") && redPacketNoticeMarkers.any { text.contains(it) }
+
     // ---------- 折叠摘要与「金额待补」（方向可辨、金额缺失） ----------
 
     private val groupedSummary = Regex(
@@ -209,9 +224,20 @@ object NotificationRules {
         "已支付", "支付成功", "付款", "支出", "消费", "扣款", "收款", "到账", "入账", "退款", "退回", "收入",
     )
 
+    /**
+     * "钱进账"的方向短语。
+     *
+     * `向你付款`/`付款给你`/`转账给你`/`收到一笔` 是收款码、转账入账的常见说法：
+     * 真实样本（2026-10-18）`收钱码 倩蕾通过扫码向你付款2.00元` 只命中裸的"付款"，
+     * 曾被判成支出。这些短语方向明确，必须优先于泛化的"付款"判定。
+     */
+    private val receivePhrases = listOf(
+        "向你付款", "付款给你", "转账给你", "向你转账", "收到一笔",
+    )
+
     private val incomePhrases = listOf(
         "收款成功", "已收款", "收款到账", "已到账", "入账成功", "成功入账", "转账到账", "收到转账",
-    )
+    ) + receivePhrases
     private val expensePhrases = listOf(
         "已支付", "支付成功", "付款成功", "支付完成", "交易成功", "已付款", "扣款成功", "已扣款", "消费成功",
     )
@@ -256,6 +282,10 @@ object NotificationRules {
         val body = normalize(raw)
         if (body.isBlank()) return null
         if (isNoise(body)) return null
+        if (isRedPacketNotice(body)) {
+            AppLog.d("Ntf", "skip red packet notice (user confirmation only) pkg=$packageName body=$body")
+            return null
+        }
         if (body.contains("退款") || body.contains("退回")) return null
 
         val income = incomePhrases.any { body.contains(it) }
@@ -282,7 +312,8 @@ object NotificationRules {
      * "…自动扣款支付，点击领取6个支付宝积分"曾把 6 当成金额；"支付成功，领取6个积分"同理），
      * ¥ 前缀的金额（已支付¥12.80）交给 currencyAmount 兜底。
      */
-    private val incomeAmount = Regex("""(?:收款|到账|入账|收入)[^\d￥¥.]{0,8}${AMT}元""")
+    private val incomeAmount =
+        Regex("""(?:收款|到账|入账|收入|向你付款|付款给你|转账给你|收到一笔)[^\d￥¥.]{0,8}${AMT}元""")
     private val expenseAmount = Regex("""(?:已支付|支付成功|支出|消费|付款|扣款)[^\d￥¥.]{0,8}${AMT}元""")
     private val refundAmount = Regex("""(?:退款|退回)[^\d￥¥.]{0,8}${AMT}元""")
 
@@ -327,6 +358,10 @@ object NotificationRules {
             AppLog.d("Ntf", "skip noise pkg=$packageName body=$body")
             return null
         }
+        if (isRedPacketNotice(body)) {
+            AppLog.d("Ntf", "skip red packet notice (user confirmation only) pkg=$packageName body=$body")
+            return null
+        }
 
         // 电商/外卖收银台：额外要求明确的交易确认短语，挡住"待支付/待付款/订单已提交"等未完成状态
         if (packageName in checkoutPackages && confirmPhrases.none { body.contains(it) }) {
@@ -335,6 +370,7 @@ object NotificationRules {
         }
 
         val refundHit = body.contains("退款") || body.contains("退回")
+        val receiveHit = receivePhrases.any { body.contains(it) }
         val incomeHit = body.contains("收款") || body.contains("到账") || body.contains("入账") || body.contains("收入")
         val expenseHit = body.contains("已支付") || body.contains("支付成功") || body.contains("支出") ||
             body.contains("消费") || body.contains("付款") || body.contains("扣款") || body.contains("支付凭证")
@@ -344,6 +380,8 @@ object NotificationRules {
         when {
             // 退款优先：退款到账是收入方向（"退款到账"同时命中"到账"不能误判为普通收款）
             refundHit -> { type = TxType.INCOME; isRefund = true }
+            // "向你付款/付款给你"是明确的入账方向，即使同时命中泛化的"付款"也不能判成支出
+            receiveHit -> { type = TxType.INCOME; isRefund = false }
             incomeHit && !expenseHit -> { type = TxType.INCOME; isRefund = false }
             expenseHit && !incomeHit -> { type = TxType.EXPENSE; isRefund = false }
             else -> {
@@ -357,7 +395,8 @@ object NotificationRules {
             type == TxType.INCOME -> incomeAmount
             else -> expenseAmount
         }
-        val fallbackAllowed = refundHit || (type == TxType.INCOME && incomeHit) || (type == TxType.EXPENSE && expenseHit)
+        val fallbackAllowed = refundHit || receiveHit || (type == TxType.INCOME && incomeHit) ||
+            (type == TxType.EXPENSE && expenseHit)
         // 反向优先：金额在关键词前是主流格式（"你有一笔14.90元的支出"），且能避开
         // 关键词后跟营销文案的干扰（真实样本"你有一笔0.01元的支出，领1元生活缴费红包"
         // 曾被正向正则抓走红包的"1元"，识别成 ¥1.00）

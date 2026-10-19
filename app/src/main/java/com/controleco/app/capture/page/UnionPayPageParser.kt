@@ -149,6 +149,7 @@ object UnionPayPageParser : AppPageParser {
                 ruleName = "$label·支付成功页",
                 note = instrument?.let { "支付方式 ${it.label}" }.orEmpty(),
                 orderId = orderId,
+                amountAnchored = true,
                 flowKey = flow.pageKey,
                 dedupKey = NotificationRules.dedupKey(
                     snapshot.packageName, TxType.EXPENSE, false, amountCents, txTime ?: snapshot.captureTime,
@@ -201,6 +202,7 @@ object UnionPayPageParser : AppPageParser {
                 ruleName = "$label·$title",
                 note = instrument?.let { "支付方式 ${it.label}" }.orEmpty(),
                 orderId = orderId,
+                amountAnchored = true,
                 isRefund = isRefund,
                 flowKey = flow.pageKey,
                 dedupKey = NotificationRules.dedupKey(
@@ -243,6 +245,7 @@ object UnionPayPageParser : AppPageParser {
                 ruleName = "$label·转账页",
                 note = instrument?.let { "支付方式 ${it.label}" }.orEmpty(),
                 orderId = PageParseSupport.orderIdFrom(lines),
+                amountAnchored = true,
                 flowKey = flow.pageKey,
                 dedupKey = NotificationRules.dedupKey(
                     snapshot.packageName, type, false, amountCents, txTime ?: snapshot.captureTime,
@@ -279,6 +282,7 @@ object UnionPayPageParser : AppPageParser {
                 sourceLabel = label,
                 ruleName = "$label·退款页",
                 orderId = orderId,
+                amountAnchored = true,
                 isRefund = true,
                 flowKey = flow.pageKey,
                 dedupKey = NotificationRules.dedupKey(

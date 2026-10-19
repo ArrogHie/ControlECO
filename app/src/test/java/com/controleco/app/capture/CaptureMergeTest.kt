@@ -1,5 +1,9 @@
 package com.controleco.app.capture
 
+import com.controleco.app.capture.page.ParseConfidence
+import com.controleco.app.capture.page.PageCandidate
+import com.controleco.app.capture.page.PageScene
+import com.controleco.app.capture.page.TradeState
 import com.controleco.app.data.db.PendingStatus
 import com.controleco.app.data.db.PendingTransactionEntity
 import com.controleco.app.data.db.TxType
@@ -57,6 +61,28 @@ class CaptureMergeTest {
     // ---------- 同笔判定 ----------
 
     @Test
+    fun `ASK红包待确认不参与自动融合`() {
+        // 红包领取页的用户确认条目（ASK）必须由用户决定，不能被同额转账/收款自动认领。
+        val ask = pending(
+            status = PendingStatus.ASK,
+            type = TxType.INCOME,
+            amount = 520,
+            ruleName = "微信·红包待确认",
+            flowId = "r:prompt",
+        )
+        assertNull(
+            pickRelatedPending(
+                listOf(ask), NotificationRules.WECHAT, TxType.INCOME, 520, base + 1_000,
+            ),
+        )
+        assertNull(
+            pickRelatedPendingForPage(
+                listOf(ask), NotificationRules.WECHAT, TxType.INCOME, 520, base + 1_000, "p:transfer",
+            ),
+        )
+    }
+
+    @Test
     fun `同包同向同金额在十秒内命中`() {
         val hit = pickRelatedPending(listOf(pending()), NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 3_000)!!
         assertEquals(1L, hit.pending.id)
@@ -94,6 +120,86 @@ class CaptureMergeTest {
         val pool = listOf(pending(id = 1, amount = 100), pending(id = 2, amount = 200))
         assertNull(
             pickRelatedPendingForPage(pool, NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 1_000),
+        )
+    }
+
+    // ---------- 金额覆盖安全闸门（CR-003：金额不同一律独立成条） ----------
+
+    @Test
+    fun `实测回归_真实收款5_20不被聊天页7_50覆盖`() {
+        // 实测根因：真实收款页先入账 ¥5.20，聊天页历史气泡解析出 ¥7.50 且窗口内候选唯一；
+        // "候选唯一"不能证明同一笔，金额不同必须独立成条，不能覆盖既有 5.20。
+        val pool = listOf(pending(type = TxType.INCOME, amount = 520))
+        assertNull(
+            pickRelatedPendingForPage(
+                pool, NotificationRules.WECHAT, TxType.INCOME, 750, base + 3_000,
+            ),
+        )
+    }
+
+    @Test
+    fun `即使页面候选金额已锚定_不同金额也不自动合并`() {
+        // amountAnchored 只表示页面金额来自锚点、不是全页扫描，不能证明与既有 5.20 是同一笔；
+        // 融合层不接收该标记，窗口内唯一候选同样不合并（CR-003）。
+        val anchored = PageCandidate(
+            type = TxType.INCOME,
+            amountCents = 750,
+            amountAnchored = true,
+            scene = PageScene.RECEIVE_SUCCESS,
+            tradeState = TradeState.SUCCESS,
+            confidence = ParseConfidence.HIGH,
+            sourceLabel = "微信",
+            ruleName = "微信·收款到账页",
+            dedupKey = "com.tencent.mm|INCOME|750|0",
+        )
+        assertTrue(anchored.amountAnchored)
+        val pool = listOf(pending(type = TxType.INCOME, amount = 520))
+        assertNull(
+            pickRelatedPendingForPage(
+                pool, NotificationRules.WECHAT, anchored.type, anchored.amountCents, base + 3_000,
+            ),
+        )
+    }
+
+    // ---------- 页面交易时间回并（重新打开同一收款页/进程重启） ----------
+
+    @Test
+    fun `页面交易时间相同_数分钟后重新打开不再插pending`() {
+        val existing = pending(
+            type = TxType.INCOME,
+            amount = 520,
+            createdAt = base,
+            timestamp = base + 500_000L,
+            ruleName = "微信·收款到账页",
+            flowId = "p:old",
+        )
+        val hit = pickRelatedPendingForPage(
+            listOf(existing), NotificationRules.WECHAT, TxType.INCOME, 520,
+            captureAt = base + 900_000L,
+            flowIdentity = "p:new",
+            txTime = base + 500_000L,
+        )!!
+        assertEquals(1L, hit.pending.id)
+        assertTrue(hit.sameAmount)
+    }
+
+    @Test
+    fun `页面交易时间相差超过六十秒_不合并`() {
+        val existing = pending(
+            type = TxType.INCOME,
+            amount = 520,
+            createdAt = base,
+            timestamp = base + 500_000L,
+            ruleName = "微信·收款到账页",
+            flowId = "p:old",
+        )
+        assertNull(
+            pickRelatedPendingForPage(
+                listOf(existing), NotificationRules.WECHAT, TxType.INCOME, 520,
+                captureAt = base + 900_000L,
+                flowIdentity = "p:new",
+                txTime = base + 700_001L,
+            ),
         )
     }
 

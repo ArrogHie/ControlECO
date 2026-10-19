@@ -206,6 +206,7 @@ open class CheckoutPageParser(protected val profile: CheckoutProfile) : AppPageP
                 ruleName = "$label·支付结果页",
                 note = instrument?.let { "支付方式 ${it.label}" }.orEmpty(),
                 orderId = orderId,
+                amountAnchored = true,
                 flowKey = flow.pageKey,
                 dedupKey = NotificationRules.dedupKey(
                     snapshot.packageName, TxType.EXPENSE, false, amountCents, txTime ?: snapshot.captureTime,
@@ -255,6 +256,7 @@ open class CheckoutPageParser(protected val profile: CheckoutProfile) : AppPageP
                 ruleName = "$label·订单详情页",
                 note = instrument?.let { "支付方式 ${it.label}" }.orEmpty(),
                 orderId = orderId,
+                amountAnchored = true,
                 flowKey = flow.pageKey,
                 dedupKey = NotificationRules.dedupKey(
                     snapshot.packageName, TxType.EXPENSE, false, amountCents, txTime ?: snapshot.captureTime,
@@ -289,6 +291,7 @@ open class CheckoutPageParser(protected val profile: CheckoutProfile) : AppPageP
                 sourceLabel = label,
                 ruleName = "$label·退款页",
                 orderId = orderId,
+                amountAnchored = true,
                 isRefund = true,
                 flowKey = flow.pageKey,
                 dedupKey = NotificationRules.dedupKey(
@@ -321,6 +324,7 @@ open class CheckoutPageParser(protected val profile: CheckoutProfile) : AppPageP
                 sourceLabel = label,
                 ruleName = "$label·收款页",
                 orderId = PageParseSupport.orderIdFrom(snapshot.lines),
+                amountAnchored = true,
                 flowKey = flow.pageKey,
                 dedupKey = NotificationRules.dedupKey(
                     snapshot.packageName, TxType.INCOME, false, amountCents, txTime ?: snapshot.captureTime,

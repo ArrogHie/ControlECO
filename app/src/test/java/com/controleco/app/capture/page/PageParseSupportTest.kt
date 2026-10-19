@@ -274,6 +274,64 @@ class PageParseSupportTest {
         )
     }
 
+    // ---------- 锚点金额 / 聊天页 / 带符号金额 ----------
+
+    @Test
+    fun `amountNearAnchor 只认锚点行或相邻行的唯一金额`() {
+        assertEquals(
+            "5.20",
+            PageParseSupport.amountNearAnchor(listOf("你已收款，资金已存入零钱¥5.20", "收款时间"), 0),
+        )
+        assertEquals("50.00", PageParseSupport.amountNearAnchor(listOf("已收钱", "¥50.00"), 0))
+        // 隔一行就不再算锚点邻域
+        assertNull(PageParseSupport.amountNearAnchor(listOf("已收钱", "说明", "¥5.20"), 0))
+        // 锚点行与邻行是同一个金额（重复渲染）：仍是一个金额
+        assertEquals("5.20", PageParseSupport.amountNearAnchor(listOf("已收钱 ¥5.20", "¥5.20"), 0))
+    }
+
+    @Test
+    fun `amountNearAnchor 邻域多个不同金额视为歧义`() {
+        assertNull(PageParseSupport.amountNearAnchor(listOf("已收钱 ¥7.50", "¥5.20"), 0))
+        assertNull(PageParseSupport.amountNearAnchor(listOf("已收钱", "¥7.50 ¥5.20"), 0))
+        // 越界锚点/没有金额
+        assertNull(PageParseSupport.amountNearAnchor(listOf("已收钱"), 3))
+        assertNull(PageParseSupport.amountNearAnchor(listOf("已收钱"), 0))
+    }
+
+    @Test
+    fun `looksLikeChatPage 需要标题加输入栏或输入栏组合`() {
+        assertTrue(PageParseSupport.looksLikeChatPage(snapshot("聊天信息", "已收款", "切换到按住说话", "听写")))
+        assertTrue(PageParseSupport.looksLikeChatPage(snapshot("按住说话", "更多功能按钮，已折叠")))
+        // 单独一个"聊天信息"（设置页/列表）不足以判聊天页
+        assertFalse(PageParseSupport.looksLikeChatPage(snapshot("聊天信息", "聊天设置")))
+        // 结果页没有聊天页特征
+        assertFalse(PageParseSupport.looksLikeChatPage(snapshot("你已收款", "¥5.20", "账单详情")))
+    }
+
+    @Test
+    fun `signedStandaloneAmount 保留符号并取绝对值`() {
+        val negative = PageParseSupport.signedStandaloneAmount("-12.35")
+        assertNotNull(negative)
+        assertEquals(1235L, negative!!.cents)
+        assertTrue(negative.negative)
+
+        val fullWidth = PageParseSupport.signedStandaloneAmount("－¥12.35")
+        assertNotNull(fullWidth)
+        assertEquals(1235L, fullWidth!!.cents)
+        assertTrue(fullWidth.negative)
+
+        val positive = PageParseSupport.signedStandaloneAmount("+12.35")
+        assertNotNull(positive)
+        assertEquals(1235L, positive!!.cents)
+        assertFalse(positive.negative)
+
+        // 无符号金额交给文字方向判断；非金额文本/零金额不认
+        assertNull(PageParseSupport.signedStandaloneAmount("12.35"))
+        assertNull(PageParseSupport.signedStandaloneAmount("¥12.35"))
+        assertNull(PageParseSupport.signedStandaloneAmount("-0.00"))
+        assertNull(PageParseSupport.signedStandaloneAmount("元"))
+    }
+
     // ---------- 结构化节点：标签与金额是同一容器的兄弟节点 ----------
 
     @Test
