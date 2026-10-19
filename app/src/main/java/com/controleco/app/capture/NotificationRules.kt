@@ -35,7 +35,7 @@ object NotificationRules {
     val knownPackages = setOf(WECHAT, ALIPAY, UNIONPAY)
 
     /**
-     * 电商/外卖收银台渠道（京东、淘宝、拼多多、抖音、美团…）。
+     * 电商/外卖收银台渠道（京东、淘宝、抖音、美团…）。
      *
      * 为什么单独一组：这些都是真实付款渠道，但**营销与物流推送极其密集**，文案随版本变化大。
      * 所以它们比支付三包多一道**硬闸门**——必须命中明确的交易确认短语才解析
@@ -49,7 +49,6 @@ object NotificationRules {
         "com.jd.jrapp" to "京东金融",
         "com.taobao.taobao" to "淘宝",
         "com.tmall.wireless" to "天猫",
-        "com.xunmeng.pinduoduo" to "拼多多",
         "com.ss.android.ugc.aweme" to "抖音",
         "com.ss.android.ugc.live" to "抖音",
         "com.sankuai.meituan" to "美团",

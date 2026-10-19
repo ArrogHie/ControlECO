@@ -20,7 +20,6 @@ object PageParserRegistry {
         UnionPayPageParser,
         JdPageParser,
         TaobaoPageParser,
-        PinduoduoPageParser,
         DouyinPageParser,
         MeituanPageParser,
         ElemePageParser,

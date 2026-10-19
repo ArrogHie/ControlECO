@@ -180,7 +180,7 @@ class NotificationRulesHardeningTest {
 
     @Test
     fun `checkout marketing is not captured`() {
-        assertNull(parse("com.xunmeng.pinduoduo", "拼多多", "限时优惠券已到账，点击领取 20元券"))
+        assertNull(parse("com.jingdong.app.mall", "京东", "限时优惠券已到账，点击领取 20元券"))
     }
 
     @Test

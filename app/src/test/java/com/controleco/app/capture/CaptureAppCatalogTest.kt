@@ -30,10 +30,18 @@ class CaptureAppCatalogTest {
         assertTrue(NotificationRules.ALIPAY in defaults)
         assertTrue(NotificationRules.UNIONPAY in defaults)
         assertTrue("com.jingdong.app.mall" in defaults)
-        assertTrue("com.xunmeng.pinduoduo" in defaults)
         assertTrue("me.ele" in defaults)
         // 银行推送默认也开（可逐项关）
         assertTrue("com.icbc" in defaults)
+    }
+
+    @Test
+    fun `拼多多不在监听目录_通知与页面通道都不再放行`() {
+        // 2026-10-19：拼多多补贴弹窗被页面解析器误记成支出，决定移除该应用的采集链路
+        assertFalse("com.xunmeng.pinduoduo" in CaptureAppCatalog.defaults())
+        assertFalse(CaptureAppCatalog.isListed("com.xunmeng.pinduoduo"))
+        assertFalse(NotificationRules.isInterested("com.xunmeng.pinduoduo"))
+        assertFalse(NotificationRules.isCheckoutPackage("com.xunmeng.pinduoduo"))
     }
 
     @Test

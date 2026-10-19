@@ -63,7 +63,6 @@ internal object CaptureAppCatalog {
         CatalogApp("com.jd.jrapp", "京东金融", AppGroup.SHOP),
         CatalogApp("com.taobao.taobao", "淘宝", AppGroup.SHOP),
         CatalogApp("com.tmall.wireless", "天猫", AppGroup.SHOP),
-        CatalogApp("com.xunmeng.pinduoduo", "拼多多", AppGroup.SHOP),
         CatalogApp("com.ss.android.ugc.aweme", "抖音", AppGroup.SHOP),
         CatalogApp("com.ss.android.ugc.live", "抖音（直播）", AppGroup.SHOP),
         CatalogApp("com.sankuai.meituan", "美团", AppGroup.SHOP),

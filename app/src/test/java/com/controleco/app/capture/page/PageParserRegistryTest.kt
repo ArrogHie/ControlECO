@@ -1,6 +1,7 @@
 package com.controleco.app.capture.page
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -37,10 +38,27 @@ class PageParserRegistryTest {
         assertEquals(JdPageParser, PageParserRegistry.parserFor("com.jingdong.app.mall"))
         assertEquals(JdPageParser, PageParserRegistry.parserFor("com.jd.jrapp"))
         assertEquals(TaobaoPageParser, PageParserRegistry.parserFor("com.tmall.wireless"))
-        assertEquals(PinduoduoPageParser, PageParserRegistry.parserFor("com.xunmeng.pinduoduo"))
         assertEquals(DouyinPageParser, PageParserRegistry.parserFor("com.ss.android.ugc.aweme"))
         assertEquals(MeituanPageParser, PageParserRegistry.parserFor("com.sankuai.meituan.takeoutnew"))
         assertEquals(ElemePageParser, PageParserRegistry.parserFor("me.ele"))
+    }
+
+    @Test
+    fun `拼多多不再解析_真实误记账样本不会生成候选`() {
+        // 2026-10-19 真机：拼多多「补贴领取」弹窗被 PinduoduoPageParser 当成支付结果页自动入账 ¥26.80。
+        // 决定移除该应用的解析链路，这里锁住"不会再解析"。
+        assertNull(PageParserRegistry.parserFor("com.xunmeng.pinduoduo"))
+        assertFalse(PageParserRegistry.hasDedicatedParser("com.xunmeng.pinduoduo"))
+        assertFalse(PageParserRegistry.fallbackAccepts("com.xunmeng.pinduoduo"))
+        val popup = listOf(
+            "拼多多", "关闭弹窗", "ab0b819e-ca7b-40f3-903d-2009635661e2.png.slim",
+            "本单已省14.99元，拼多多累计为你省7367.23元", "拼单成功", "本单获得福建地区补贴",
+            "26.80元", "一键领取", "即将失效", "查看订单详情",
+        )
+        assertEquals(
+            PageParseResult.NotATradePage,
+            PageParserRegistry.parse(snapshot("com.xunmeng.pinduoduo", popup), PageFlowTracker().flow("com.xunmeng.pinduoduo")),
+        )
     }
 
     @Test

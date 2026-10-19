@@ -337,7 +337,7 @@ open class CheckoutPageParser(protected val profile: CheckoutProfile) : AppPageP
 
     /**
      * 结果页金额：锚点节点内的金额 → 锚点**前后**的独立金额节点 → 实付类标签 → 通用优先级。
-     * 电商结果页的版式差异大（"支付成功 ¥19.38" / "¥19.38 支付成功" / "已支付，多多支付已减¥2"），
+     * 电商结果页的版式差异大（"支付成功 ¥19.38" / "¥19.38 支付成功" / "已支付，立减¥2"），
      * 所以锚点前后都要看，但一律排除优惠/余额/运费上下文。
      */
     protected open fun successAmount(snapshot: PageSnapshot, anchorIdx: Int): String? {
@@ -469,20 +469,6 @@ object TaobaoPageParser : CheckoutPageParser(
         confirmMarkers = listOf("提交订单", "立即支付", "确认支付", "请输入支付密码", "付款", "去支付"),
         orderPendingMarkers = listOf("等待付款", "待付款", "立即付款"),
         merchantLabels = listOf("店铺名称", "卖家昵称") + PageParseSupport.counterpartyLabels,
-    ),
-)
-
-/** 拼多多 */
-object PinduoduoPageParser : CheckoutPageParser(
-    CheckoutProfile(
-        packageNames = setOf("com.xunmeng.pinduoduo"),
-        label = "拼多多",
-        // 拼单成功/免拼成功也是真实的付款完成状态（拼多多特有）
-        successTitles = listOf("支付成功", "付款成功", "拼单成功", "免拼成功", "下单成功", "已支付"),
-        detailTitles = listOf("订单详情", "账单详情", "交易详情"),
-        confirmMarkers = listOf("提交订单", "立即支付", "去支付", "确认支付", "免密支付", "请输入支付密码"),
-        orderPendingMarkers = listOf("待支付", "待付款", "立即支付"),
-        merchantLabels = listOf("店铺名称", "商家名称") + PageParseSupport.counterpartyLabels,
     ),
 )
 
