@@ -102,4 +102,5 @@
 ## 六、提交记录
 
 - `63ee6da` feat(ui): eco v5 design system + home + bills
-- 后续页面按域提交（统计/个人/流程/设置/悬浮卡）。
+- `9b80bd0` feat(ui): 全量对齐 eco v5 原型（其余页面 + 设置 + 悬浮卡 + 文档）
+- `6313b95` style(ui): 自定义颜色弹窗改用 eco 对话框与字段
