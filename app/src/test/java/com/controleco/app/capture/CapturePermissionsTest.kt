@@ -19,12 +19,13 @@ class CapturePermissionsTest {
         val ready = mapOf(
             CapturePermission.LISTENER to true,
             CapturePermission.A11Y to false,
+            CapturePermission.SCREEN_READER to false,
             CapturePermission.NOTIFY to false,
             CapturePermission.SMS to true,
             CapturePermission.OVERLAY to true,
         )
         assertEquals(
-            listOf(CapturePermission.A11Y, CapturePermission.NOTIFY),
+            listOf(CapturePermission.A11Y, CapturePermission.SCREEN_READER, CapturePermission.NOTIFY),
             missingPermissions(ready),
         )
     }
@@ -35,6 +36,7 @@ class CapturePermissionsTest {
         val ready = mapOf(
             CapturePermission.LISTENER to false,
             CapturePermission.A11Y to true,
+            CapturePermission.SCREEN_READER to true,
             CapturePermission.NOTIFY to true,
             CapturePermission.SMS to true,
             CapturePermission.OVERLAY to true,
@@ -47,6 +49,7 @@ class CapturePermissionsTest {
         val ready = mapOf(
             CapturePermission.LISTENER to true,
             CapturePermission.A11Y to true,
+            CapturePermission.SCREEN_READER to true,
             CapturePermission.NOTIFY to true,
             CapturePermission.SMS to false,
             CapturePermission.OVERLAY to true,
@@ -59,6 +62,7 @@ class CapturePermissionsTest {
         val ready = mapOf(
             CapturePermission.LISTENER to true,
             CapturePermission.A11Y to true,
+            CapturePermission.SCREEN_READER to true,
             CapturePermission.NOTIFY to true,
             CapturePermission.SMS to true,
             CapturePermission.OVERLAY to false,
@@ -75,9 +79,17 @@ class CapturePermissionsTest {
     fun `权限项短标签`() {
         assertEquals("通知监听", CapturePermission.LISTENER.label)
         assertEquals("无障碍", CapturePermission.A11Y.label)
+        assertEquals("随选朗读", CapturePermission.SCREEN_READER.label)
         assertEquals("通知权限", CapturePermission.NOTIFY.label)
         assertEquals("短信权限", CapturePermission.SMS.label)
         assertEquals("悬浮窗", CapturePermission.OVERLAY.label)
+    }
+
+    @Test
+    fun `随选朗读仅在页面采集且微信监听时需要`() {
+        assertTrue(CapturePermissions.screenReaderNeeded(a11yCaptureEnabled = true, wechatWatched = true))
+        assertFalse(CapturePermissions.screenReaderNeeded(a11yCaptureEnabled = false, wechatWatched = true))
+        assertFalse(CapturePermissions.screenReaderNeeded(a11yCaptureEnabled = true, wechatWatched = false))
     }
 
     @Test

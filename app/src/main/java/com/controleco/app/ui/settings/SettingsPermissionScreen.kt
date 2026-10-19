@@ -38,7 +38,7 @@ import com.controleco.app.ui.common.overlayPathFor
 import com.controleco.app.ui.theme.accBook
 
 /**
- * 设置 → 权限：两块权限（通知监听 / 无障碍）的状态、开关与开启教程都在这一页。
+ * 设置 → 权限：通知监听 / 无障碍 / 随选朗读 / 悬浮窗 / 短信的状态、开关与开启教程都在这一页。
  * 行上只留标题与开关；授权状态用右侧短标签表达（未授权时附「去开启」）。
  */
 @Composable
@@ -63,6 +63,7 @@ fun SettingsPermissionScreen(
     SettingsPage(title = "权限", onBack = onBack) {
         NotificationSection(vm, resumeTick, onOpenNotificationAccess)
         A11ySection(vm, resumeTick, onOpenAccessibilitySettings)
+        ScreenReaderSection(vm, resumeTick, onOpenAccessibilitySettings)
         OverlaySection(vm, resumeTick, onOpenOverlayPermission)
         BankSection(vm, resumeTick)
     }
@@ -230,6 +231,48 @@ private fun A11ySection(vm: LedgerViewModel, resumeTick: Int, onOpenAccessibilit
                 a11yPathFor(Brand.current()),
                 "打开「我ECO 支付页面采集」开关；系统弹 10 秒倒计时确认属正常（小米十秒盾）。",
                 "回到本页状态应显示「已连接」；付款后在捕获日志的「页面」通道能看到页面快照。",
+            ),
+        )
+    }
+}
+
+/**
+ * 微信 8.0.52+ 的页面节点只对系统读屏服务开放。
+ * 随选朗读（或 TalkBack）与本应用的无障碍服务同时开启时，页面通道才能读到微信文本；
+ * 这里给出状态与开启步骤，未开启时冷启动权限提醒也会列出该项。
+ */
+@Composable
+private fun ScreenReaderSection(vm: LedgerViewModel, resumeTick: Int, onOpenAccessibilitySettings: () -> Unit) {
+    val enabled = remember(resumeTick) { vm.isScreenReaderEnabled() }
+
+    SectionTitle("微信页面读取（随选朗读）")
+    PaneCard {
+        PermissionStatusRow(
+            title = "随选朗读",
+            granted = enabled,
+            grantedText = "已开启",
+            ungrantedText = "未开启",
+            actionText = "去开启",
+            onAction = onOpenAccessibilitySettings,
+        )
+        RowDivider()
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(
+                "微信 8.0.52+ 只向系统读屏服务暴露页面节点。只开「无障碍页面采集」时，" +
+                    "微信页面可能读到空树；请同时开启随选朗读（或 TalkBack）。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        RowDivider()
+        PermissionTutorial(
+            "随选朗读开启教程",
+            listOf(
+                "系统设置 → 无障碍 → 随选朗读（Select to Speak），打开开关；找不到时在设置里搜索「随选朗读」。",
+                "「随选朗读」与上方「我ECO 支付页面采集」需要同时保持开启；两者都在无障碍的已下载服务/应用里。",
+                "回到本页状态应显示「已开启」；若微信页面仍为空树，关闭再重新打开两个服务，并在微信页面停留 1–2 秒。",
+                "没有随选朗读时可改用 TalkBack；它也会朗读屏幕内容，按需选择。",
+                "不使用微信页面通道时，可在上方关闭「自动记录支付页面」；通知与转账仍可正常记账。",
             ),
         )
     }

@@ -16,6 +16,7 @@ import com.controleco.app.capture.CaptureDefaults
 import com.controleco.app.capture.NotificationRules
 import com.controleco.app.capture.MerchantRules
 import com.controleco.app.capture.PendingActions
+import com.controleco.app.capture.ScreenReaderAccess
 import com.controleco.app.csv.BillParsers
 import com.controleco.app.data.db.AccountBalanceRow
 import com.controleco.app.data.db.AccountEntity
@@ -1102,6 +1103,9 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 系统无障碍设置中是否已开启采集服务 */
     fun isA11yEnabled(): Boolean = AccBookAccessibilityService.isEnabled(getApplication())
+
+    /** 系统随选朗读/TalkBack 是否已开启（微信 8.0.52+ 页面节点白名单的前提） */
+    fun isScreenReaderEnabled(): Boolean = ScreenReaderAccess.isEnabled(getApplication())
 
     fun discardPending(id: Long) {
         viewModelScope.launch(Dispatchers.IO) {

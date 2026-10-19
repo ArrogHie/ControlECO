@@ -35,6 +35,15 @@ fun PermissionReminderDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
                 )
+                if (CapturePermission.SCREEN_READER in missing) {
+                    Text(
+                        "微信 8.0.52+ 还需要系统「随选朗读」同时开启，否则读不到微信页面；" +
+                            "权限页里有开启步骤。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
             }
         },
         confirmButton = { TextButton(onClick = onOpenPermissions) { Text("去开启") } },
