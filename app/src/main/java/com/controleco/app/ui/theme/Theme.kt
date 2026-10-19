@@ -43,7 +43,8 @@ enum class EcoAccent(
         "default", "潮汐", "青蓝",
         BlueFamily(0xFF24788A, 0xFF145B70, 0xFF419DAB, 0xFFA0DFDE, 0xFFE0F3F2, 0xFFECF7F4),
         BlueFamily(0xFF88D5DF, 0xFFB8EDF0, 0xFF62B8C6, 0xFFC0F4E9, 0xFF264E54, 0xFF20434A),
-        Color(0xFF103945), Color(0xFF165A60), Color(0xFF1B766F),
+        // hero 渐变：深端不要压到近黑（真机设置页曾出现右半张黑块）
+        Color(0xFF15545A), Color(0xFF165A60), Color(0xFF1B766F),
     ),
     Meadow(
         "meadow", "松林", "玉绿",

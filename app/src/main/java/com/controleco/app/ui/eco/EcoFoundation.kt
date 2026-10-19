@@ -48,12 +48,26 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.LocalIndication
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Path
 import com.controleco.app.ui.common.EcoIcons
+import com.controleco.app.util.Money
+import kotlin.math.roundToLong
 import com.controleco.app.ui.theme.EcoColors
 import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.eco
@@ -65,6 +79,8 @@ import com.controleco.app.ui.theme.eco
 @Composable
 fun EcoBackdrop(modifier: Modifier = Modifier) {
     val c = MaterialTheme.eco
+    val reveal = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { reveal.animateTo(1f, tween(620, easing = FastOutSlowInEasing)) }
     Canvas(modifier.fillMaxSize()) {
         drawRect(c.paper)
         val w = size.width
@@ -84,18 +100,89 @@ fun EcoBackdrop(modifier: Modifier = Modifier) {
                 radius = w * 0.78f,
             ),
         )
-        // 极细装饰线：不抢内容，只让大块纸面不空
+
+        // 原型的 geo 层：等高线 / 细规线 / 点阵 / 十字 / 菱形，入场 0.6s 淡入
+        val a = reveal.value
+        if (a <= 0.001f) return@Canvas
+        val line = if (c.isDark) 0.38f else 0.58f
+        val thin = 1.dp.toPx()
+        val inkLine = c.blue.copy(alpha = line * 0.55f * a)
+        val ruleLine = c.rule.copy(alpha = line * a)
+        val stroke = Stroke(width = thin, cap = StrokeCap.Round)
+
+        // 右上大圆与内圈
         drawCircle(
-            color = c.rule.copy(alpha = if (c.isDark) 0.22f else 0.34f),
-            radius = w * 0.36f,
-            center = Offset(w * 1.03f, h * 0.19f),
-            style = Stroke(width = 1.dp.toPx()),
+            color = ruleLine,
+            radius = w * 0.52f,
+            center = Offset(w * 1.10f, h * 0.10f),
+            style = stroke,
         )
         drawCircle(
-            color = c.rule.copy(alpha = if (c.isDark) 0.18f else 0.28f),
-            radius = w * 0.30f,
-            center = Offset(-w * 0.08f, h * 0.86f),
-            style = Stroke(width = 1.dp.toPx()),
+            color = ruleLine.copy(alpha = ruleLine.alpha * 0.7f),
+            radius = w * 0.37f,
+            center = Offset(w * 1.02f, h * 0.22f),
+            style = stroke,
+        )
+        // 顶部两道等高线，越向左侧越淡
+        val contour1 = Path().apply {
+            moveTo(-w * 0.12f, h * 0.115f)
+            cubicTo(w * 0.18f, h * 0.055f, w * 0.48f, h * 0.13f, w * 1.12f, h * 0.255f)
+        }
+        drawPath(contour1, inkLine, style = stroke)
+        val contour2 = Path().apply {
+            moveTo(-w * 0.10f, h * 0.165f)
+            cubicTo(w * 0.24f, h * 0.105f, w * 0.54f, h * 0.18f, w * 1.10f, h * 0.325f)
+        }
+        drawPath(contour2, inkLine.copy(alpha = inkLine.alpha * 0.62f), style = stroke)
+        val contour3 = Path().apply {
+            moveTo(-w * 0.06f, h * 0.70f)
+            cubicTo(w * 0.20f, h * 0.60f, w * 0.46f, h * 0.79f, w * 0.92f, h * 0.70f)
+        }
+        drawPath(contour3, inkLine.copy(alpha = inkLine.alpha * 0.42f), style = stroke)
+
+        // 左下点阵（向中心衰减）
+        val cols = 7
+        val rows = 6
+        val gap = 19.dp.toPx()
+        val ox = -w * 0.055f
+        val oy = h * 0.755f
+        for (row in 0 until rows) {
+            for (col in 0 until cols) {
+                val fade = (1f - (row / rows.toFloat()) * 0.65f) * (1f - (col / cols.toFloat()) * 0.35f)
+                drawCircle(
+                    color = c.blue.copy(alpha = 0.24f * a * fade),
+                    radius = 1.15.dp.toPx(),
+                    center = Offset(ox + col * gap, oy + row * gap),
+                )
+            }
+        }
+
+        // 十字 / 菱形 / 小圆点
+        fun cross(cx: Float, cy: Float, r: Float, color: Color) {
+            drawLine(color, Offset(cx - r, cy), Offset(cx + r, cy), thin, StrokeCap.Round)
+            drawLine(color, Offset(cx, cy - r), Offset(cx, cy + r), thin, StrokeCap.Round)
+        }
+        cross(w * 0.075f, h * 0.635f, 7.dp.toPx(), c.amber.copy(alpha = 0.35f * a))
+        cross(w * 0.80f, h * 0.405f, 8.dp.toPx(), c.blue.copy(alpha = 0.25f * a))
+        val diamond = Path().apply {
+            moveTo(w * 0.925f, h * 0.455f - 9.dp.toPx())
+            lineTo(w * 0.925f + 13.dp.toPx(), h * 0.455f)
+            lineTo(w * 0.925f, h * 0.455f + 9.dp.toPx())
+            lineTo(w * 0.925f - 13.dp.toPx(), h * 0.455f)
+            close()
+        }
+        drawPath(diamond, c.rule.copy(alpha = 0.35f * a), style = stroke)
+        drawCircle(c.blue.copy(alpha = 0.45f * a), radius = 2.6.dp.toPx(), center = Offset(w * 0.155f, h * 0.225f))
+        drawCircle(c.amber.copy(alpha = 0.30f * a), radius = 1.8.dp.toPx(), center = Offset(w * 0.86f, h * 0.29f))
+
+        // 斜规线：从左到右极淡消失
+        drawLine(
+            brush = Brush.horizontalGradient(
+                listOf(Color.Transparent, c.blue.copy(alpha = 0.11f * a), Color.Transparent),
+            ),
+            start = Offset(w * 0.02f, h * 0.84f),
+            end = Offset(w * 0.92f, h * 0.75f),
+            strokeWidth = thin,
         )
     }
 }
@@ -246,6 +333,93 @@ fun EcoAutoMoney(
     }
 }
 
+/**
+ * 金额滚数：按原型 940ms easeOutQuart 从 0 滚到目标值。
+ * 每次目标变化都会重新滚（与原型每次 render 都执行 animateCounters 一致）。
+ */
+@Composable
+fun EcoCountUpMoney(
+    cents: Long,
+    style: TextStyle,
+    color: Color,
+    modifier: Modifier = Modifier,
+    widthLimit: Dp? = null,
+    minSize: TextUnit = 18.sp,
+    textAlign: TextAlign = TextAlign.Center,
+    durationMillis: Int = 940,
+    format: (Long) -> String = { Money.formatYuanGroupedFixed(it) },
+) {
+    val anim = remember { Animatable(0f) }
+    LaunchedEffect(cents) {
+        anim.snapTo(0f)
+        anim.animateTo(
+            targetValue = cents.toFloat(),
+            animationSpec = tween(
+                durationMillis = durationMillis,
+                easing = CubicBezierEasing(0.25f, 1f, 0.5f, 1f),
+            ),
+        )
+    }
+    EcoAutoMoney(
+        text = format(anim.value.roundToLong()),
+        style = style,
+        color = color,
+        modifier = modifier,
+        widthLimit = widthLimit,
+        minSize = minSize,
+        textAlign = textAlign,
+    )
+}
+
+/**
+ * 个人页「散落弹入」：对应原型 .profile-arrival / ecoScatteredPop。
+ * 每张卡延迟出现，带 25dp 上移、0.79→1 弹簧缩放和轻微旋转。
+ */
+@Composable
+fun EcoArrival(
+    delayMillis: Int = 0,
+    turn: Float = 3f,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(delayMillis.toLong())
+        shown = true
+    }
+    val scale by animateFloatAsState(
+        targetValue = if (shown) 1f else 0.79f,
+        animationSpec = spring(dampingRatio = 0.56f, stiffness = 420f),
+        label = "arrival-scale",
+    )
+    val rise by animateFloatAsState(
+        targetValue = if (shown) 0f else 25f,
+        animationSpec = spring(dampingRatio = 0.58f, stiffness = 420f),
+        label = "arrival-rise",
+    )
+    val turnNow by animateFloatAsState(
+        targetValue = if (shown) 0f else turn,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f),
+        label = "arrival-turn",
+    )
+    val alpha by animateFloatAsState(
+        targetValue = if (shown) 1f else 0f,
+        animationSpec = tween(190),
+        label = "arrival-alpha",
+    )
+    Box(
+        modifier.graphicsLayer {
+            this.alpha = alpha
+            scaleX = scale
+            scaleY = scale
+            translationY = rise.dp.toPx()
+            rotationZ = turnNow
+        },
+    ) {
+        content()
+    }
+}
+
 /** 章节头：01 / 标题 / 右侧说明（可选） */
 @Composable
 fun EcoSectionHead(
@@ -267,15 +441,18 @@ fun EcoSectionHead(
                 Modifier
                     .size(19.dp)
                     .clip(RoundedCornerShape(7.dp))
-                    .background(c.blue),
+                    .background(if (c.isDark) c.blue.copy(alpha = 0.22f) else c.blueSoft),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(number, style = EcoType.SectionNo, color = Color.White)
+                Text(number, style = EcoType.SectionNo, color = c.blue)
             }
             Spacer(Modifier.width(9.dp))
         }
         Text(title, style = EcoType.SectionTitle, color = c.ink)
-        Spacer(Modifier.weight(1f))
+        // 原型：标题和右侧 aside 之间有一条极细的延长线
+        Spacer(Modifier.width(12.dp))
+        Box(Modifier.weight(1f).height(1.dp).background(c.rule))
+        Spacer(Modifier.width(12.dp))
         if (aside != null) Text(aside, style = EcoType.SectionAside, color = c.quiet)
         trailing?.invoke()
     }
@@ -344,6 +521,16 @@ fun EcoHeroCard(
 ) {
     val c = MaterialTheme.eco
     val gradient = colors ?: listOf(c.heroA, c.heroB, c.heroC)
+    val glow = rememberInfiniteTransition(label = "hero-glow")
+    val glowPhase by glow.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(3500, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse,
+        ),
+        label = "hero-glow-phase",
+    )
     Box(
         modifier
             .shadow(
@@ -358,16 +545,22 @@ fun EcoHeroCard(
             .border(1.dp, Color.White.copy(alpha = 0.16f), shape),
     ) {
         Canvas(Modifier.fillMaxSize()) {
+            // 原型 hero 右上柔光只能用 shader 画，但本机 Skia 会把大的 radialGradient
+            // 插值成硬边黑块；改为只让装饰环缓慢漂移/呼吸，避免黑块回归。
+            val ringCenter = Offset(
+                size.width * (0.94f + 0.02f * glowPhase),
+                -size.height * (0.08f - 0.035f * glowPhase),
+            )
             drawCircle(
                 color = Color.White.copy(alpha = 0.08f),
                 radius = size.width * 0.34f,
-                center = Offset(size.width * 0.94f, -size.height * 0.08f),
+                center = ringCenter,
                 style = Stroke(width = 1.dp.toPx()),
             )
             drawCircle(
                 color = Color.White.copy(alpha = 0.06f),
                 radius = size.width * 0.24f,
-                center = Offset(size.width * 0.94f, -size.height * 0.08f),
+                center = ringCenter,
                 style = Stroke(width = 1.dp.toPx()),
             )
         }
@@ -398,7 +591,18 @@ fun EcoProgressBar(
     fill: Brush = Brush.horizontalGradient(
         listOf(MaterialTheme.eco.blue.copy(alpha = 0.55f), MaterialTheme.eco.blue),
     ),
+    animationDelayMillis: Int = 0,
 ) {
+    val target = progress.coerceIn(0f, 1f)
+    val drawn = remember { Animatable(0f) }
+    LaunchedEffect(target) {
+        drawn.snapTo(0f)
+        if (animationDelayMillis > 0) kotlinx.coroutines.delay(animationDelayMillis.toLong())
+        drawn.animateTo(
+            target,
+            tween(900, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)),
+        )
+    }
     Box(
         modifier
             .fillMaxWidth()
@@ -408,7 +612,7 @@ fun EcoProgressBar(
     ) {
         Box(
             Modifier
-                .fillMaxWidth(progress.coerceIn(0f, 1f))
+                .fillMaxWidth(drawn.value)
                 .height(height)
                 .clip(CircleShape)
                 .background(fill),

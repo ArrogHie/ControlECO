@@ -67,10 +67,10 @@ private const val PICKER_YEAR_MIN = 1970
 private const val PICKER_YEAR_MAX = 2099
 private const val YEARS_PER_PAGE = 12
 
-/** 周期文案：月模式 "2026年10月"，年模式 "2026年" */
+/** 周期文案：原型统一 "2026.10" / "2026"（点号，不写年月） */
 fun periodLabel(yearMonth: YearMonth, mode: PeriodMode): String = when (mode) {
-    PeriodMode.MONTH -> "${yearMonth.year}年${yearMonth.monthValue}月"
-    PeriodMode.YEAR -> "${yearMonth.year}年"
+    PeriodMode.MONTH -> "${yearMonth.year}.${yearMonth.monthValue.toString().padStart(2, '0')}"
+    PeriodMode.YEAR -> "${yearMonth.year}"
 }
 
 /** 结余文案前缀：本月结余 / 本年结余 */

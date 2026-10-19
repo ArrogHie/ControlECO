@@ -133,6 +133,13 @@ object Money {
         return sign + grouped(abs) + "." + (abs % 100).toString().padStart(2, '0')
     }
 
+    /** 同 [formatSignedPlain]，但带上当前货币符号（账单行/日期小计，如 "-¥23.90"）。 */
+    fun formatSignedCurrency(cents: Long): String {
+        val sign = if (cents < 0) "-" else "+"
+        val abs = if (cents < 0) -cents else cents
+        return sign + symbol + grouped(abs) + "." + (abs % 100).toString().padStart(2, '0')
+    }
+
     /**
      * 整数元部分的千分位分组（手写，入参为非负分）。
      *

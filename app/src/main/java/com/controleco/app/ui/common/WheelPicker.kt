@@ -9,6 +9,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -77,7 +78,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 /** 展开滚轮的触发方式 */
-enum class WheelTrigger { TAP, LONG_PRESS, TAP_AND_LONG_PRESS }
+enum class WheelTrigger { TAP, LONG_PRESS, TAP_AND_LONG_PRESS, DRAG }
 
 // ---------- 圆柱投影与滚动物理（纯函数，见 WheelPickerMathTest） ----------
 
@@ -289,15 +290,28 @@ fun WheelPicker(
                 },
             )
             .then(
-                if (trigger != WheelTrigger.LONG_PRESS) {
+                if (trigger != WheelTrigger.LONG_PRESS && trigger != WheelTrigger.DRAG) {
                     Modifier.clickable(enabled = !inlineMounted) { openPopup() }
                 } else {
                     Modifier
                 },
             )
             .then(
-                if (trigger != WheelTrigger.TAP) {
-                    Modifier.pointerInput(lastIndex) {
+                when (trigger) {
+                    WheelTrigger.DRAG -> Modifier.pointerInput(lastIndex) {
+                        detectDragGestures(
+                            onDragStart = { controller.onStart() },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                controller.onMove(change)
+                                controller.drag(dragAmount.y)
+                            },
+                            onDragEnd = { controller.settleAsync() },
+                            onDragCancel = { controller.settleAsync() },
+                        )
+                    }
+                    WheelTrigger.TAP -> Modifier
+                    else -> Modifier.pointerInput(lastIndex) {
                         detectDragGesturesAfterLongPress(
                             onDragStart = {
                                 controller.onStart()
@@ -312,8 +326,6 @@ fun WheelPicker(
                             onDragCancel = { if (inlineMounted) closeInlineAfterSettle() },
                         )
                     }
-                } else {
-                    Modifier
                 },
             ),
         contentAlignment = Alignment.Center,
@@ -324,7 +336,8 @@ fun WheelPicker(
             pos = { pos.value },
             itemHeightPx = itemHeightPx,
             highlightProvider = { highlight },
-            maxAbsD = WHEEL_MAX_ABS_D,
+            // 常态行数由 rows 决定：rows=3 时仍是原来 3 行；rows=5 的底部弹层要露 5 行
+            maxAbsD = rows / 2f + 0.6f,
             // 浮窗在场时整格隐去（卡下不重影、入场半透明期不穿帮）
             modifier = Modifier
                 .fillMaxSize()

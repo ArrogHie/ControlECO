@@ -1,7 +1,11 @@
 package com.controleco.app.ui.eco
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -25,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -51,8 +56,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -181,6 +188,22 @@ fun EcoBottomNav(
         ) {
             items.forEachIndexed { index, item ->
                 val on = index == selected
+                // 原型 nav：选中图标上浮 2dp、渐变胶囊 + 投影，底部还有 3dp 玉色小点
+                val lift by animateDpAsState(
+                    targetValue = if (on) (-2).dp else 0.dp,
+                    animationSpec = tween(220, easing = FastOutSlowInEasing),
+                    label = "nav-lift-$index",
+                )
+                val iconTint by animateColorAsState(
+                    targetValue = if (on) c.blueDeep else c.quiet,
+                    animationSpec = tween(220),
+                    label = "nav-icon-$index",
+                )
+                val labelColor by animateColorAsState(
+                    targetValue = if (on) c.blueDeep else c.quiet,
+                    animationSpec = tween(220),
+                    label = "nav-label-$index",
+                )
                 Column(
                     Modifier
                         .weight(1f)
@@ -195,21 +218,50 @@ fun EcoBottomNav(
                 ) {
                     Box(
                         Modifier
+                            .offset(y = lift)
                             .width(46.dp)
                             .height(29.dp)
+                            .shadow(
+                                elevation = if (on) 9.dp else 0.dp,
+                                shape = RoundedCornerShape(15.dp),
+                                clip = false,
+                                ambientColor = c.blueDeep.copy(alpha = 0.27f),
+                                spotColor = c.blueDeep.copy(alpha = 0.27f),
+                            )
                             .clip(RoundedCornerShape(15.dp))
-                            .background(if (on) c.blueSoft else Color.Transparent),
+                            .background(
+                                if (on) {
+                                    Brush.linearGradient(
+                                        listOf(Color(0xFFD0F2E5), c.blueSoft),
+                                    )
+                                } else {
+                                    SolidColor(Color.Transparent)
+                                },
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             item.icon,
                             contentDescription = item.label,
-                            tint = if (on) c.blue else c.quiet,
+                            tint = iconTint,
                             modifier = Modifier.size(19.dp),
                         )
                     }
                     Spacer(Modifier.height(2.dp))
-                    Text(item.label, style = EcoType.Nav, color = if (on) c.ink else c.quiet)
+                    Text(
+                        item.label,
+                        style = EcoType.Nav.copy(
+                            fontWeight = if (on) FontWeight(760) else FontWeight(640),
+                        ),
+                        color = labelColor,
+                    )
+                    Box(
+                        Modifier
+                            .padding(top = 1.dp)
+                            .size(3.dp)
+                            .clip(CircleShape)
+                            .background(if (on) c.jade else Color.Transparent),
+                    )
                 }
             }
         }
@@ -235,48 +287,58 @@ fun ecoFabBottomOffset(): Dp {
 
 @Composable
 fun EcoFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val c = MaterialTheme.eco
     val transition = rememberInfiniteTransition(label = "fab-breath")
-    val breath by transition.animateFloat(
-        initialValue = 0.94f,
-        targetValue = 1.08f,
-        animationSpec = infiniteRepeatable(tween(4100), RepeatMode.Reverse),
-        label = "fab-breath-scale",
+    // 原型 4.2s：整体只呼吸 2.5%、上浮 3.5dp；外圈 0.95→1.07、透明度 .2→.5
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(2100, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            RepeatMode.Reverse,
+        ),
+        label = "fab-breath-phase",
     )
-    val ringAlpha by transition.animateFloat(
-        initialValue = 0.34f,
-        targetValue = 0.08f,
-        animationSpec = infiniteRepeatable(tween(4100), RepeatMode.Reverse),
-        label = "fab-breath-alpha",
-    )
-    Box(modifier.size(64.dp), contentAlignment = Alignment.Center) {
+    // 原型最终覆盖：FAB 本体不位移、不缩放，只有外圈呼吸
+    val ringScale = 0.95f + 0.12f * phase
+    val ringAlpha = 0.20f + 0.30f * phase
+    Box(modifier.size(62.dp), contentAlignment = Alignment.Center) {
         Box(
             Modifier
-                .size(54.dp)
-                .graphicsLayer { scaleX = breath; scaleY = breath; alpha = ringAlpha }
-                .border(1.dp, Color.White.copy(alpha = 0.5f), CircleShape),
+                .size(50.dp)
+                .graphicsLayer {
+                    scaleX = ringScale
+                    scaleY = ringScale
+                    alpha = ringAlpha
+                }
+                .border(1.dp, c.heroB.copy(alpha = 0.65f), CircleShape),
         )
         Box(
             Modifier
-                .size(54.dp)
+                .size(50.dp)
+                .graphicsLayer {
+                    scaleX = 1f
+                    scaleY = 1f
+                }
                 .shadow(
                     elevation = 12.dp,
                     shape = CircleShape,
-                    ambientColor = Color(0x55103539),
-                    spotColor = Color(0x66103539),
+                    ambientColor = Color(0x55235F66),
+                    spotColor = Color(0x66134F5B),
                 )
                 .clip(CircleShape)
                 .background(
                     Brush.linearGradient(
-                        listOf(Color(0xFF356F88), Color(0xFF25556C), Color(0xFF1F475B)),
+                        listOf(Color(0xFF2AA79C), Color(0xFF16858A), Color(0xFF0F6472)),
                         start = androidx.compose.ui.geometry.Offset.Zero,
-                        end = androidx.compose.ui.geometry.Offset(140f, 140f),
+                        end = androidx.compose.ui.geometry.Offset(130f, 130f),
                     ),
                 )
-                .border(1.dp, Color.White.copy(alpha = 0.34f), CircleShape)
-                .ecoPressable(scaleTo = 0.93f, onClick = onClick),
+                .border(1.dp, Color.White.copy(alpha = 0.36f), CircleShape)
+                .ecoPressable(scaleTo = 0.92f, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(EcoIcons.Plus, contentDescription = "记一笔", tint = Color(0xFFF8FAF4), modifier = Modifier.size(20.dp))
+            Icon(EcoIcons.Plus, contentDescription = "记一笔", tint = Color(0xFFF8FAF4), modifier = Modifier.size(21.dp))
         }
     }
 }
@@ -389,10 +451,22 @@ fun EcoDialog(
                 ),
             contentAlignment = Alignment.Center,
         ) {
+            // 原型 modalIn .28s：scale .94 → 1、上移 8dp、淡入
+            val entrance = remember { Animatable(0f) }
+            LaunchedEffect(Unit) {
+                entrance.animateTo(1f, tween(280, easing = FastOutSlowInEasing))
+            }
             Box(
                 modifier
                     .padding(horizontal = 28.dp)
                     .fillMaxWidth()
+                    .graphicsLayer {
+                        alpha = entrance.value
+                        val s = 0.94f + 0.06f * entrance.value
+                        scaleX = s
+                        scaleY = s
+                        translationY = (1f - entrance.value) * 8.dp.toPx()
+                    }
                     .shadow(26.dp, RoundedCornerShape(23.dp), ambientColor = Color(0x66103539), spotColor = Color(0x66103539))
                     .clip(RoundedCornerShape(23.dp))
                     .background(MaterialTheme.eco.surface)

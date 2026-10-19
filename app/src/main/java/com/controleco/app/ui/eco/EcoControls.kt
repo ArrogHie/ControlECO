@@ -2,6 +2,7 @@ package com.controleco.app.ui.eco
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -279,6 +280,8 @@ fun EcoSegmented(
     modifier: Modifier = Modifier,
     height: Dp = 34.dp,
     small: Boolean = false,
+    selectedContainerColor: Color? = null,
+    selectedContentColor: Color? = null,
 ) {
     val c = MaterialTheme.eco
     BoxWithConstraints(
@@ -289,7 +292,12 @@ fun EcoSegmented(
             .padding(3.dp),
     ) {
         val itemWidth = maxWidth / options.size.coerceAtLeast(1)
-        val x by animateDpAsState(itemWidth * selectedIndex, tween(220), label = "seg-x")
+        // 原型选中块 300ms cubic-bezier(.22,1.35,.4,1)：带一点回弹
+        val x by animateDpAsState(
+            targetValue = itemWidth * selectedIndex,
+            animationSpec = spring(dampingRatio = 0.66f, stiffness = 460f),
+            label = "seg-x",
+        )
         Box(
             Modifier
                 .offset(x = x)
@@ -297,7 +305,7 @@ fun EcoSegmented(
                 .fillMaxHeight()
                 .shadow(3.dp, RoundedCornerShape(9.dp), ambientColor = c.ink.copy(alpha = .12f), spotColor = c.ink.copy(alpha = .16f))
                 .clip(RoundedCornerShape(9.dp))
-                .background(c.surface),
+                .background(selectedContainerColor ?: c.surface),
         )
         Row(Modifier.fillMaxWidth()) {
             options.forEachIndexed { index, text ->
@@ -315,7 +323,11 @@ fun EcoSegmented(
                     Text(
                         text,
                         style = if (small) EcoType.SegSmall else EcoType.Seg,
-                        color = if (index == selectedIndex) c.blueDeep else c.muted,
+                        color = if (index == selectedIndex) {
+                            selectedContentColor ?: c.blueDeep
+                        } else {
+                            c.muted
+                        },
                         maxLines = 1,
                     )
                 }
@@ -348,7 +360,7 @@ fun EcoFilterStrip(
                 Modifier
                     .height(26.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(if (on) c.blueDeep else Color.Transparent)
+                    .background(if (on) c.surface else Color.Transparent)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -356,7 +368,7 @@ fun EcoFilterStrip(
                     .padding(horizontal = 10.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(text, style = EcoType.Pill, color = if (on) Color.White else c.muted)
+                Text(text, style = EcoType.Pill, color = if (on) c.ink else c.muted)
             }
         }
     }

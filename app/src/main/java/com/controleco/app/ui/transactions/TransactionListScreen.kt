@@ -588,7 +588,11 @@ private fun BillToolbar(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                if (mode == PeriodMode.MONTH) "${month.year}年${month.monthValue}月" else "${month.year}年",
+                if (mode == PeriodMode.MONTH) {
+                    "${month.year}.${month.monthValue.toString().padStart(2, '0')}"
+                } else {
+                    "${month.year}"
+                },
                 style = EcoType.RowTitle.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold),
                 color = c.ink,
                 maxLines = 1,
@@ -941,12 +945,16 @@ private fun DayHeader(day: LocalDate, dayRows: List<TransactionRow>, onClickDay:
                 .padding(horizontal = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("${day.dayOfMonth}日", style = EcoType.Pill.copy(fontSize = 9.5.sp, fontWeight = FontWeight.Bold), color = c.blueDeep)
+            Text(
+                "${day.monthValue}月${day.dayOfMonth}日",
+                style = EcoType.Pill.copy(fontSize = 9.5.sp, fontWeight = FontWeight.Bold),
+                color = c.blueDeep,
+            )
             Spacer(Modifier.width(5.dp))
             Text(relative, style = EcoType.PageNote.copy(fontSize = 8.5.sp), color = c.muted)
         }
         Text(
-            Money.formatSignedPlain(dayBalance),
+            Money.formatSignedCurrency(dayBalance),
             style = EcoType.Micro.copy(fontSize = 10.sp, letterSpacing = 0.sp),
             color = if (dayBalance >= 0L) c.jade else c.clay,
         )
@@ -1029,7 +1037,7 @@ private fun BillRow(
         }
         Spacer(Modifier.width(8.dp))
         Text(
-            Money.formatSignedPlain(if (isExpense) -row.amountCents else row.amountCents),
+            Money.formatSignedCurrency(if (isExpense) -row.amountCents else row.amountCents),
             style = EcoType.RowTitle.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp),
             color = if (isExpense) c.ink else c.jade,
             maxLines = 1,

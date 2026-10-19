@@ -1,5 +1,8 @@
 package com.controleco.app.ui.stats
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -129,6 +133,13 @@ fun ExpenseBarChart(
     // 文字量测缓存：拖动手势每帧都会重画，避免重复量同一串数字
     val labelCache = remember(measurer, labelStyle) { mutableMapOf<String, TextLayoutResult>() }
 
+    // 柱子从轴线向上生长，31 根柱子依次错开 6ms（原型 .chart-bar 的 scaleY 入场）
+    val grow = remember { Animatable(0f) }
+    LaunchedEffect(bars) {
+        grow.snapTo(0f)
+        grow.animateTo(1f, tween(820, easing = FastOutSlowInEasing))
+    }
+
     Canvas(
         modifier
             .fillMaxWidth()
@@ -158,7 +169,7 @@ fun ExpenseBarChart(
         val pitch = barPitch(size.width, count)
         // 柱间距固定 2dp、柱宽上限 13dp（原型 .chart-bar：flex + gap 2 + max-width 13）
         val gap = 2.dp.toPx()
-        val barWidth = (pitch - gap).coerceIn(2.dp.toPx(), 13.dp.toPx())
+        val barWidth = (pitch - gap).coerceIn(2.dp.toPx(), 9.dp.toPx())
         val labelBand = 18.dp.toPx()
         val axisY = size.height - labelBand
         val plotTop = 6.dp.toPx()
@@ -168,16 +179,14 @@ fun ExpenseBarChart(
         fun yAt(cents: Long): Float =
             axisY - (cents / 100f / maxYuan).coerceIn(0f, 1f) * plotH
 
-        // 1) 虚线网格（上限 / 2/3 / 1/3），轴线另画实线
-        val dash = PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 4.dp.toPx()))
+        // 1) 细网格（上限 / 2/3 / 1/3），原型是实线而不是虚线
         listOf(1f, 2f / 3f, 1f / 3f).forEach { fraction ->
             val y = axisY - fraction * plotH
             drawLine(
-                color = c.rule.copy(alpha = 0.7f),
+                color = c.rule.copy(alpha = 0.55f),
                 start = Offset(0f, y),
                 end = Offset(size.width, y),
                 strokeWidth = 1.dp.toPx(),
-                pathEffect = dash,
             )
         }
 
@@ -187,7 +196,9 @@ fun ExpenseBarChart(
             val isSelected = index == selected
             val dimmed = selected >= 0 && !isSelected
             if (bar.cents > 0L) {
-                val top = yAt(bar.cents)
+                val progress = ((grow.value - index * 0.006f) / 0.82f).coerceIn(0f, 1f)
+                val fullTop = yAt(bar.cents)
+                val top = axisY - (axisY - fullTop) * progress
                 val barHeight = (axisY - top).coerceAtLeast(2.dp.toPx())
                 if (isSelected) {
                     // 柔和投影：同一根柱子下移 2dp 先画一层低透明度
@@ -200,7 +211,7 @@ fun ExpenseBarChart(
                             radiusTop = 5.dp.toPx(),
                             radiusBottom = 1.dp.toPx(),
                         ),
-                        color = c.blueDeep.copy(alpha = 0.22f),
+                        color = c.blueDeep.copy(alpha = 0.22f * progress),
                     )
                 }
                 val alpha = if (dimmed) 0.3f else 1f
@@ -226,9 +237,9 @@ fun ExpenseBarChart(
                         endY = axisY,
                     ),
                 )
-                if (isSelected) {
+                if (isSelected && progress > 0.92f) {
                     val dotX = left + barWidth / 2f
-                    val dotY = (top - 9.dp.toPx()).coerceAtLeast(4.dp.toPx())
+                    val dotY = (fullTop - 9.dp.toPx()).coerceAtLeast(4.dp.toPx())
                     drawCircle(c.jadeSoft, radius = 5.dp.toPx(), center = Offset(dotX, dotY))
                     drawCircle(c.jade, radius = 2.5.dp.toPx(), center = Offset(dotX, dotY))
                 }
@@ -272,6 +283,7 @@ fun CategoryDonut(
     onSelect: (String?) -> Unit,
     modifier: Modifier = Modifier,
     ringSize: Dp = 171.dp,
+    showCenterLabels: Boolean = true,
 ) {
     val c = MaterialTheme.eco
     val selectedSlice = slices.firstOrNull { it.name == selected }
@@ -339,8 +351,9 @@ fun CategoryDonut(
             ring(geo.rInner, geo.strokeInner, alpha = 1f, value = { it.actualCents }, total = slices.sumOf { it.actualCents })
         }
 
-        // 圆心读数：分类名（未选中 = 总支出）/ 金额 / 占比
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        // 圆心读数：分类名（未选中 = 总支出）/ 金额 / 占比。
+        // 统计页按原型把读数放到环左右两侧，这里可以关掉圆心文字，露出空心。
+        if (showCenterLabels) Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = selectedSlice?.name ?: "总支出",
                 style = EcoType.Micro.copy(fontSize = 8.sp),

@@ -1,10 +1,13 @@
 package com.controleco.app.ui
 
 import android.content.Intent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,11 +24,13 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlin.math.roundToInt
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -146,15 +151,28 @@ fun AccBookNav(
         navController = navController,
         startDestination = "main",
         modifier = Modifier.fillMaxSize(),
+        // 原型 .page-enter：380ms 淡入 + 7px 下移回弹；返回用 pageInRight 的横向 14px
         enterTransition = {
-            fadeIn(animationSpec = tween(180)) +
-                slideInHorizontally(animationSpec = tween(180), initialOffsetX = { it / 14 })
+            fadeIn(tween(380, easing = FastOutSlowInEasing)) +
+                slideInVertically(
+                    animationSpec = tween(380, easing = FastOutSlowInEasing),
+                    initialOffsetY = { (it * 0.0085f).roundToInt() },
+                )
         },
-        exitTransition = { fadeOut(animationSpec = tween(120)) },
-        popEnterTransition = { fadeIn(animationSpec = tween(160)) },
+        exitTransition = { fadeOut(tween(200)) },
+        popEnterTransition = {
+            fadeIn(tween(340, easing = FastOutSlowInEasing)) +
+                slideInHorizontally(
+                    animationSpec = tween(340, easing = FastOutSlowInEasing),
+                    initialOffsetX = { it / 28 },
+                )
+        },
         popExitTransition = {
-            fadeOut(animationSpec = tween(120)) +
-                slideOutHorizontally(animationSpec = tween(160), targetOffsetX = { it / 14 })
+            fadeOut(tween(200)) +
+                slideOutHorizontally(
+                    animationSpec = tween(300, easing = FastOutSlowInEasing),
+                    targetOffsetX = { it / 28 },
+                )
         },
     ) {
         composable("main") {
@@ -287,28 +305,47 @@ private fun MainScaffold(
     // 再次点击当前标签 → 计数 +1，由页面自己"回到顶部"（列表/滚动页通用）
     var reenterTick by rememberSaveable { mutableIntStateOf(0) }
     val tabStates = rememberSaveableStateHolder()
+    // 原型每次切页重放 .page-enter：新页面直接替换旧页面，从透明 + 7px 下移淡入。
+    // 不用 AnimatedContent 叠放两页（会残留旧页的 pointerInput，挡掉新页点击）。
+    val pageIn = remember { Animatable(1f) }
+    LaunchedEffect(tab) {
+        pageIn.snapTo(0f)
+        pageIn.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(380, easing = FastOutSlowInEasing),
+        )
+    }
     Box(Modifier.fillMaxSize()) {
-        tabStates.SaveableStateProvider(tab) {
-            when (tab) {
-                0 -> HomeScreen(
-                    vm = vm,
-                    onOpenSettings = onOpenSettings,
-                    onOpenCategories = onOpenCategories,
-                )
-                1 -> TransactionListScreen(
-                    vm = vm,
-                    onEditTransaction = onEditTransaction,
-                    scrollToTopTick = reenterTick,
-                )
-                2 -> StatsScreen(vm = vm, scrollToTopTick = reenterTick)
-                3 -> ProfileScreen(
-                    vm = vm,
-                    onOpenAccount = onOpenAccount,
-                    onOpenImport = onOpenImport,
-                    onOpenPending = onOpenPending,
-                    onOpenSettings = onOpenSettings,
-                    onOpenCategories = onOpenCategories,
-                )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    alpha = pageIn.value
+                    translationY = (1f - pageIn.value) * 24f
+                },
+        ) {
+            tabStates.SaveableStateProvider(tab) {
+                when (tab) {
+                    0 -> HomeScreen(
+                        vm = vm,
+                        onOpenSettings = onOpenSettings,
+                        onOpenCategories = onOpenCategories,
+                    )
+                    1 -> TransactionListScreen(
+                        vm = vm,
+                        onEditTransaction = onEditTransaction,
+                        scrollToTopTick = reenterTick,
+                    )
+                    2 -> StatsScreen(vm = vm, scrollToTopTick = reenterTick)
+                    3 -> ProfileScreen(
+                        vm = vm,
+                        onOpenAccount = onOpenAccount,
+                        onOpenImport = onOpenImport,
+                        onOpenPending = onOpenPending,
+                        onOpenSettings = onOpenSettings,
+                        onOpenCategories = onOpenCategories,
+                    )
+                }
             }
         }
         EcoBottomNav(

@@ -2,7 +2,11 @@ package com.controleco.app.ui.home
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -24,6 +28,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -45,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -54,6 +61,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
@@ -78,7 +86,9 @@ import com.controleco.app.ui.common.EcoIcons
 import com.controleco.app.ui.common.rememberReducedMotion
 import com.controleco.app.ui.eco.EcoAutoMoney
 import com.controleco.app.ui.eco.EcoBudgetSheet
+import com.controleco.app.ui.eco.EcoArrival
 import com.controleco.app.ui.eco.EcoCategoryTile
+import com.controleco.app.ui.eco.EcoCountUpMoney
 import com.controleco.app.ui.eco.EcoIconTile
 import com.controleco.app.ui.eco.EcoMicro
 import com.controleco.app.ui.eco.EcoPane
@@ -379,7 +389,8 @@ fun HomeScreen(
 private fun ModeRemaining(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate) {
     val c = MaterialTheme.eco
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val ringSize = min(maxWidth.value * 0.84f, maxHeight.value * 0.60f).coerceIn(200f, 306f).dp
+        // 原型环径 306：只受宽度限制，不再被高度压小（小屏按 84% 宽兜底）
+        val ringSize = min(maxWidth.value * 0.84f, 306f).coerceAtLeast(176f).dp
         Column(
             Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -409,7 +420,21 @@ private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate
     val ratio = s.remainingRatio.coerceIn(0f, 1f)
     val daysLeft = period.daysLeft(today)
     val timeRatio = (daysLeft.toFloat() / period.days.coerceAtLeast(1)).coerceIn(0f, 1f)
-
+    // 原型：液面 1.1s、时间环稍慢地画出来（首帧从 0 开始）
+    val drawn = remember { Animatable(0f) }
+    val timeDrawn = remember { Animatable(0f) }
+    LaunchedEffect(ratio) {
+        drawn.animateTo(
+            ratio,
+            tween(1100, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)),
+        )
+    }
+    LaunchedEffect(timeRatio) {
+        timeDrawn.animateTo(
+            timeRatio,
+            tween(1300, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)),
+        )
+    }
     Box(Modifier.size(size), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val u = this.size.minDimension / 320f
@@ -425,8 +450,13 @@ private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate
                 center = Offset(cx, cy + 3.5f * u),
                 style = Stroke(stroke),
             )
-            // 主轨
-            drawCircle(c.track, radius = r, center = Offset(cx, cy), style = Stroke(stroke))
+            // 主轨：偏玉色的浅轨（原型 track 不是灰蓝）
+            drawCircle(
+                color = lerp(c.track, c.jadeSoft, 0.55f),
+                radius = r,
+                center = Offset(cx, cy),
+                style = Stroke(stroke),
+            )
             // 外描边 + 内亮线
             drawCircle(
                 color = c.rule.copy(alpha = 0.8f),
@@ -442,12 +472,14 @@ private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate
             )
             // 液面
             drawArc(
-                brush = Brush.sweepGradient(
-                    colors = listOf(tone.copy(alpha = 0.7f), tone, toneHi, tone),
-                    center = Offset(cx, cy),
+                // 原型是斜向线性渐变（budgetFill），sweep 会在 12 点留一道接缝
+                brush = Brush.linearGradient(
+                    colors = listOf(toneHi, tone, toneHi, tone),
+                    start = Offset(cx - r, cy - r),
+                    end = Offset(cx + r, cy + r),
                 ),
                 startAngle = -90f,
-                sweepAngle = 360f * ratio,
+                sweepAngle = 360f * drawn.value,
                 useCenter = false,
                 topLeft = Offset(cx - r, cy - r),
                 size = Size(r * 2, r * 2),
@@ -467,7 +499,7 @@ private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate
                     center = Offset(cx, cy),
                 ),
                 startAngle = -90f,
-                sweepAngle = 360f * timeRatio,
+                sweepAngle = 360f * timeDrawn.value,
                 useCenter = false,
                 topLeft = Offset(cx - timeR, cy - timeR),
                 size = Size(timeR * 2, timeR * 2),
@@ -487,12 +519,12 @@ private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text("本月剩余", style = EcoType.MeterLabel, color = c.muted)
             Spacer(Modifier.height(4.dp))
-            EcoAutoMoney(
-                text = Money.formatYuanGroupedFixed(s.remainingCents),
+            EcoCountUpMoney(
+                cents = s.remainingCents,
                 style = EcoType.MeterMoney,
-                color = tone,
-                widthLimit = size * 0.62f,
-                minSize = 23.sp,
+                color = c.ink,
+                widthLimit = size * 0.65f,
+                minSize = 21.sp,
             )
             Spacer(Modifier.height(2.dp))
             Text(
@@ -520,6 +552,17 @@ private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate
 @Composable
 private fun TodayCard(s: Budget.Snapshot) {
     val c = MaterialTheme.eco
+    // 原型 starBreath 3.5s：星星在 .9→1.15 之间呼吸并轻微旋转
+    val star = rememberInfiniteTransition(label = "today-star")
+    val starPhase by star.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(1750, easing = FastOutSlowInEasing),
+            RepeatMode.Reverse,
+        ),
+        label = "today-star-phase",
+    )
     val over = s.todayLeftCents < 0
     val tone = when {
         over -> c.clay
@@ -528,8 +571,8 @@ private fun TodayCard(s: Budget.Snapshot) {
     }
     EcoPane(
         modifier = Modifier
-            .fillMaxWidth(0.92f)
-            .height(118.dp),
+            .fillMaxWidth(0.77f)
+            .height(108.dp),
         shape = RoundedCornerShape(24.dp),
         elevation = 12.dp,
     ) {
@@ -541,12 +584,12 @@ private fun TodayCard(s: Budget.Snapshot) {
                     color = c.muted,
                 )
                 Spacer(Modifier.height(4.dp))
-                EcoAutoMoney(
-                    text = Money.formatYuanGroupedFixed(if (over) -s.todayLeftCents else s.todayLeftCents),
+                EcoCountUpMoney(
+                    cents = if (over) -s.todayLeftCents else s.todayLeftCents,
                     style = EcoType.TodayAmount,
                     color = tone,
-                    widthLimit = 270.dp,
-                    minSize = 30.sp,
+                    widthLimit = 240.dp,
+                    minSize = 26.sp,
                 )
                 Spacer(Modifier.height(6.dp))
                 Canvas(Modifier.width(92.dp).height(8.dp)) {
@@ -563,7 +606,14 @@ private fun TodayCard(s: Budget.Snapshot) {
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(top = 16.dp, end = 22.dp)
-                    .size(16.dp),
+                    .size(16.dp)
+                    .graphicsLayer {
+                        alpha = 0.46f + 0.48f * starPhase
+                        rotationZ = -8f + 16f * starPhase
+                        val sc = 0.90f + 0.25f * starPhase
+                        scaleX = sc
+                        scaleY = sc
+                    },
             )
         }
     }
@@ -582,12 +632,12 @@ private fun ModeCategories(
             Column(Modifier.weight(1f)) {
                 Text("分类剩余", style = EcoType.AssetLabel.copy(fontSize = 10.sp), color = c.muted)
                 Spacer(Modifier.height(5.dp))
-                EcoAutoMoney(
-                    text = Money.formatYuanGroupedFixed(totalRemaining),
+                EcoCountUpMoney(
+                    cents = totalRemaining,
                     style = EcoType.CatTotal,
                     color = c.ink,
                     widthLimit = 250.dp,
-                    minSize = 24.sp,
+                    minSize = 22.sp,
                     textAlign = TextAlign.Start,
                 )
             }
@@ -596,16 +646,23 @@ private fun ModeCategories(
         Spacer(Modifier.height(10.dp))
         MonthProgress(period, today)
         Spacer(Modifier.height(8.dp))
+        val scrollable = bars.size >= 6
         Column(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .then(if (scrollable) Modifier.verticalScroll(rememberScrollState()) else Modifier)
                 .padding(bottom = 8.dp),
+            verticalArrangement = if (scrollable) Arrangement.Top else Arrangement.SpaceEvenly,
         ) {
             bars.forEachIndexed { index, bar ->
-                CategoryBarRow(bar, compact = bars.size >= 6, dense = bars.size >= 8)
-                if (index != bars.lastIndex) Spacer(Modifier.height(2.dp))
+                EcoArrival(
+                    delayMillis = 70 + index * 55,
+                    turn = if (index % 2 == 0) 2.2f else -2.2f,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    CategoryBarRow(bar, index = index, compact = bars.size >= 6, dense = bars.size >= 8)
+                }
             }
             if (bars.isEmpty()) {
                 Text(
@@ -648,7 +705,7 @@ private fun MonthProgress(period: MonthPeriod, today: LocalDate) {
 }
 
 @Composable
-private fun CategoryBarRow(bar: CategoryBarData, compact: Boolean, dense: Boolean) {
+private fun CategoryBarRow(bar: CategoryBarData, index: Int, compact: Boolean, dense: Boolean) {
     val c = MaterialTheme.eco
     val tint = if (bar.isOther) {
         c.amber
@@ -705,11 +762,14 @@ private fun CategoryBarRow(bar: CategoryBarData, compact: Boolean, dense: Boolea
             if (bar.budgetCents <= 0) {
                 Text("未设预算", style = EcoType.Pill.copy(fontSize = 11.sp), color = c.quiet)
             } else {
-                Text(
-                    Money.formatYuanGrouped(bar.remainingCents),
+                EcoCountUpMoney(
+                    cents = bar.remainingCents,
                     style = EcoType.CatAmount.copy(fontSize = if (dense) 14.5.sp else 16.5.sp),
                     color = amountColor,
-                    maxLines = 1,
+                    modifier = Modifier.widthIn(max = 140.dp),
+                    widthLimit = 140.dp,
+                    minSize = 12.sp,
+                    textAlign = TextAlign.End,
                 )
             }
         }
@@ -726,6 +786,7 @@ private fun CategoryBarRow(bar: CategoryBarData, compact: Boolean, dense: Boolea
                         listOf(tint.copy(alpha = 0.58f), tint)
                     },
                 ),
+                animationDelayMillis = 120 + index * 55,
             )
         } else {
             Box(
@@ -740,13 +801,13 @@ private fun CategoryBarRow(bar: CategoryBarData, compact: Boolean, dense: Boolea
         Spacer(Modifier.height(5.dp))
         Row(Modifier.fillMaxWidth()) {
             Text(
-                "已花 ${Money.formatYuanGrouped(bar.spentCents)}",
+                "已花 ${Money.formatYuanGroupedFixed(bar.spentCents)}",
                 style = EcoType.PageNote.copy(fontSize = if (dense) 8.sp else 9.sp),
                 color = c.muted,
             )
             Spacer(Modifier.weight(1f))
             Text(
-                if (bar.budgetCents > 0) "预算 ${Money.formatYuanGrouped(bar.budgetCents)}" else "未设预算",
+                if (bar.budgetCents > 0) "预算 ${Money.formatYuanGroupedFixed(bar.budgetCents)}" else "未设预算",
                 style = EcoType.PageNote.copy(fontSize = if (dense) 8.sp else 9.sp),
                 color = c.muted,
             )
@@ -782,16 +843,12 @@ private fun ModeSpentAndDeposit(
     trend: HomeTrend,
 ) {
     val c = MaterialTheme.eco
-    val spentTone = when (tone) {
-        Budget.Tone.OK -> c.ink
-        Budget.Tone.MID -> c.amber
-        Budget.Tone.LOW -> c.clay
-    }
+    // 原型资产页的「本月已花」恒为墨色，只有总存款用蓝色/陶土区分正负
     Column(Modifier.fillMaxSize()) {
         AssetStage(
             label = "本月已花",
-            amount = Money.formatYuanGroupedFixed(spentCents),
-            color = spentTone,
+            amountCents = spentCents,
+            color = c.ink,
             dotColor = c.amber,
             values = trend.spent,
             stageColor = c.amber,
@@ -812,7 +869,7 @@ private fun ModeSpentAndDeposit(
         }
         AssetStage(
             label = "总存款",
-            amount = Money.formatYuanGroupedFixed(depositCents),
+            amountCents = depositCents,
             color = if (depositCents < 0) c.clay else c.blue,
             dotColor = if (depositCents < 0) c.clay else c.jade,
             values = trend.deposit,
@@ -825,7 +882,7 @@ private fun ModeSpentAndDeposit(
 @Composable
 private fun AssetStage(
     label: String,
-    amount: String,
+    amountCents: Long,
     color: Color,
     dotColor: Color,
     values: List<Float>,
@@ -835,6 +892,24 @@ private fun AssetStage(
     val c = MaterialTheme.eco
     Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         AssetChart(values = values, color = stageColor, modifier = Modifier.fillMaxSize())
+        // 原型 .asset-stage::before：金额后面垫一层纸色径向渐变，让曲线退到字后面
+        Box(
+            Modifier
+                .matchParentSize()
+                .drawBehind {
+                    drawRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                c.paper.copy(alpha = 0.94f),
+                                c.paper.copy(alpha = 0.55f),
+                                Color.Transparent,
+                            ),
+                            center = center,
+                            radius = size.maxDimension * 0.50f,
+                        ),
+                    )
+                },
+        )
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(5.dp).clip(CircleShape).background(dotColor))
@@ -842,12 +917,12 @@ private fun AssetStage(
                 Text(label, style = EcoType.AssetLabel, color = c.muted)
             }
             Spacer(Modifier.height(6.dp))
-            EcoAutoMoney(
-                text = amount,
+            EcoCountUpMoney(
+                cents = amountCents,
                 style = EcoType.AssetAmount,
                 color = color,
                 widthLimit = 320.dp,
-                minSize = 32.sp,
+                minSize = 28.sp,
             )
         }
     }
@@ -855,6 +930,12 @@ private fun AssetStage(
 
 @Composable
 private fun AssetChart(values: List<Float>, color: Color, modifier: Modifier = Modifier) {
+    // 原型：面积 1s、墨线 2.25s 依次淡入；这里用整体 reveal 近似，避免首帧就压住金额
+    val reveal = remember { Animatable(0f) }
+    LaunchedEffect(values) {
+        reveal.snapTo(0f)
+        reveal.animateTo(1f, tween(1500, delayMillis = 260, easing = FastOutSlowInEasing))
+    }
     Canvas(modifier) {
         if (values.size < 2) return@Canvas
         val w = size.width
@@ -884,15 +965,17 @@ private fun AssetChart(values: List<Float>, color: Color, modifier: Modifier = M
         drawPath(
             path = area,
             brush = Brush.verticalGradient(
-                listOf(color.copy(alpha = 0.16f), color.copy(alpha = 0.03f), Color.Transparent),
+                listOf(color.copy(alpha = 0.075f), color.copy(alpha = 0.018f), Color.Transparent),
                 startY = top,
                 endY = h,
             ),
+            alpha = reveal.value,
         )
         drawPath(
             path = line,
-            color = color.copy(alpha = 0.48f),
-            style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round),
+            color = color.copy(alpha = 0.30f),
+            style = Stroke(width = 2.0.dp.toPx(), cap = StrokeCap.Round),
+            alpha = reveal.value,
         )
     }
 }

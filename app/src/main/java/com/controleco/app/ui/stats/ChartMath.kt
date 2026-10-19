@@ -68,8 +68,12 @@ object ChartMath {
             BarPoint(
                 cents = c,
                 count = n,
-                // 每 5 格标一个数字；期末补一格，但离上一个刻度太近（如 31 距 30）就跳过，避免数字挤在一起
-                axisLabel = if (pos % 5 == 0 || (pos == days && pos % 5 >= 3)) "${date.dayOfMonth}" else null,
+                // 原型横轴固定 5 个刻度：01 / 09 / 16 / 24 / 月末（两位补零）
+                axisLabel = if (pos == 1 || pos == 9 || pos == 16 || pos == 24 || pos == days) {
+                    "%02d".format(date.dayOfMonth)
+                } else {
+                    null
+                },
                 tip = if (c > 0) {
                     "${date.monthValue}月${date.dayOfMonth}日  ${Money.formatYuanGrouped(c)}  $n 笔"
                 } else {

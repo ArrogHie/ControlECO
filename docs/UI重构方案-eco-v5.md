@@ -97,10 +97,21 @@
 - `:app:testDebugUnitTest` 全过（现有 577 项；保留 `buildCategoryRings`、`billRowText`、分页等纯函数 API）。
 - `:app:assembleDebug` 通过。
 - 浅色/深色静态走查：无旧 M3 卡片/Scaffold 视觉残留；无硬编码旧蓝。
-- 无设备/模拟器，截图对照以 `tmp/proto-shots` 为准（该目录 gitignore）。
+- 真机 `UWW4RCGUKVJFDYWC`（1280×2772 / density 520）已走查：首页三视图、账单、统计、
+  个人、设置、每月首日滚轮、底部导航、FAB、路由转场；截图 `tmp/device/*.png`（gitignore）。
+
+### 5.1 动效验收口径（真机回归补充）
+
+- 切 Tab / 进子页：新页 alpha 0→1、下移 24px→0，380ms；旧页立即移除，不保留可点击层。
+- FAB：只有外圈缩放 .95→1.09、alpha .20→.50，4.2s 呼吸；本体不位移、不缩放。
+- 底部导航：选中胶囊渐变 + 上浮 2dp + 3dp 玉色点，220ms。
+- 金额：940ms easeOutQuart 数字滚动；进度条 900ms；统计柱 820ms 依次生长。
+- Hero 柔光 7s、今日星 3.5s、待确认摇摆 4.5s、Dialog 280ms modalIn。
+- 每月首日：拖拽滚轮不得被 sheet/外层滚动抢手势，松手吸附后落库。
 
 ## 六、提交记录
 
 - `63ee6da` feat(ui): eco v5 design system + home + bills
 - `9b80bd0` feat(ui): 全量对齐 eco v5 原型（其余页面 + 设置 + 悬浮卡 + 文档）
 - `6313b95` style(ui): 自定义颜色弹窗改用 eco 对话框与字段
+- 本次真机回归（动效/滚轮/账单细节，见 `docs/开发日志.md` 2026-10-19 条目）

@@ -58,11 +58,21 @@ class MainActivity : ComponentActivity() {
         // 自动更新检查：同样只认冷启动、从捕获通知进入时不打扰（结果就绪后弹对话框）
         if (coldStart && !fromCaptureRoute) AppUpdate.maybeCheck(this)
         setContent {
-            AccBookTheme(accent = AccentThemeStore.current) {
-                val vm: LedgerViewModel = viewModel()
-                Box(Modifier.fillMaxSize()) {
-                    AccBookNav(vm, navEvent, promptPermissions)
-                    UpdateAvailableDialog()
+            // eco v5 是 390dp 固定栅格设计：系统字体放到 1.25 会把 hero/底排卡片全部撑变形。
+            // 这里把字体的可缩放上限锁在 1.0，dp 尺寸和系统显示大小仍照常生效。
+            val base = androidx.compose.ui.platform.LocalDensity.current
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(
+                    density = base.density,
+                    fontScale = base.fontScale.coerceAtMost(1f),
+                ),
+            ) {
+                AccBookTheme(accent = AccentThemeStore.current) {
+                    val vm: LedgerViewModel = viewModel()
+                    Box(Modifier.fillMaxSize()) {
+                        AccBookNav(vm, navEvent, promptPermissions)
+                        UpdateAvailableDialog()
+                    }
                 }
             }
         }
