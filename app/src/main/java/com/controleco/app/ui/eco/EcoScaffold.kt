@@ -153,7 +153,7 @@ fun EcoBottomNav(
             EcoNavItem("首页", EcoIcons.Home),
             EcoNavItem("账单", EcoIcons.List),
             EcoNavItem("统计", EcoIcons.Chart),
-            EcoNavItem("我的", EcoIcons.User),
+            EcoNavItem("个人", EcoIcons.User),
         )
     }
     Column(

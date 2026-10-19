@@ -5,43 +5,30 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,11 +37,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.controleco.app.data.CategoryIcon
 import com.controleco.app.data.LedgerViewModel
@@ -62,25 +53,55 @@ import com.controleco.app.data.budget.CategoryBudgetMath
 import com.controleco.app.data.budget.CategoryBudgetMode
 import com.controleco.app.data.db.CategoryEntity
 import com.controleco.app.data.db.TxType
-import com.controleco.app.ui.common.CategoryLogo
 import com.controleco.app.ui.common.ColorWheelDialog
-import com.controleco.app.ui.common.PercentInput
-import com.controleco.app.ui.common.SlidingSwitch
-import com.controleco.app.ui.common.hueWheelBrush
-import com.controleco.app.ui.common.rgbOf
-import com.controleco.app.ui.common.solidBrush
+import com.controleco.app.ui.common.EcoIcons
 import com.controleco.app.ui.common.Glyph
 import com.controleco.app.ui.common.GlyphIcon
+import com.controleco.app.ui.common.PercentInput
 import com.controleco.app.ui.common.glyphByName
 import com.controleco.app.ui.common.glyphForName
 import com.controleco.app.ui.common.glyphTint
+import com.controleco.app.ui.common.hueWheelBrush
+import com.controleco.app.ui.common.rgbOf
+import com.controleco.app.ui.eco.EcoCategoryTile
+import com.controleco.app.ui.eco.EcoConfirm
+import com.controleco.app.ui.eco.EcoDangerButton
+import com.controleco.app.ui.eco.EcoEmpty
+import com.controleco.app.ui.eco.EcoField
+import com.controleco.app.ui.eco.EcoGhostButton
+import com.controleco.app.ui.eco.EcoIconButton
+import com.controleco.app.ui.eco.EcoMoneyField
+import com.controleco.app.ui.eco.EcoPageLead
+import com.controleco.app.ui.eco.EcoPageNote
+import com.controleco.app.ui.eco.EcoPane
+import com.controleco.app.ui.eco.EcoPrimaryButton
+import com.controleco.app.ui.eco.EcoRowDivider
+import com.controleco.app.ui.eco.EcoSectionHead
+import com.controleco.app.ui.eco.EcoSegmented
+import com.controleco.app.ui.eco.EcoSheet
+import com.controleco.app.ui.eco.EcoSquareFab
+import com.controleco.app.ui.eco.EcoTextAction
+import com.controleco.app.ui.eco.EcoTopBar
+import com.controleco.app.ui.eco.ecoPressable
+import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.accBook
+import com.controleco.app.ui.theme.eco
 import com.controleco.app.util.Money
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+/** 编辑卡图标宫格的首屏数量（更多图形可展开，全部 26 个都在） */
+private const val QUICK_GLYPH_COUNT = 12
+
+/**
+ * 分类管理（设计稿 5.23）：支出/收入两段列表 + 全局「金额 / 比例」预算口径。
+ *
+ * 新增/编辑全部收在**同一张可滚动底部卡**里：名称、类型、12 图标宫格（可展开全部）、
+ * 自定义颜色（色板 + 色环）、Emoji、相册图片、分类预算（金额/比例）、删除。
+ * 预算仍是全局口径开关（与首页/列表一致），切换只改显示与输入方式。
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CategoriesScreen(vm: LedgerViewModel, onBack: () -> Unit) {
     val categories by vm.categories.collectAsStateWithLifecycle()
@@ -94,6 +115,7 @@ fun CategoriesScreen(vm: LedgerViewModel, onBack: () -> Unit) {
     var showEditor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<CategoryEntity?>(null) }
     var draftIcon by remember { mutableStateOf("") }
+    var sheetError by remember { mutableStateOf<String?>(null) }
     // 本次编辑里刚导入、还没保存的图片：取消时删掉，避免留孤儿文件
     var freshImport by remember { mutableStateOf<String?>(null) }
 
@@ -116,6 +138,7 @@ fun CategoriesScreen(vm: LedgerViewModel, onBack: () -> Unit) {
         editing = category
         draftIcon = category?.icon ?: ""
         freshImport = null
+        sheetError = null
         showEditor = true
     }
 
@@ -124,80 +147,177 @@ fun CategoriesScreen(vm: LedgerViewModel, onBack: () -> Unit) {
         freshImport = null
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("分类管理") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回") }
+    val expenseList = categories.filter { it.type == TxType.EXPENSE }
+    val incomeList = categories.filter { it.type == TxType.INCOME }
+    val allocatedCents = expenseList.sumOf { budgets[it.id] ?: 0L }
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            EcoTopBar(
+                micro = "CATEGORIES",
+                title = "分类管理",
+                onBack = onBack,
+                action = {
+                    EcoIconButton(
+                        icon = EcoIcons.Plus,
+                        contentDescription = "新增分类",
+                        onClick = { openEditor(null) },
+                        size = 38.dp,
+                    )
                 },
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { openEditor(null) }) {
-                Icon(Icons.Filled.Add, contentDescription = "新增分类")
-            }
-        },
-    ) { padding ->
-        LazyColumn(Modifier.padding(padding).fillMaxSize()) {
-            val expenseList = categories.filter { it.type == TxType.EXPENSE }
-            val incomeList = categories.filter { it.type == TxType.INCOME }
-            // 支出分类表头行：右上角是全局预算方式（金额 / 比例）滑动开关
-            item(key = "header-expense") {
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "支出分类",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
-                    )
-                    SlidingSwitch(
-                        options = listOf("金额", "比例"),
-                        selectedIndex = if (budgetMode == CategoryBudgetMode.PERCENT) 1 else 0,
-                        onSelect = {
-                            vm.setCategoryBudgetMode(
-                                if (it == 1) CategoryBudgetMode.PERCENT else CategoryBudgetMode.AMOUNT,
+
+            LazyColumn(
+                Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(start = 22.dp, end = 22.dp, bottom = 112.dp),
+            ) {
+                item(key = "head") {
+                    Column {
+                        EcoPageLead(
+                            "分类预算只作用于支出分类；在「金额 / 比例」之间切换不会改变已有数值，只改变显示与输入方式。",
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Row(
+                            Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                buildString {
+                                    append("支出分类 · 已分配 ")
+                                    append(Money.formatYuanGroupedFixed(allocatedCents))
+                                    if (monthlyBudget > 0L) {
+                                        append(" / ").append(Money.formatYuanGroupedFixed(monthlyBudget))
+                                    } else {
+                                        append(" · 未设月预算")
+                                    }
+                                },
+                                style = EcoType.RowSub.copy(
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.4.sp,
+                                ),
+                                color = MaterialTheme.eco.muted,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 2,
                             )
-                        },
-                    )
+                            Spacer(Modifier.width(8.dp))
+                            EcoSegmented(
+                                options = listOf("金额", "比例"),
+                                selectedIndex = if (budgetMode == CategoryBudgetMode.PERCENT) 1 else 0,
+                                onSelect = {
+                                    vm.setCategoryBudgetMode(
+                                        if (it == 1) CategoryBudgetMode.PERCENT else CategoryBudgetMode.AMOUNT,
+                                    )
+                                },
+                                modifier = Modifier.width(108.dp),
+                                height = 30.dp,
+                                small = true,
+                            )
+                        }
+                    }
                 }
-            }
-            items(expenseList, key = { it.id }) { c ->
-                CategoryRow(c, budgets[c.id] ?: 0L, budgetPercents[c.id] ?: 0, budgetMode) { openEditor(c) }
-            }
-            if (incomeList.isNotEmpty()) {
-                item(key = "header-income") {
-                    Text(
-                        "收入分类",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    )
+
+                item(key = "expense") {
+                    EcoPane(Modifier.fillMaxWidth(), shape = RoundedCornerShape(19.dp)) {
+                        if (expenseList.isEmpty()) {
+                            EcoEmpty(
+                                title = "暂无支出分类",
+                                body = "点右下角 + 新建一个分类，预算与图标都能在编辑卡里改",
+                                icon = EcoIcons.Bowl,
+                            )
+                        } else {
+                            Column {
+                                expenseList.forEachIndexed { index, category ->
+                                    CategoryRowItem(
+                                        category = category,
+                                        budgetCents = budgets[category.id] ?: 0L,
+                                        percentBp = budgetPercents[category.id] ?: 0,
+                                        budgetMode = budgetMode,
+                                        onClick = { openEditor(category) },
+                                    )
+                                    if (index != expenseList.lastIndex) EcoRowDivider(inset = 15.dp)
+                                }
+                            }
+                        }
+                    }
                 }
-                items(incomeList, key = { it.id }) { c ->
-                    CategoryRow(c, budgets[c.id] ?: 0L, budgetPercents[c.id] ?: 0, budgetMode) { openEditor(c) }
+
+                item(key = "incomeHead") {
+                    EcoSectionHead(number = "02", title = "收入分类", aside = "${incomeList.size} ITEMS")
+                }
+
+                item(key = "income") {
+                    EcoPane(Modifier.fillMaxWidth(), shape = RoundedCornerShape(19.dp)) {
+                        if (incomeList.isEmpty()) {
+                            EcoEmpty(
+                                title = "暂无收入分类",
+                                body = "新增分类时把类型切到「收入」即可",
+                                icon = EcoIcons.Gift,
+                            )
+                        } else {
+                            Column {
+                                incomeList.forEachIndexed { index, category ->
+                                    CategoryRowItem(
+                                        category = category,
+                                        budgetCents = budgets[category.id] ?: 0L,
+                                        percentBp = budgetPercents[category.id] ?: 0,
+                                        budgetMode = budgetMode,
+                                        onClick = { openEditor(category) },
+                                    )
+                                    if (index != incomeList.lastIndex) EcoRowDivider(inset = 15.dp)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item(key = "note") {
+                    EcoPageNote(
+                        "删除分类不会删除已入账流水；分类下已有流水时无法删除。分类预算只影响首页与统计的预算读数。",
+                    )
                 }
             }
         }
+
+        EcoSquareFab(
+            onClick = { openEditor(null) },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(end = 22.dp, bottom = 18.dp),
+        )
     }
 
     if (showEditor) {
-        CategoryEditorDialog(
-            initial = editing,
+        val editingNow = editing
+        val deleteAction: (() -> Unit)? = editingNow?.let { entity ->
+            val action: () -> Unit = {
+                vm.deleteCategory(entity.id) { err ->
+                    if (err == null) {
+                        discardFreshImport()
+                        sheetError = null
+                        showEditor = false
+                    } else {
+                        sheetError = err
+                    }
+                }
+            }
+            action
+        }
+        CategoryEditorSheet(
+            initial = editingNow,
+            error = sheetError,
             budgetMode = budgetMode,
-            initialBudgetCents = editing?.let { budgets[it.id] } ?: 0L,
-            initialBudgetPercentBp = editing?.let { budgetPercents[it.id] } ?: 0,
-            // 可分配余量 = 月总预算 − 其它分类预算之和（本分类不计入，等于本次最多能设多少）
+            initialBudgetCents = editingNow?.let { budgets[it.id] } ?: 0L,
+            initialBudgetPercentBp = editingNow?.let { budgetPercents[it.id] } ?: 0,
             totalBudgetCents = monthlyBudget,
+            // 可分配余量 = 月总预算 − 其它分类预算之和（本分类不计入）
             otherAllocatedCents = budgets.entries
-                .filter { it.key != editing?.id }
+                .filter { it.key != editingNow?.id }
                 .sumOf { it.value },
             // 比例口径的可分配余量 = 100% − 其它分类比例之和
             otherAllocatedBp = budgetPercents.entries
-                .filter { it.key != editing?.id }
+                .filter { it.key != editingNow?.id }
                 .sumOf { it.value },
             icon = draftIcon,
             onIconChange = { draftIcon = it },
@@ -205,6 +325,7 @@ fun CategoriesScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                 imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             },
             onClearFreshImport = { discardFreshImport() },
+            onBudgetModeChange = { vm.setCategoryBudgetMode(it) },
             onSave = { id, name, type, budgetCents, budgetBp, icon ->
                 vm.saveCategory(id, name, type, icon) { savedId, err ->
                     if (err == null) {
@@ -218,20 +339,14 @@ fun CategoriesScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                             else -> vm.setCategoryBudget(savedId, budgetCents)
                         }
                         freshImport = null // 已入库，文件归分类所有
+                        sheetError = null
                         showEditor = false
+                    } else {
+                        sheetError = err
                     }
                 }
             },
-            onDelete = editing?.let { entity ->
-                {
-                    vm.deleteCategory(entity.id) { err ->
-                        if (err == null) {
-                            discardFreshImport()
-                            showEditor = false
-                        }
-                    }
-                }
-            },
+            onDelete = deleteAction,
             onClose = {
                 discardFreshImport()
                 showEditor = false
@@ -240,46 +355,69 @@ fun CategoriesScreen(vm: LedgerViewModel, onBack: () -> Unit) {
     }
 }
 
-/** 分类列表行：名称 + 预算取值（金额或比例），点按进编辑 */
+/** 分类行：分类标记 + 名称 + 预算读数（金额 / 比例）或「收入」 */
 @Composable
-private fun CategoryRow(
+private fun CategoryRowItem(
     category: CategoryEntity,
     budgetCents: Long,
     percentBp: Int,
     budgetMode: CategoryBudgetMode,
     onClick: () -> Unit,
 ) {
+    val c = MaterialTheme.eco
+    val isExpense = category.type == TxType.EXPENSE
+    val value = when {
+        !isExpense -> "收入"
+        budgetMode == CategoryBudgetMode.PERCENT ->
+            percentBp.takeIf { it > 0 }?.let { CategoryBudgetMath.formatPercent(it) }
+        else -> budgetCents.takeIf { it > 0L }?.let { Money.formatYuanGroupedFixed(it) }
+    }
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .heightIn(min = 56.dp)
+            .ecoPressable(scaleTo = 0.99f, onClick = onClick)
+            .padding(horizontal = 15.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CategoryLogo(categoryName = category.name, icon = category.icon, size = 30.dp)
-        Spacer(Modifier.width(12.dp))
-        Text(category.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        if (category.type == TxType.EXPENSE) {
-            val trailing = if (budgetMode == CategoryBudgetMode.PERCENT) {
-                percentBp.takeIf { it > 0 }?.let { CategoryBudgetMath.formatPercent(it) }
-            } else {
-                budgetCents.takeIf { it > 0L }?.let { Money.formatYuanGrouped(it) }
-            }
-            trailing?.let {
-                Text(
-                    it,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
+        EcoCategoryTile(
+            categoryName = category.name,
+            icon = category.icon,
+            size = 31.dp,
+            radius = 10.dp,
+        )
+        Spacer(Modifier.width(11.dp))
+        Text(
+            category.name,
+            style = EcoType.RowTitle,
+            color = c.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(8.dp))
+        if (value == null) {
+            Text("未设预算", style = EcoType.RowTrail, color = c.quiet, maxLines = 1)
+        } else {
+            Text(
+                value,
+                style = EcoType.RowTrail.copy(fontWeight = FontWeight.Bold),
+                color = if (isExpense) c.blue else c.quiet,
+                maxLines = 1,
+            )
         }
     }
-    HorizontalDivider()
 }
 
+/**
+ * 新增 / 编辑分类底部卡——**唯一**的编辑入口，所有字段都在这一张可滚动卡里：
+ * 名称 → 类型 → 图标（12 宫格 / 更多）→ 图形颜色（色板 + 色环）→ Emoji → 预算（金额/比例）→ 删除。
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CategoryEditorDialog(    initial: CategoryEntity?,
+private fun CategoryEditorSheet(
+    initial: CategoryEntity?,
+    error: String?,
     budgetMode: CategoryBudgetMode,
     initialBudgetCents: Long,
     initialBudgetPercentBp: Int,
@@ -290,28 +428,36 @@ private fun CategoryEditorDialog(    initial: CategoryEntity?,
     onIconChange: (String) -> Unit,
     onPickImage: () -> Unit,
     onClearFreshImport: () -> Unit,
+    onBudgetModeChange: (CategoryBudgetMode) -> Unit,
     onSave: (Long, String, TxType, Long, Int, String) -> Unit,
     onDelete: (() -> Unit)?,
     onClose: () -> Unit,
 ) {
-    var name by remember { mutableStateOf(initial?.name ?: "") }
-    var type by remember { mutableStateOf(initial?.type ?: TxType.EXPENSE) }
-    var budgetText by remember {
+    val c = MaterialTheme.eco
+    var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "") }
+    var type by remember(initial?.id) { mutableStateOf(initial?.type ?: TxType.EXPENSE) }
+    var budgetText by remember(initial?.id) {
         mutableStateOf(if (initialBudgetCents > 0L) Money.formatCents(initialBudgetCents) else "")
     }
-    var percentCells by remember { mutableStateOf(CategoryBudgetMath.bpToCells(initialBudgetPercentBp)) }
-    var emojiText by remember { mutableStateOf(CategoryIcon.emojiOf(icon) ?: "") }
-    var error by remember { mutableStateOf<String?>(null) }
+    var percentCells by remember(initial?.id) {
+        mutableStateOf(CategoryBudgetMath.bpToCells(initialBudgetPercentBp))
+    }
+    var emojiText by remember(initial?.id) { mutableStateOf(CategoryIcon.emojiOf(icon) ?: "") }
+    var localError by remember(initial?.id) { mutableStateOf<String?>(null) }
     var showColorWheel by remember { mutableStateOf(false) }
+    var showAllGlyphs by remember { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+
     // 图形颜色：图标不是 emoji / 相册图片时都有"颜色"可谈（默认图形也能只换颜色）
     val glyphName = CategoryIcon.glyphOf(icon)
     val isGlyphBased = CategoryIcon.emojiOf(icon) == null && CategoryIcon.imageOf(icon) == null
     val currentColor = if (isGlyphBased) CategoryIcon.glyphColorOf(icon) else null
-    // 当前（或将要用的）形状：选中色块上叠它，让"选色"和"选形状"看得见关联
+    // 当前（或将要用的）形状：自定义色环从它自动取到的颜色起步
     val previewGlyph = glyphName?.let { glyphByName(it) } ?: glyphForName(name.ifBlank { "默认" })
 
     val emojiInvalid = emojiText.isNotBlank() && !CategoryIcon.isEmojiInput(emojiText)
     val palette = MaterialTheme.accBook.categoryPalette
+    val paletteRgb = palette.map { it.toArgb() and 0xFFFFFF }.toSet()
 
     // 还可分配多少：总预算 − 其它分类预算（本分类不计）。没设总预算时不限制
     val hasTotalBudget = totalBudgetCents > 0L
@@ -322,308 +468,402 @@ private fun CategoryEditorDialog(    initial: CategoryEntity?,
     val allocatableBp = (CategoryBudgetMath.PERCENT_SCALE - otherAllocatedBp).coerceAtLeast(0)
     val maxAllowedBp = maxOf(allocatableBp, initialBudgetPercentBp)
 
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text(if (initial == null) "新增分类" else "编辑分类") },
-        text = {
-            Column(
-                Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("分类名称") },
-                    singleLine = true,
+    val typedBp = CategoryBudgetMath.cellsToBp(percentCells)
+    val typedCents = Money.parseCents(budgetText.trim())
+
+    /** 卡内切换预算口径：先把已输入的值折算到另一侧，再切全局开关（不丢本次输入） */
+    fun switchBudgetMode(next: CategoryBudgetMode) {
+        if (next == budgetMode) return
+        if (next == CategoryBudgetMode.PERCENT) {
+            if (CategoryBudgetMath.cellsToBp(percentCells) == 0) {
+                val cents = Money.parseCents(budgetText.trim()) ?: initialBudgetCents
+                val bp = CategoryBudgetMath.percentOf(cents, totalBudgetCents)
+                if (bp != null) percentCells = CategoryBudgetMath.bpToCells(bp)
+            }
+        } else {
+            if (Money.parseCents(budgetText.trim()) == null) {
+                val bp = CategoryBudgetMath.cellsToBp(percentCells)
+                val cents = if (bp > 0) {
+                    CategoryBudgetMath.centsOf(bp, totalBudgetCents)
+                } else {
+                    initialBudgetCents
+                }
+                if (cents > 0L) budgetText = Money.formatCents(cents)
+            }
+        }
+        localError = null
+        onBudgetModeChange(next)
+    }
+
+    val allGlyphs = Glyph.entries.toList()
+    val visibleGlyphs = if (showAllGlyphs) allGlyphs else allGlyphs.take(QUICK_GLYPH_COUNT)
+    val glyphTintColor = currentColor?.let { Color(it or 0xFF000000.toInt()) }
+
+    EcoSheet(
+        onDismiss = onClose,
+        title = if (initial == null) "新增分类" else "编辑分类",
+        subtitle = "图标、颜色与预算都在这一张卡里改完",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            // ---------- 顶部预览 ----------
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                EcoCategoryTile(
+                    categoryName = name.ifBlank { "默认" },
+                    icon = icon,
+                    size = 44.dp,
+                    radius = 14.dp,
                 )
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    androidx.compose.material3.FilterChip(
-                        selected = type == TxType.EXPENSE,
-                        onClick = { type = TxType.EXPENSE },
-                        label = { Text("支出") },
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        name.trim().ifBlank { "新分类" },
+                        style = EcoType.RowTitle,
+                        color = c.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
-                    androidx.compose.material3.FilterChip(
-                        selected = type == TxType.INCOME,
-                        onClick = { type = TxType.INCOME },
-                        label = { Text("收入") },
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        iconLabel(icon),
+                        style = EcoType.RowSub,
+                        color = c.muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
 
-                // ---- 预算（放在图标之上：先定"多少钱"，再定"长什么样"）----
-                // 两种方案（全局开关）：金额 = 月金额（元）；比例 = 占月预算的百分比（四个数字格）
-                if (type == TxType.EXPENSE) {
-                    if (budgetMode == CategoryBudgetMode.PERCENT) {
+            EcoField(
+                label = "名称",
+                value = name,
+                onValueChange = {
+                    name = it
+                    localError = null
+                },
+                placeholder = "例如：餐饮",
+            )
+
+            // ---------- 类型 ----------
+            Column {
+                Text("类型", style = EcoType.FieldLabel, color = c.muted)
+                Spacer(Modifier.height(6.dp))
+                EcoSegmented(
+                    options = listOf("支出", "收入"),
+                    selectedIndex = if (type == TxType.INCOME) 1 else 0,
+                    onSelect = {
+                        type = if (it == 1) TxType.INCOME else TxType.EXPENSE
+                        localError = null
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            // ---------- 图标：12 宫格（可展开全部） ----------
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("图标", style = EcoType.FieldLabel, color = c.muted, modifier = Modifier.weight(1f))
+                    if (glyphName != null) EcoTextAction("按名称取形", onClick = { onIconChange("") })
+                }
+                Spacer(Modifier.height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    visibleGlyphs.chunked(6).forEach { rowGlyphs ->
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            rowGlyphs.forEach { glyph ->
+                                GlyphChoice(
+                                    glyph = glyph,
+                                    selected = glyphName == glyph.name,
+                                    tint = glyphTintColor ?: glyphTint(glyph, name.ifBlank { "默认" }),
+                                    modifier = Modifier.weight(1f).aspectRatio(1f),
+                                    onClick = {
+                                        emojiText = ""
+                                        localError = null
+                                        onIconChange(CategoryIcon.glyph(glyph.name, currentColor))
+                                    },
+                                )
+                            }
+                            repeat(6 - rowGlyphs.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                EcoTextAction(
+                    if (showAllGlyphs) {
+                        "收起图形"
+                    } else {
+                        "更多图形（${allGlyphs.size - QUICK_GLYPH_COUNT}）"
+                    },
+                    onClick = { showAllGlyphs = !showAllGlyphs },
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    EcoGhostButton(
+                        text = "从相册选图",
+                        onClick = onPickImage,
+                        height = 38.dp,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (icon.isNotEmpty()) {
+                        EcoGhostButton(
+                            text = "恢复默认",
+                            onClick = {
+                                onClearFreshImport()
+                                emojiText = ""
+                                onIconChange("")
+                            },
+                            height = 38.dp,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
+
+            // ---------- 图形颜色：色板 + 自定义色环 ----------
+            Column {
+                Text("图形颜色", style = EcoType.FieldLabel, color = c.muted)
+                Spacer(Modifier.height(8.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    // 默认：按分类名自动取色（等于清除自定义颜色）
+                    ColorDot(
+                        selected = currentColor == null,
+                        onClick = {
+                            emojiText = ""
+                            onIconChange(if (glyphName == null) "" else CategoryIcon.glyph(glyphName))
+                        },
+                    ) {
                         Text(
-                            "分类月预算（比例）",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            "默认",
+                            style = EcoType.Pill.copy(fontSize = 8.sp),
+                            color = if (currentColor == null) c.ink else c.muted,
                         )
-                        val typedBp = CategoryBudgetMath.cellsToBp(percentCells)
-                        PercentInput(
-                            cells = percentCells,
-                            onCellsChange = { percentCells = it },
+                    }
+                    palette.forEach { color ->
+                        val rgb = color.toArgb() and 0xFFFFFF
+                        ColorDot(
+                            selected = currentColor == rgb,
+                            color = color,
+                            onClick = {
+                                emojiText = ""
+                                // 固定过形状就保留形状；否则只存颜色（形状按分类名取）
+                                onIconChange(
+                                    if (glyphName == null) {
+                                        CategoryIcon.glyphColorOnly(rgb)
+                                    } else {
+                                        CategoryIcon.glyph(glyphName, rgb)
+                                    },
+                                )
+                            },
+                        ) {
+                            if (currentColor == rgb) {
+                                Icon(
+                                    EcoIcons.Check,
+                                    contentDescription = null,
+                                    tint = if (color.luminance() > 0.55f) Color.Black else Color.White,
+                                    modifier = Modifier.size(15.dp),
+                                )
+                            }
+                        }
+                    }
+                    // 自定义：色环里挑任意颜色（色环里也能直接输十六进制 / RGB）
+                    val customSelected = currentColor != null && currentColor !in paletteRgb
+                    ColorDot(
+                        selected = customSelected,
+                        color = if (customSelected) Color(currentColor!! or 0xFF000000.toInt()) else null,
+                        brush = if (customSelected) null else hueWheelBrush(),
+                        onClick = {
+                            emojiText = ""
+                            showColorWheel = true
+                        },
+                    ) {
+                        if (customSelected) {
+                            Icon(
+                                EcoIcons.Check,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(15.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ---------- Emoji ----------
+            EcoField(
+                label = "Emoji 图标",
+                value = emojiText,
+                onValueChange = { input ->
+                    emojiText = input
+                    if (CategoryIcon.isEmojiInput(input)) {
+                        localError = null
+                        onIconChange(CategoryIcon.emoji(input))
+                    }
+                },
+                placeholder = "在此输入 emoji 作为图标",
+                isError = emojiInvalid,
+                supporting = if (emojiInvalid) {
+                    "请输入 emoji（不接受文字）"
+                } else {
+                    "输入任意 emoji 即替换当前图标；清空后回到图形 / 图片"
+                },
+            )
+
+            // ---------- 分类预算（仅支出） ----------
+            if (type == TxType.EXPENSE) {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "分类月预算",
+                            style = EcoType.FieldLabel,
+                            color = c.muted,
+                            modifier = Modifier.weight(1f),
                         )
+                        EcoSegmented(
+                            options = listOf("金额", "比例"),
+                            selectedIndex = if (budgetMode == CategoryBudgetMode.PERCENT) 1 else 0,
+                            onSelect = {
+                                switchBudgetMode(
+                                    if (it == 1) CategoryBudgetMode.PERCENT else CategoryBudgetMode.AMOUNT,
+                                )
+                            },
+                            modifier = Modifier.width(104.dp),
+                            height = 28.dp,
+                            small = true,
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    if (budgetMode == CategoryBudgetMode.PERCENT) {
                         val overAllocatable = typedBp > maxAllowedBp
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 56.dp)
+                                .clip(RoundedCornerShape(11.dp))
+                                .background(c.surface2)
+                                .border(
+                                    1.dp,
+                                    if (overAllocatable) c.clay else c.rule,
+                                    RoundedCornerShape(11.dp),
+                                )
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                        ) {
+                            PercentInput(
+                                cells = percentCells,
+                                onCellsChange = {
+                                    percentCells = it
+                                    localError = null
+                                },
+                            )
+                        }
+                        Spacer(Modifier.height(5.dp))
                         Text(
                             buildString {
                                 append("还可分配 ${CategoryBudgetMath.formatPercent(allocatableBp)}")
                                 if (typedBp > 0 && hasTotalBudget) {
-                                    append("　≈ ${Money.formatYuanGrouped(CategoryBudgetMath.centsOf(typedBp, totalBudgetCents))}")
+                                    append("　≈ ")
+                                    append(
+                                        Money.formatYuanGroupedFixed(
+                                            CategoryBudgetMath.centsOf(typedBp, totalBudgetCents),
+                                        ),
+                                    )
                                 }
                             },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (overAllocatable) {
-                                MaterialTheme.accBook.critical
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
+                            style = EcoType.PageNote,
+                            color = if (overAllocatable) c.clay else c.quiet,
                         )
                     } else {
-                        OutlinedTextField(
+                        EcoMoneyField(
+                            label = "每月金额",
                             value = budgetText,
-                            onValueChange = { budgetText = it },
-                            label = { Text("分类月预算") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            singleLine = true,
-                        )
-                        if (hasTotalBudget) {
-                            // 一句话就够：剩下的额度就是本次能填的上限；填超了直接变红，不额外加文字
-                            val typed = Money.parseCents(budgetText.trim())
-                            val overAllocatable = typed != null && typed > allocatableCents
-                            Text(
-                                "还可分配 ${Money.formatYuanGrouped(allocatableCents)}",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = if (overAllocatable) {
-                                    MaterialTheme.accBook.critical
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                            )
-                        }
-                    }
-                }
-
-                // ---- 图标：当前效果 + 相册图片 / 恢复默认 ----
-                Text("图标", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CategoryLogo(categoryName = name, icon = icon, size = 52.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            iconLabel(icon),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Row {
-                            TextButton(onClick = onPickImage) { Text("相册图片") }
-                            if (icon.isNotEmpty()) {
-                                TextButton(onClick = {
-                                    onClearFreshImport()
-                                    emojiText = ""
-                                    onIconChange("")
-                                }) { Text("恢复默认") }
-                            }
-                        }
-                    }
-                }
-
-                // ---- 图形颜色：**常驻**（emoji / 相册图片也能一键切到"自定颜色的图形"）----
-                Text("图形颜色", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    // 默认：按分类名自动取色（等于清除自定义颜色）
-                    Box(
-                        Modifier
-                            .size(28.dp)
-                            .clip(RoundedCornerShape(9.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainer)
-                            .clickable {
-                                // 只改过颜色的回到"全自动"；已固定形状的保留形状
-                                onIconChange(if (glyphName == null) "" else CategoryIcon.glyph(glyphName))
+                            onValueChange = {
+                                budgetText = it
+                                localError = null
                             },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            "默认",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (currentColor == null) {
-                                MaterialTheme.colorScheme.primary
+                            placeholder = "0.00",
+                            isError = typedCents != null && hasTotalBudget && typedCents > allocatableCents,
+                            supporting = if (hasTotalBudget) {
+                                "还可分配 ${Money.formatYuanGroupedFixed(allocatableCents)}"
                             } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
+                                "未设置月总预算时不限制分类预算"
                             },
                         )
-                    }
-                    palette.forEach { c ->
-                        val rgb = c.toArgb() and 0xFFFFFF
-                        val selected = currentColor == rgb
-                        Box(
-                            Modifier
-                                .size(28.dp)
-                                .clip(RoundedCornerShape(9.dp))
-                                .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer)
-                                .clickable {
-                                    // 固定过形状就保留形状；否则只存颜色（形状按分类名取）——
-                                    // 当前是 emoji / 图片时也走这条路：等于"换成这个颜色的图形"
-                                    emojiText = ""
-                                    onIconChange(
-                                        if (glyphName == null) {
-                                            CategoryIcon.glyphColorOnly(rgb)
-                                        } else {
-                                            CategoryIcon.glyph(glyphName, rgb)
-                                        },
-                                    )
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Box(
-                                Modifier
-                                    .size(if (selected) 20.dp else 18.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(c),
-                            )
-                            if (selected) {
-                                GlyphIcon(glyph = previewGlyph, tint = MaterialTheme.colorScheme.onPrimaryContainer, size = 22.dp)
-                            }
-                        }
-                    }
-
-                    // 自定义：色环里挑任意颜色（色环里也能直接输十六进制 / RGB）
-                    val paletteRgb = palette.map { it.toArgb() and 0xFFFFFF }.toSet()
-                    val customSelected = currentColor != null && currentColor !in paletteRgb
-                    Box(
-                        Modifier
-                            .size(28.dp)
-                            .clip(RoundedCornerShape(9.dp))
-                            .background(if (customSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer)
-                            .clickable {
-                                emojiText = ""
-                                showColorWheel = true
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Box(
-                            Modifier
-                                .size(if (customSelected) 20.dp else 18.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(
-                                    if (customSelected) {
-                                        solidBrush(Color(currentColor!! or 0xFF000000.toInt()))
-                                    } else {
-                                        hueWheelBrush()
-                                    },
-                                ),
-                        )
-                        if (customSelected) {
-                            GlyphIcon(glyph = previewGlyph, tint = MaterialTheme.colorScheme.onPrimaryContainer, size = 22.dp)
-                        }
-                    }
-                }
-
-                // ---- emoji：只留一个输入框，列一堆预设反而干扰选择 ----
-                OutlinedTextField(
-                    value = emojiText,
-                    onValueChange = { input ->
-                        emojiText = input
-                        if (CategoryIcon.isEmojiInput(input)) onIconChange(CategoryIcon.emoji(input))
-                    },
-                    label = { Text("在此输入emoji作为图标") },
-                    placeholder = { Text("在此输入emoji作为图标") },
-                    singleLine = true,
-                    isError = emojiInvalid,
-                    supportingText = if (emojiInvalid) {
-                        { Text("请输入 emoji（不接受文字）") }
-                    } else {
-                        null
-                    },
-                )
-
-                // ---- 内置图形 ----
-                Text("内置图形", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    val currentGlyph = CategoryIcon.glyphOf(icon)
-                    // 自定义了颜色就整排按这个颜色预览：一眼看清"换成这个形状会是什么样"
-                    val customColor = CategoryIcon.glyphColorOf(icon)
-                    Glyph.entries.forEach { g ->
-                        val selected = currentGlyph == g.name
-                        Box(
-                            Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(11.dp))
-                                .background(
-                                    if (selected) {
-                                        MaterialTheme.colorScheme.primaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.surfaceContainer
-                                    },
-                                )
-                                .clickable {
-                                    emojiText = ""
-                                    // 换图形时保留已选的颜色（没选颜色就按分类名自动取）
-                                    onIconChange(CategoryIcon.glyph(g.name, customColor))
-                                },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            GlyphIcon(
-                                glyph = g,
-                                tint = customColor?.let { Color(it or 0xFF000000.toInt()) }
-                                    ?: glyphTint(g, name.ifBlank { "默认" }),
-                                size = 32.dp,
-                            )
-                        }
-                    }
-                }
-
-                error?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                }
-                if (onDelete != null) {
-                    TextButton(onClick = onDelete) {
-                        Text("删除该分类", color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                val trimmed = name.trim()
-                if (trimmed.isEmpty()) {
-                    error = "请输入名称"
-                    return@TextButton
-                }
-                if (type == TxType.EXPENSE && budgetMode == CategoryBudgetMode.PERCENT) {
-                    val bp = CategoryBudgetMath.cellsToBp(percentCells)
-                    if (bp > maxAllowedBp) {
-                        error = "最多可设 ${CategoryBudgetMath.formatPercent(maxAllowedBp)}"
-                        return@TextButton
+
+            val shownError = localError ?: error
+            if (shownError != null) {
+                Text(shownError, style = EcoType.PageNote, color = c.clay)
+            }
+
+            EcoPrimaryButton(
+                text = "保存",
+                onClick = {
+                    val trimmed = name.trim()
+                    when {
+                        trimmed.isEmpty() -> localError = "请输入名称"
+                        // 收入分类没有预算：不解析（也不阻塞）预算输入
+                        type != TxType.EXPENSE -> onSave(initial?.id ?: 0L, trimmed, type, 0L, 0, icon)
+                        budgetMode == CategoryBudgetMode.PERCENT -> {
+                            val bp = CategoryBudgetMath.cellsToBp(percentCells)
+                            if (bp > maxAllowedBp) {
+                                localError = "最多可设 ${CategoryBudgetMath.formatPercent(maxAllowedBp)}"
+                            } else {
+                                onSave(initial?.id ?: 0L, trimmed, type, 0L, bp, icon)
+                            }
+                        }
+                        else -> {
+                            val raw = budgetText.trim()
+                            val cents = if (raw.isEmpty()) 0L else Money.parseCents(raw)
+                            if (cents == null || cents < 0L) {
+                                localError = "分类月预算请输入有效金额（或留空）"
+                            } else if (type == TxType.EXPENSE && cents > maxAllowedCents) {
+                                localError = "最多可设 ${Money.formatYuanGrouped(maxAllowedCents)}"
+                            } else {
+                                onSave(initial?.id ?: 0L, trimmed, type, cents, 0, icon)
+                            }
+                        }
                     }
-                    onSave(initial?.id ?: 0L, trimmed, type, 0L, bp, icon)
-                    return@TextButton
+                },
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                EcoGhostButton(text = "取消", onClick = onClose, modifier = Modifier.weight(1f))
+                if (onDelete != null) {
+                    EcoDangerButton(
+                        text = "删除分类",
+                        onClick = { confirmDelete = true },
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-                val raw = budgetText.trim()
-                val budgetCents = if (raw.isEmpty()) {
-                    0L
-                } else {
-                    val cents = Money.parseCents(raw)
-                    if (cents == null || cents < 0) {
-                        error = "分类月预算请输入有效金额（或留空）"
-                        return@TextButton
-                    }
-                    cents
-                }
-                if (type == TxType.EXPENSE && budgetCents > maxAllowedCents) {
-                    error = "最多可设 ${Money.formatYuanGrouped(maxAllowedCents)}"
-                    return@TextButton
-                }
-                onSave(initial?.id ?: 0L, trimmed, type, budgetCents, 0, icon)
-            }) { Text("保存") }
-        },
-        dismissButton = { TextButton(onClick = onClose) { Text("取消") } },
-    )
+            }
+
+            Text(
+                "预算只作用于支出分类；分类预算只影响读数，不会产生账目。",
+                style = EcoType.PageNote,
+                color = c.quiet,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+        }
+    }
+
+    if (confirmDelete && onDelete != null) {
+        EcoConfirm(
+            title = "删除分类",
+            body = "删除后不可恢复。分类下若已有流水，需要先处理这些账单才能删除。",
+            confirmText = "删除",
+            danger = true,
+            onConfirm = {
+                confirmDelete = false
+                onDelete()
+            },
+            onDismiss = { confirmDelete = false },
+        )
+    }
 
     if (showColorWheel) {
         // 从当前颜色起步（没自定义过就从"这个分类的自动取色"起步），确定后连形状一起写入
@@ -645,6 +885,56 @@ private fun CategoryEditorDialog(    initial: CategoryEntity?,
             },
             onDismiss = { showColorWheel = false },
         )
+    }
+}
+
+/** 图标宫格里的一格：选中蓝底描边，图形按当前自定义色 / 分类名取色 */
+@Composable
+private fun GlyphChoice(
+    glyph: Glyph,
+    selected: Boolean,
+    tint: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val c = MaterialTheme.eco
+    Box(
+        modifier
+            .clip(RoundedCornerShape(11.dp))
+            .background(if (selected) c.blueSoft else c.surface2)
+            .border(
+                1.dp,
+                if (selected) c.blue else c.rule,
+                RoundedCornerShape(11.dp),
+            )
+            .ecoPressable(scaleTo = 0.94f, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        GlyphIcon(glyph = glyph, tint = tint, size = 30.dp)
+    }
+}
+
+/** 色板块：可传纯色或渐变（自定义色环用），选中加粗描边 + 对勾 */
+@Composable
+private fun ColorDot(
+    selected: Boolean,
+    onClick: () -> Unit,
+    color: Color? = null,
+    brush: Brush? = null,
+    content: @Composable () -> Unit = {},
+) {
+    val c = MaterialTheme.eco
+    val shape = RoundedCornerShape(10.dp)
+    Box(
+        Modifier
+            .size(30.dp)
+            .clip(shape)
+            .then(if (brush != null) Modifier.background(brush) else Modifier.background(color ?: c.surface2))
+            .border(if (selected) 2.dp else 1.dp, if (selected) c.ink else c.rule, shape)
+            .ecoPressable(scaleTo = 0.92f, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
     }
 }
 

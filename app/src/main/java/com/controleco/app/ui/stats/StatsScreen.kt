@@ -1,58 +1,89 @@
 package com.controleco.app.ui.stats
 
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.controleco.app.data.LedgerViewModel
 import com.controleco.app.data.PeriodMode
-import com.controleco.app.data.db.TxType
-import com.controleco.app.ui.common.PeriodPickerSheet
-import com.controleco.app.ui.common.PeriodStepper
-import com.controleco.app.ui.common.PeriodSwitch
-import com.controleco.app.ui.common.periodBalanceLabel
-import com.controleco.app.ui.common.periodScopeLabel
-import com.controleco.app.ui.theme.accBook
-import com.controleco.app.util.Money
 import com.controleco.app.data.budget.MonthPeriod
+import com.controleco.app.data.db.CategoryEntity
+import com.controleco.app.data.db.CategorySumRow
+import com.controleco.app.data.db.TxType
+import com.controleco.app.ui.common.EcoIcons
+import com.controleco.app.ui.common.PeriodPickerSheet
+import com.controleco.app.ui.common.periodLabel
+import com.controleco.app.ui.eco.EcoAutoMoney
+import com.controleco.app.ui.eco.EcoPane
+import com.controleco.app.ui.eco.EcoSectionHead
+import com.controleco.app.ui.eco.EcoSegmented
+import com.controleco.app.ui.eco.EcoTopBar
+import com.controleco.app.ui.eco.ecoBottomContentPadding
+import com.controleco.app.ui.eco.ecoPressable
+import com.controleco.app.ui.theme.EcoType
+import com.controleco.app.ui.theme.accBook
+import com.controleco.app.ui.theme.eco
+import com.controleco.app.util.Money
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
- * 统计页：结论 → 趋势（可交互柱状图）→ 分类（预算 vs 实际双环饼图）。
- * 月视角每日一柱、年视角每月一柱；横竖轴标简单数字，点按/滑动柱子实时读数。
- * 图表全部自绘（Canvas），不引入第三方图表库。
+ * 统计页（ECO 版）：顶栏 → 周期工具条 → 结论卡 → 每日/月度支出柱状图 → 分类占比环 → 预算对比。
+ *
+ * 数据流保持原样（[LedgerViewModel.periodRows] / [LedgerViewModel.periodTotals] /
+ * [LedgerViewModel.periodCategorySums] / [LedgerViewModel.categoryBudgets]），
+ * 月视角每日一柱、年视角每月一柱；柱状图与圆环都是自绘 Canvas，不引第三方图表库。
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
+    val c = MaterialTheme.eco
     val month by vm.month.collectAsStateWithLifecycle()
     val mode by vm.periodMode.collectAsStateWithLifecycle()
     val currentAccountingMonth by vm.currentAccountingMonth.collectAsStateWithLifecycle()
@@ -74,6 +105,7 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
 
     val expense = totalsReady.firstOrNull { it.type == TxType.EXPENSE }?.totalCents ?: 0L
     val income = totalsReady.firstOrNull { it.type == TxType.INCOME }?.totalCents ?: 0L
+    val balance = income - expense
 
     // 日均结余：净结余 ÷ 天数（当前周期用"截至今天"，历史周期用满周期天数）；
     // 结余为负时带上负号（说明这个周期平均每天在净流出）。
@@ -93,7 +125,13 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
         isCurrentPeriod -> MonthPeriod.year(month.year, monthStartDay).daysElapsed(today)
         else -> MonthPeriod.year(month.year, monthStartDay).days
     }
-    val dailyBalance = (income - expense) / daysElapsed.coerceAtLeast(1)
+    val dailyBalance = balance / daysElapsed.coerceAtLeast(1)
+
+    // 结论卡下方的小字：本期笔数 / 最大单笔（只算支出）
+    val billCount = rowsReady.size
+    val maxExpense = rowsReady
+        .filter { it.type == TxType.EXPENSE }
+        .maxOfOrNull { it.amountCents } ?: 0L
 
     // 柱状图数据：月视角每日一根、年视角每月一根（月视角按会计月分桶）
     val bars = remember(rowsReady, month, mode, monthStartDay) {
@@ -103,6 +141,8 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
             ChartMath.yearBars(rowsReady, month)
         }
     }
+    // 选中柱由页面持有：卡片头部的 readout 要跟着它走
+    var selectedBar by remember(bars) { mutableIntStateOf(-1) }
 
     // 分类切片：实际支出（本期）+ 分类预算（年视角按 12 个月合计）
     val slices = remember(byCategoryReady, categoryBudgets, categories, mode) {
@@ -119,7 +159,8 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
     }
     // 圆环选中态与配色：**与分类图标同色**（图标自定义过颜色就用它；emoji/相册图片没有颜色，
     // 才由系统从调色板里挑"离已用色最远"的），选中态点空白处取消
-    var selectedSlice by remember(slices) { mutableStateOf<String?>(null) }
+    val selectedState = remember(slices) { mutableStateOf<String?>(null) }
+    var selectedSlice by selectedState
     val palette = MaterialTheme.accBook.categoryPalette
     val sliceColors = remember(slices, palette, categories) {
         val iconByName = categories
@@ -127,147 +168,162 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
             .associate { it.name to it.icon }
         sliceColorsOf(palette, slices, iconByName)
     }
+
+    // 预算对比：分类预算（年视角 ×12）与实际支出对齐，按实际降序
+    val ratioRows = remember(categoryBudgets, categories, byCategoryReady, mode) {
+        buildRatioRows(categoryBudgets, categories, byCategoryReady, mode)
+    }
+    val ratioActual = ratioRows.sumOf { it.actualCents }
+    val ratioBudget = ratioRows.sumOf { it.budgetCents }
+
+    val monthEn = month.atDay(1)
+        .format(DateTimeFormatter.ofPattern("MMM", Locale.ENGLISH))
+        .uppercase(Locale.ENGLISH)
     val listState = rememberLazyListState()
     // 再次点击底部「统计」标签：回到顶部
     LaunchedEffect(scrollToTopTick) {
         if (scrollToTopTick > 0) listState.animateScrollToItem(0)
     }
-    // 用 LazyColumn 而不是普通 Column：分类圆环要当 stickyHeader 常驻屏幕上方，
-    // 往下翻图例时圆环仍看得见（点图例 = 点圆环，两边必须同时在场）
-    LazyColumn(
-        state = listState,
-        modifier = Modifier
-            .fillMaxSize()
-            // 点页面上任意空白处 = 取消圆环选中（点环 / 点图例行会被它们自己接住）
-            .pointerInput(Unit) { detectTapGestures { selectedSlice = null } },
-        contentPadding = PaddingValues(bottom = 24.dp),
-    ) {
-        item(key = "period") {
-            Row(
-                Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                PeriodStepper(
-                    yearMonth = month,
+
+    Column(Modifier.fillMaxSize()) {
+        EcoTopBar(
+            micro = "INSIGHTS / $monthEn",
+            title = "统计",
+            action = {
+                Text(
+                    "${month.year} / ${month.monthValue.toString().padStart(2, '0')}",
+                    style = EcoType.Micro,
+                    color = c.quiet,
+                )
+            },
+        )
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                // 点页面上任意空白处 = 取消圆环选中（点环 / 点图例行会被它们自己接住）
+                .pointerInput(selectedState) { detectTapGestures { selectedState.value = null } },
+            // 底栏悬浮在内容之上，底部留白避免最后一行被盖住
+            contentPadding = PaddingValues(bottom = ecoBottomContentPadding(extra = 6.dp)),
+        ) {
+            item(key = "toolbar") {
+                StatsToolbar(
+                    month = month,
                     mode = mode,
                     onPrev = { vm.prevPeriod() },
                     onNext = { vm.nextPeriod() },
                     onOpenPicker = { showPicker = true },
+                    onMode = { vm.setPeriodMode(it) },
                 )
-                Spacer(Modifier.weight(1f))
-                PeriodSwitch(mode = mode, onChange = { vm.setPeriodMode(it) })
             }
-        }
 
-        // ---- 结论卡：与账单悬浮卡同排版（左：结余大字 + 日均；右：收入 / 支出，+绿 −红，无文字标签） ----
-        item(key = "conclusion") {
-            StatsCard(Modifier.padding(top = 12.dp)) {
-                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.Top) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            periodBalanceLabel(mode),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Text(
-                            Money.formatYuanGroupedFixed(income - expense),
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Text(
-                            "${Money.formatYuanGrouped(dailyBalance)} / day",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 2.dp),
-                        )
-                        if (showRefunds && refundReady > 0L) {
-                            Text(
-                                "退款到账 ${Money.formatYuanGrouped(refundReady)}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 2.dp),
-                            )
+            // ---- 结论卡：本月/本年支出大字 + 日均，右侧收入/结余，下方笔数/最大单笔 ----
+            item(key = "conclusion") {
+                ConclusionCard(
+                    mode = mode,
+                    expenseCents = expense,
+                    incomeCents = income,
+                    balanceCents = balance,
+                    dailyBalanceCents = dailyBalance,
+                    count = billCount,
+                    maxExpenseCents = maxExpense,
+                    refundCents = refundReady,
+                    showRefund = showRefunds,
+                )
+            }
+
+            // ---- 趋势卡：柱状图（可点按/滑动读数） ----
+            item(key = "trendHead") {
+                EcoSectionHead(
+                    number = "01",
+                    title = "支出节奏",
+                    aside = if (mode == PeriodMode.MONTH) "DAILY" else "MONTHLY",
+                    modifier = Modifier.padding(horizontal = 22.dp),
+                )
+            }
+            item(key = "trend") {
+                TrendCard(
+                    mode = mode,
+                    bars = bars,
+                    expenseCents = expense,
+                    selected = selectedBar,
+                    onSelect = { selectedBar = it },
+                )
+            }
+
+            // ---- 分类卡：预算 vs 实际 环比 + 图例 ----
+            item(key = "donutHead") {
+                EcoSectionHead(
+                    number = "02",
+                    title = "分类预算与占比",
+                    aside = "BUDGET / ACTUAL",
+                    modifier = Modifier.padding(horizontal = 22.dp),
+                )
+            }
+            item(key = "donut") {
+                EcoPane(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 22.dp),
+                    shape = RoundedCornerShape(20.dp),
+                ) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(start = 13.dp, end = 13.dp, top = 14.dp, bottom = 12.dp),
+                    ) {
+                        if (slices.isEmpty()) {
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                EmptyNote("暂无分类数据：记账或设置分类预算后这里会出现占比环")
+                            }
+                        } else {
+                            // .donut-body：171 环在左，图例在右（窄屏时图例自动省略长分类名）
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                CategoryDonut(
+                                    slices = slices,
+                                    totalActualCents = expense,
+                                    colors = sliceColors,
+                                    selected = selectedSlice,
+                                    onSelect = { selectedSlice = it },
+                                )
+                                Spacer(Modifier.width(13.dp))
+                                Column(Modifier.weight(1f)) {
+                                    DonutLegend(
+                                        slices = slices,
+                                        totalActualCents = expense,
+                                        colors = sliceColors,
+                                        selected = selectedSlice,
+                                        // 点图例 = 点圆环上该分类（同一份选中态，两边同时高亮）
+                                        onSelect = { selectedSlice = it },
+                                    )
+                                    Spacer(Modifier.height(7.dp))
+                                    Text(
+                                        text = buildString {
+                                            append("外环 预算占比　内环 实际占比")
+                                            if (mode == PeriodMode.YEAR) append("（年视角预算按 12 个月计）")
+                                        },
+                                        style = EcoType.PageNote.copy(fontSize = 7.5.sp, lineHeight = 11.6.sp),
+                                        color = c.quiet,
+                                        textAlign = TextAlign.Start,
+                                    )
+                                }
+                            }
                         }
                     }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            Money.formatSignedPlain(income),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.accBook.income,
-                        )
-                        Spacer(Modifier.height(3.dp))
-                        Text(
-                            Money.formatSignedPlain(-expense),
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.accBook.critical,
-                        )
-                    }
                 }
             }
-        }
 
-        // ---- 趋势卡：柱状图（可点按/滑动读数） ----
-        item(key = "trendLabel") {
-            SectionLabel(if (mode == PeriodMode.MONTH) "每日支出" else "月度支出")
-        }
-        item(key = "trend") {
-            StatsCard {
-                if (expense == 0L) {
-                    EmptyNote("${periodScopeLabel(mode)}暂无支出记录，记一笔后这里会出现柱状图")
-                } else {
-                    ExpenseBarChart(
-                        bars = bars,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
-                    )
-                }
-            }
-        }
-
-        // ---- 分类卡：预算 vs 实际 双环饼图（两侧数字跟着选中项走），常驻屏幕上方 ----
-        item(key = "categoryLabel") { SectionLabel("分类预算与占比") }
-        stickyHeader(key = "categoryDonut") {
-            // 卡片下方会有图例滚过，所以整块先铺一层页面底色，内容不会从圆角外透出来
-            Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) {
-                StatsCard(Modifier.padding(top = 4.dp)) {
-                    if (slices.isEmpty()) {
-                        EmptyNote("暂无分类数据：记账或设置分类预算后这里会出现饼图")
-                    } else {
-                        CategoryDonut(
-                            slices = slices,
-                            totalActualCents = expense,
-                            colors = sliceColors,
-                            selected = selectedSlice,
-                            onSelect = { selectedSlice = it },
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp),
-                        )
-                    }
-                }
-            }
-        }
-        if (slices.isNotEmpty()) {
-            item(key = "categoryCaption") {
-                Text(
-                    buildString {
-                        append("外环 预算占比　内环 实际占比")
-                        if (mode == PeriodMode.YEAR) append("（年视角预算按 12 个月计）")
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 30.dp, end = 30.dp, top = 12.dp, bottom = 8.dp),
+            // ---- 预算对比卡：实际 vs 预算（双环 + 分类清单） ----
+            item(key = "ratio") {
+                RatioCard(
+                    rows = ratioRows,
+                    actualTotal = ratioActual,
+                    budgetTotal = ratioBudget,
+                    colors = sliceColors,
+                    selected = selectedSlice,
+                    onSelect = { selectedSlice = it },
                 )
-            }
-            item(key = "categoryLegend") {
-                StatsCard {
-                    DonutLegend(
-                        slices = slices,
-                        totalActualCents = expense,
-                        colors = sliceColors,
-                        selected = selectedSlice,
-                        // 点图例 = 点圆环上该分类（同一份选中态，两边同时高亮）
-                        onSelect = { selectedSlice = it },
-                        modifier = Modifier.padding(vertical = 4.dp),
-                    )
-                }
             }
         }
     }
@@ -284,36 +340,577 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
     }
 }
 
+// ---------- 工具条 ----------
+
+/** 周期工具条：‹ 2026年10月 / MONTH › + 右侧月/年分段 */
 @Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.onBackground,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 18.dp, bottom = 8.dp),
-    )
+private fun StatsToolbar(
+    month: YearMonth,
+    mode: PeriodMode,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+    onOpenPicker: () -> Unit,
+    onMode: (PeriodMode) -> Unit,
+) {
+    val c = MaterialTheme.eco
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(45.dp)
+            .padding(start = 22.dp, end = 22.dp, top = 4.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StepChevron(icon = EcoIcons.Back, description = "上一${mode.label}", onClick = onPrev)
+        Column(
+            Modifier
+                .widthIn(min = 86.dp)
+                .clip(RoundedCornerShape(9.dp))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onOpenPicker,
+                )
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                periodLabel(month, mode),
+                style = EcoType.RowTitle.copy(
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = (-0.5).sp,
+                ),
+                color = c.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (mode == PeriodMode.MONTH) "MONTH" else "YEAR",
+                style = EcoType.PageNote.copy(
+                    fontSize = 7.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.9.sp,
+                    lineHeight = 10.sp,
+                ),
+                color = c.quiet,
+                maxLines = 1,
+            )
+        }
+        StepChevron(icon = EcoIcons.Next, description = "下一${mode.label}", onClick = onNext)
+        Spacer(Modifier.weight(1f))
+        EcoSegmented(
+            options = listOf("月", "年"),
+            selectedIndex = if (mode == PeriodMode.MONTH) 0 else 1,
+            onSelect = { index -> onMode(if (index == 0) PeriodMode.MONTH else PeriodMode.YEAR) },
+            modifier = Modifier.width(88.dp),
+            height = 30.dp,
+            small = true,
+        )
+    }
 }
 
-/** 白色卡片：与账单/设置页同一套视觉（16dp 圆角 + 发丝描边） */
 @Composable
-private fun StatsCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.accBook.hairline, RoundedCornerShape(16.dp)),
-        content = content,
-    )
+private fun StepChevron(icon: ImageVector, description: String, onClick: () -> Unit) {
+    val c = MaterialTheme.eco
+    Box(
+        Modifier
+            .size(width = 27.dp, height = 28.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .ecoPressable(scaleTo = 0.92f, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = description, tint = c.muted, modifier = Modifier.size(13.dp))
+    }
 }
+
+// ---------- 结论卡 ----------
+
+@Composable
+private fun ConclusionCard(
+    mode: PeriodMode,
+    expenseCents: Long,
+    incomeCents: Long,
+    balanceCents: Long,
+    dailyBalanceCents: Long,
+    count: Int,
+    maxExpenseCents: Long,
+    refundCents: Long,
+    showRefund: Boolean,
+) {
+    val c = MaterialTheme.eco
+    EcoPane(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp)
+            .padding(top = 10.dp),
+        shape = RoundedCornerShape(19.dp),
+        elevation = 10.dp,
+    ) {
+        Box(Modifier.fillMaxWidth()) {
+            // 右上装饰环（极淡，只让大片留白不空）
+            Canvas(Modifier.matchParentSize()) {
+                val ring = if (c.isDark) 0.4f else 0.75f
+                drawCircle(
+                    color = c.rule.copy(alpha = ring),
+                    radius = size.width * 0.34f,
+                    center = Offset(size.width * 1.04f, -size.height * 0.16f),
+                    style = Stroke(1.dp.toPx()),
+                )
+                drawCircle(
+                    color = c.rule.copy(alpha = ring * 0.7f),
+                    radius = size.width * 0.22f,
+                    center = Offset(size.width * 1.04f, -size.height * 0.16f),
+                    style = Stroke(1.dp.toPx()),
+                )
+            }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 15.dp),
+            ) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            if (mode == PeriodMode.MONTH) "本月支出" else "本年支出",
+                            style = EcoType.Micro.copy(fontSize = 9.5.sp),
+                            color = c.muted,
+                        )
+                        Spacer(Modifier.height(1.dp))
+                        EcoAutoMoney(
+                            text = Money.formatYuanGrouped(expenseCents),
+                            style = EcoType.ConclusionAmount,
+                            color = c.ink,
+                            widthLimit = 210.dp,
+                            minSize = 18.sp,
+                            textAlign = TextAlign.Start,
+                        )
+                        Spacer(Modifier.height(1.dp))
+                        Text(
+                            "日均 ${Money.formatYuanGrouped(dailyBalanceCents)} / day",
+                            style = EcoType.PageNote.copy(fontSize = 9.5.sp),
+                            color = c.quiet,
+                            maxLines = 1,
+                        )
+                        if (showRefund && refundCents > 0L) {
+                            Text(
+                                "退款到账 ${Money.formatYuanGrouped(refundCents)}",
+                                style = EcoType.PageNote.copy(fontSize = 9.sp, fontWeight = FontWeight.Medium),
+                                color = c.jade,
+                                maxLines = 1,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(horizontalAlignment = Alignment.End) {
+                        SideAmount(label = "收入", text = Money.formatYuanGrouped(incomeCents), color = c.jade)
+                        Spacer(Modifier.height(6.dp))
+                        SideAmount(
+                            label = "结余",
+                            text = Money.formatYuanGrouped(balanceCents),
+                            color = if (balanceCents < 0L) c.clay else c.jade,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(c.rule))
+                Spacer(Modifier.height(9.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "$count 笔",
+                        style = EcoType.PageNote.copy(fontSize = 8.5.sp, letterSpacing = 0.2.sp),
+                        color = c.quiet,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "最大单笔 ${Money.formatYuanGrouped(maxExpenseCents)}",
+                        style = EcoType.PageNote.copy(fontSize = 8.5.sp, letterSpacing = 0.2.sp),
+                        color = c.quiet,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SideAmount(label: String, text: String, color: Color) {
+    val c = MaterialTheme.eco
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, style = EcoType.PageNote.copy(fontSize = 8.5.sp), color = c.quiet)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text,
+            style = EcoType.RowTrail.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+            color = color,
+            maxLines = 1,
+        )
+    }
+}
+
+// ---------- 趋势卡 ----------
+
+@Composable
+private fun TrendCard(
+    mode: PeriodMode,
+    bars: List<BarPoint>,
+    expenseCents: Long,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+) {
+    val c = MaterialTheme.eco
+    val selectedBar = bars.getOrNull(selected)
+    // 读数：选中柱给"日期 / 金额"，没选中就是本期合计
+    val readoutLabel = selectedBar?.tip
+        ?.substringBefore("  ")
+        ?.takeIf { it.isNotBlank() }
+        ?: "合计"
+    val readoutAmount = Money.formatYuanGrouped(selectedBar?.cents ?: expenseCents)
+    EcoPane(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp),
+        shape = RoundedCornerShape(20.dp),
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 14.dp, end = 14.dp, top = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (mode == PeriodMode.MONTH) "每日支出" else "月度支出",
+                    style = EcoType.SectionTitle.copy(fontSize = 12.5.sp),
+                    color = c.ink,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    readoutLabel,
+                    style = EcoType.PageNote.copy(fontSize = 9.sp),
+                    color = c.muted,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    readoutAmount,
+                    style = EcoType.CatAmount.copy(fontSize = 15.sp),
+                    color = c.ink,
+                    maxLines = 1,
+                )
+            }
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 13.dp, end = 13.dp, top = 9.dp, bottom = 12.dp),
+            ) {
+                Box(Modifier.fillMaxWidth().height(1.dp).background(c.rule))
+                Spacer(Modifier.height(11.dp))
+                if (expenseCents == 0L) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(155.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                if (mode == PeriodMode.MONTH) "本月还没有支出" else "本年还没有支出",
+                                style = EcoType.EmptyTitle.copy(fontSize = 12.sp),
+                                color = c.muted,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "记一笔后这里会出现柱状图",
+                                style = EcoType.PageNote.copy(fontSize = 9.sp),
+                                color = c.quiet,
+                            )
+                        }
+                    }
+                } else {
+                    ExpenseBarChart(
+                        bars = bars,
+                        selected = selected,
+                        onSelect = onSelect,
+                    )
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+}
+
+// ---------- 预算对比卡 ----------
+
+@Composable
+private fun RatioCard(
+    rows: List<BudgetRatioRow>,
+    actualTotal: Long,
+    budgetTotal: Long,
+    colors: Map<String, Color>,
+    selected: String?,
+    onSelect: (String) -> Unit,
+) {
+    val c = MaterialTheme.eco
+    EcoPane(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 22.dp)
+            .padding(top = 14.dp),
+        shape = RoundedCornerShape(20.dp),
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 12.dp, end = 12.dp, top = 16.dp, bottom = 13.dp),
+        ) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                Text("预算对比", style = EcoType.SectionTitle, color = c.ink)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    Money.formatYuanGrouped(actualTotal),
+                    style = EcoType.CatAmount.copy(fontSize = 13.5.sp),
+                    color = c.ink,
+                    maxLines = 1,
+                )
+                Text(
+                    " / ${Money.formatYuanGrouped(budgetTotal)}",
+                    style = EcoType.RowTrail.copy(fontSize = 10.sp),
+                    color = c.quiet,
+                    maxLines = 1,
+                )
+            }
+            if (rows.isEmpty()) {
+                Text(
+                    "还没有分类预算：到「个人 → 分类」给支出分类设定预算后，这里会出现实际与预算的对比。",
+                    style = EcoType.PageNote.copy(fontSize = 9.sp, lineHeight = 14.sp),
+                    color = c.quiet,
+                    modifier = Modifier.padding(top = 10.dp, start = 2.dp, end = 2.dp),
+                )
+            } else {
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    RatioSide(
+                        caption = "实际",
+                        amountCents = actualTotal,
+                        percentText = "已用 ${ratioPercent(actualTotal, budgetTotal).roundToInt()}%",
+                        percentColor = if (actualTotal > budgetTotal) c.clay else c.muted,
+                        alignEnd = false,
+                        modifier = Modifier.weight(1f),
+                    )
+                    RatioRing(
+                        rows = rows,
+                        actualTotalCents = actualTotal,
+                        budgetTotalCents = budgetTotal,
+                        colors = colors,
+                    )
+                    RatioSide(
+                        caption = "预算",
+                        amountCents = budgetTotal,
+                        percentText = "剩余 ${(100f - ratioPercent(actualTotal, budgetTotal)).coerceAtLeast(0f).roundToInt()}%",
+                        percentColor = c.muted,
+                        alignEnd = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    RatioKey()
+                }
+                Spacer(Modifier.height(4.dp))
+                rows.forEachIndexed { index, row ->
+                    if (index > 0) {
+                        Box(Modifier.fillMaxWidth().height(1.dp).background(c.rule))
+                    }
+                    RatioListRow(
+                        row = row,
+                        color = colors[row.name] ?: c.quiet,
+                        actualShare = ratioPercent(row.actualCents, actualTotal),
+                        budgetShare = ratioPercent(row.budgetCents, budgetTotal),
+                        selected = row.name == selected,
+                        dim = selected != null && row.name != selected,
+                        onClick = { onSelect(row.name) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RatioSide(
+    caption: String,
+    amountCents: Long,
+    percentText: String,
+    percentColor: Color,
+    alignEnd: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val c = MaterialTheme.eco
+    Column(
+        modifier,
+        horizontalAlignment = if (alignEnd) Alignment.End else Alignment.Start,
+    ) {
+        Text(
+            caption,
+            style = EcoType.PageNote.copy(fontSize = 8.sp, letterSpacing = 0.2.sp),
+            color = c.muted,
+            maxLines = 1,
+        )
+        Spacer(Modifier.height(2.dp))
+        EcoAutoMoney(
+            text = Money.formatYuanGrouped(amountCents),
+            style = EcoType.CatAmount.copy(fontSize = 14.sp),
+            color = c.ink,
+            minSize = 9.sp,
+            textAlign = if (alignEnd) TextAlign.End else TextAlign.Start,
+        )
+        Spacer(Modifier.height(1.dp))
+        Text(
+            percentText,
+            style = EcoType.RowTrail.copy(fontSize = 11.5.sp),
+            color = percentColor,
+            maxLines = 1,
+        )
+    }
+}
+
+/** 预算对比清单的一行：左侧 9dp 竖色条 + 名称 / 实际 / 占比，第二行 预算 / 预算占比 */
+@Composable
+private fun RatioListRow(
+    row: BudgetRatioRow,
+    color: Color,
+    actualShare: Float,
+    budgetShare: Float,
+    selected: Boolean,
+    dim: Boolean,
+    onClick: () -> Unit,
+) {
+    val c = MaterialTheme.eco
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+            // 选中别的分类时其余行降到 46%（与原型 .dim 一致）
+            .graphicsLayer { alpha = if (dim) 0.46f else 1f }
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) c.blueWash.copy(alpha = if (c.isDark) 0.5f else 0.85f) else Color.Transparent)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .width(9.dp)
+                .fillMaxHeight()
+                .heightIn(min = 42.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .background(color),
+        )
+        Spacer(Modifier.width(11.dp))
+        Column(Modifier.weight(1f)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    row.name,
+                    style = EcoType.RowTitle.copy(fontSize = 14.5.sp, fontWeight = FontWeight.Bold),
+                    color = c.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    Money.formatYuanGrouped(row.actualCents),
+                    style = EcoType.CatAmount.copy(fontSize = 14.5.sp),
+                    color = c.ink,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "${actualShare.roundToInt()}%",
+                    style = EcoType.RowTrail.copy(fontSize = 11.5.sp),
+                    color = c.muted,
+                    modifier = Modifier.width(34.dp),
+                    textAlign = TextAlign.End,
+                )
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "预算",
+                    style = EcoType.PageNote.copy(fontSize = 8.5.sp, letterSpacing = 0.2.sp),
+                    color = c.quiet,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    Money.formatYuanGrouped(row.budgetCents),
+                    style = EcoType.RowTrail.copy(fontSize = 10.5.sp),
+                    color = c.muted,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "${budgetShare.roundToInt()}%",
+                    style = EcoType.PageNote.copy(fontSize = 10.sp),
+                    color = c.quiet,
+                    modifier = Modifier.width(34.dp),
+                    textAlign = TextAlign.End,
+                )
+            }
+        }
+    }
+}
+
+// ---------- 小工具 ----------
+
+/**
+ * 预算对比的行数据：只取设了预算的**支出**分类，年视角预算 ×12，
+ * 实际金额按分类名从本期分类合计里取（与圆环同一份数据），按实际降序。
+ */
+internal fun buildRatioRows(
+    categoryBudgets: Map<Long, Long>,
+    categories: List<CategoryEntity>,
+    byCategory: List<CategorySumRow>,
+    mode: PeriodMode,
+): List<BudgetRatioRow> {
+    if (categoryBudgets.isEmpty()) return emptyList()
+    val actualByName = byCategory.associate { it.categoryName to it.totalCents }
+    val byId = categories.associateBy { it.id }
+    val multiplier = if (mode == PeriodMode.YEAR) 12L else 1L
+    return categoryBudgets.entries
+        .mapNotNull { (id, cents) ->
+            val category = byId[id] ?: return@mapNotNull null
+            if (category.type != TxType.EXPENSE || cents <= 0L) return@mapNotNull null
+            BudgetRatioRow(
+                name = category.name,
+                actualCents = actualByName[category.name] ?: 0L,
+                budgetCents = cents * multiplier,
+            )
+        }
+        .sortedByDescending { it.actualCents }
+}
+
+/** 占比（0..100）；分母 ≤ 0 时返回 0 */
+private fun ratioPercent(part: Long, total: Long): Float =
+    if (total <= 0L) 0f else part * 100f / total
 
 @Composable
 private fun EmptyNote(text: String) {
     Text(
         text,
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(16.dp),
+        style = EcoType.PageNote.copy(fontSize = 9.5.sp, lineHeight = 15.sp),
+        color = MaterialTheme.eco.quiet,
+        modifier = Modifier.padding(horizontal = 6.dp, vertical = 18.dp),
     )
 }

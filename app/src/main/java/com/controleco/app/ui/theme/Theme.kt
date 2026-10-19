@@ -270,14 +270,14 @@ internal fun lightAccBookColors() = AccBookColors(
         pillSelectedContent = Color(0xFF142F37),
     ),
     categoryPalette = listOf(
-        Color(0xFF24788A), // 青蓝
-        Color(0xFF268E70), // 玉绿
-        Color(0xFFB98937), // 琥珀
-        Color(0xFFCC6854), // 陶土
-        Color(0xFF907BA8), // 鸢尾
-        Color(0xFF317FAB), // 晴海
-        Color(0xFFB66678), // 珊瑚
-        Color(0xFF2E8069), // 松林
+        Color(0xFFB95B5B), // 陶红
+        Color(0xFF796834), // 岩金
+        Color(0xFFA3C87E), // 苔绿
+        Color(0xFF347945), // 松林
+        Color(0xFF7EC8C8), // 浅青
+        Color(0xFF7E91C8), // 雾蓝
+        Color(0xFF70439D), // 鸢尾
+        Color(0xFFC87EB6), // 藕荷
     ),
 )
 
@@ -312,14 +312,14 @@ internal fun darkAccBookColors() = AccBookColors(
         pillSelectedContent = Color(0xFF142F37),
     ),
     categoryPalette = listOf(
-        Color(0xFF88D5DF),
-        Color(0xFF88DBB0),
-        Color(0xFFF0C278),
-        Color(0xFFF39F8E),
-        Color(0xFFC4B3DF),
-        Color(0xFFA4D8F3),
-        Color(0xFFF0ADBB),
-        Color(0xFF94D8B5),
+        Color(0xFF5FB6C8), // 浅青
+        Color(0xFF5FBF88), // 苔绿
+        Color(0xFFD6A84A), // 岩金
+        Color(0xFFD9826C), // 陶红
+        Color(0xFFA98BC8), // 鸢尾
+        Color(0xFF6A9BD8), // 雾蓝
+        Color(0xFFD8749E), // 藕荷
+        Color(0xFF94A84E), // 橄榄
     ),
 )
 

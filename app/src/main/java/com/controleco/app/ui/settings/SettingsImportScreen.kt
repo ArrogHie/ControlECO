@@ -1,26 +1,24 @@
 package com.controleco.app.ui.settings
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.material3.MaterialTheme
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.controleco.app.data.LedgerViewModel
-import com.controleco.app.ui.common.InfoRow
-import com.controleco.app.ui.common.PaneCard
-import com.controleco.app.ui.common.RowDivider
-import com.controleco.app.ui.common.SectionTitle
+import com.controleco.app.ui.common.EcoIcons
+import com.controleco.app.ui.common.SettingsDivider
+import com.controleco.app.ui.common.SettingsNote
 import com.controleco.app.ui.common.SettingsPage
-import com.controleco.app.ui.common.SwitchRow
+import com.controleco.app.ui.common.SettingsPane
+import com.controleco.app.ui.common.SettingsRow
+import com.controleco.app.ui.common.SettingsSection
+import com.controleco.app.ui.common.SettingsSwitchRow
+import com.controleco.app.ui.theme.eco
 
 /**
- * 账单导入（个人页「账本」→ 账单导入）：导入入口 + 微信/支付宝导出账单的路径教程 + 退款记录显示开关。
+ * 账单导入（个人页「账本」→ 账单导入）：导入入口 + 微信/支付宝导出账单的路径教程
+ * + 退款记录显示开关。所有回调与开关写回逻辑保持不变。
  */
 @Composable
 fun SettingsImportScreen(
@@ -28,52 +26,55 @@ fun SettingsImportScreen(
     onBack: () -> Unit,
     onImport: () -> Unit,
 ) {
-    SettingsPage(title = "账单导入", onBack = onBack) {
-        SectionTitle("导入")
-        PaneCard {
-            InfoRow(title = "选择账单文件", onClick = onImport)
+    SettingsPage(micro = "IMPORT", title = "账单导入", onBack = onBack) {
+        SettingsSection(number = "01", title = "导入", aside = "IMPORT")
+        SettingsPane {
+            SettingsRow(
+                title = "选择账单文件",
+                subtitle = "微信 xlsx / 支付宝 CSV",
+                icon = EcoIcons.File,
+                iconTint = MaterialTheme.eco.blue,
+                showChevron = true,
+                onClick = onImport,
+            )
         }
 
-        SectionTitle("导出账单（微信 / 支付宝）")
-        PaneCard {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                TutorialStep(
-                    "1. 微信",
-                    "我 → 服务 → 钱包 → 账单 → 常见问题 → 下载账单，用途选「用于个人对账」，xlsx 会发送到邮箱。",
-                )
-                Spacer(Modifier.height(10.dp))
-                TutorialStep(
-                    "2. 支付宝",
-                    "我的 → 账单 → 右上角「…」 → 开具交易流水证明，用途选「用于个人对账」，CSV 会发送到邮箱。",
-                )
-            }
+        SettingsSection(number = "02", title = "导出账单", aside = "HOW TO")
+        SettingsPane {
+            SettingsRow(
+                title = "微信",
+                subtitle = "我 → 服务 → 钱包 → 账单 → 常见问题 → 下载账单，用途选「用于个人对账」，xlsx 会发送到邮箱。",
+                subtitleMaxLines = 3,
+                icon = EcoIcons.Phone,
+                iconTint = MaterialTheme.eco.jade,
+                minHeight = 66.dp,
+            )
+            SettingsDivider()
+            SettingsRow(
+                title = "支付宝",
+                subtitle = "我的 → 账单 → 右上角「…」 → 开具交易流水证明，用途选「用于个人对账」，CSV 会发送到邮箱。",
+                subtitleMaxLines = 3,
+                icon = EcoIcons.App,
+                iconTint = MaterialTheme.eco.blue,
+                minHeight = 66.dp,
+            )
         }
 
-        SectionTitle("显示")
-        PaneCard {
+        SettingsSection(number = "03", title = "显示", aside = "DISPLAY")
+        SettingsPane {
             RefundDisplaySetting(vm)
         }
-    }
-}
 
-@Composable
-private fun TutorialStep(title: String, detail: String) {
-    Column {
-        Text(title, style = MaterialTheme.typography.bodyLarge)
-        Text(
-            detail,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 2.dp),
-        )
+        SettingsNote("导入文件只在本机解析；识别与去重后写入本地账本。原始文件不会上传。")
     }
 }
 
 @Composable
 private fun RefundDisplaySetting(vm: LedgerViewModel) {
     val showRefunds by vm.showRefunds.collectAsStateWithLifecycle()
-    SwitchRow(
+    SettingsSwitchRow(
         title = "显示退款记录",
+        subtitle = "关闭后，退款相关记录不计入流水与汇总",
         checked = showRefunds,
         onCheckedChange = { vm.setShowRefunds(it) },
     )

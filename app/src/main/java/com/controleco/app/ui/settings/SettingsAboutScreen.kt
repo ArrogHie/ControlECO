@@ -1,6 +1,10 @@
 package com.controleco.app.ui.settings
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,99 +14,318 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.controleco.app.BuildConfig
-import com.controleco.app.ui.common.PaneCard
-import com.controleco.app.ui.common.SectionTitle
+import com.controleco.app.ui.common.EcoIcons
+import com.controleco.app.ui.common.SettingsDivider
+import com.controleco.app.ui.common.SettingsNote
 import com.controleco.app.ui.common.SettingsPage
+import com.controleco.app.ui.common.SettingsPane
+import com.controleco.app.ui.common.SettingsRow
+import com.controleco.app.ui.common.SettingsSection
+import com.controleco.app.ui.common.SettingsValueRow
+import com.controleco.app.ui.eco.EcoGhostButton
+import com.controleco.app.ui.eco.EcoHeroCard
+import com.controleco.app.ui.eco.EcoPillTone
+import com.controleco.app.ui.eco.EcoSheet
+import com.controleco.app.ui.eco.EcoToast
+import com.controleco.app.ui.theme.EcoType
+import com.controleco.app.ui.theme.eco
+import com.controleco.app.update.AppUpdate
+
+/** 开源仓库（与个人页「更多」里的仓库行保持一致） */
+private const val GITHUB_REPO_PATH = "ArrogHie/ControlECO"
+private const val GITHUB_REPO_URL = "https://github.com/$GITHUB_REPO_PATH"
+
+/** 深色 hero 上的固定前景色（hero 永远是深色，不随深浅主题变） */
+private val HERO_INK = Color(0xFFF7FFFA)
+private val HERO_SUB = Color(0xFFB9D4CD)
+private val HERO_PILL_INK = Color(0xFFE7F5EF)
+private val LOGO_A = Color(0xFF52A47B)
+private val LOGO_B = Color(0xFF2E7358)
+
+private data class LicenseEntry(val name: String, val license: String, val note: String)
+
+private val LICENSES = listOf(
+    LicenseEntry("Jetpack Compose", "Apache-2.0", "声明式 UI 工具包（androidx.compose.*）"),
+    LicenseEntry("Material 3", "Apache-2.0", "Jetson 组件与主题（androidx.compose.material3）"),
+    LicenseEntry("AndroidX Core / Activity", "Apache-2.0", "兼容库与 Activity Compose 集成"),
+    LicenseEntry("AndroidX Lifecycle / Navigation", "Apache-2.0", "状态收集与单 Activity 导航"),
+    LicenseEntry("Room", "Apache-2.0", "本地 SQLite 持久化（androidx.room）"),
+    LicenseEntry("Kotlin / kotlinx.coroutines", "Apache-2.0", "语言运行时与协程调度"),
+    LicenseEntry("JUnit 4", "EPL-1.0", "单元测试（仅测试构建使用）"),
+)
 
 /**
- * 设置 → 关于 我ECO：版本、隐私承诺与数据存储说明（隐私红线在界面上可见）。
+ * 设置 → 关于 我ECO：品牌 hero + 隐私承诺 + 版本/构建/仓库 + 独立仓库入口。
+ *
+ * 「检查更新」沿用全局更新流程：AppUpdate 发现新版本后写入 updateAvailable，
+ * 由 Activity 级的更新对话框负责下载进度与「安装未知应用」授权闸（installGate），
+ * 本页不重复实现下载逻辑，只负责发起检查与结果提示。
  */
 @Composable
 fun SettingsAboutScreen(onBack: () -> Unit) {
-    SettingsPage(title = "关于 我ECO", onBack = onBack) {
-        PaneCard(modifier = Modifier.padding(top = 16.dp)) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
-                verticalAlignment = Alignment.CenterVertically,
+    val context = LocalContext.current
+    var showLicenses by remember { mutableStateOf(false) }
+    var checking by remember { mutableStateOf(false) }
+
+    val openRepo: () -> Unit = {
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_REPO_URL)))
+        }.onFailure {
+            EcoToast.show("没有可用的浏览器，仓库地址：$GITHUB_REPO_PATH", EcoPillTone.Warn)
+        }
+        Unit
+    }
+
+    SettingsPage(micro = "ABOUT", title = "关于 我ECO", onBack = onBack) {
+        AboutHero()
+
+        SettingsSection(number = "01", title = "隐私与安全", aside = "LOCAL ONLY")
+        SettingsPane {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+                PrivacyBullet("只写本机数据库", "，不联网、不上传，无云端账号与第三方统计。")
+                Spacer(Modifier.height(8.dp))
+                PrivacyBullet("数据存于应用私有目录", "（Room / SQLite），卸载即清除，可被系统备份规则排除。")
+                Spacer(Modifier.height(8.dp))
+                PrivacyBullet(
+                    "通知监听 / 无障碍 / 悬浮窗权限",
+                    "只用于识别支付信息与弹出确认卡片，捕获内容仅在本机解析与留存。",
+                )
+                Spacer(Modifier.height(8.dp))
+                PrivacyBullet("账单导入文件只在本机解析", "，识别与去重后写入本地账本。")
+            }
+        }
+
+        SettingsSection(number = "02", title = "版本", aside = "BUILD")
+        SettingsPane {
+            SettingsValueRow("版本号", "v${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
+            SettingsDivider()
+            SettingsValueRow("构建类型", if (BuildConfig.DEBUG) "debug · 含调试开关" else "release")
+            SettingsDivider()
+            SettingsValueRow("开源仓库", "ArrogHie / ControlECO")
+            SettingsDivider()
+            SettingsRow(
+                title = "检查更新",
+                subtitle = "从 GitHub Release 检查是否有新版本",
+                icon = EcoIcons.Refresh,
+                iconTint = MaterialTheme.eco.blue,
+                trail = if (checking) "检查中…" else "v${BuildConfig.VERSION_NAME}",
+                trailColor = if (checking) MaterialTheme.eco.quiet else MaterialTheme.eco.muted,
+                showChevron = !checking,
+                onClick = {
+                    if (!checking) {
+                        checking = true
+                        AppUpdate.checkNow(context) { message ->
+                            checking = false
+                            when {
+                                message == null -> EcoToast.show("发现新版本，正在打开更新…", EcoPillTone.Blue)
+                                message.startsWith("检查失败") -> EcoToast.show(message, EcoPillTone.Warn)
+                                else -> EcoToast.show(message, EcoPillTone.Good)
+                            }
+                        }
+                    }
+                },
+            )
+            SettingsDivider()
+            SettingsRow(
+                title = "开源许可",
+                subtitle = "第三方开源组件与许可证",
+                icon = EcoIcons.File,
+                iconTint = MaterialTheme.eco.violet,
+                showChevron = true,
+                onClick = { showLicenses = true },
+            )
+        }
+
+        SettingsPane(
+            modifier = Modifier.padding(top = 12.dp),
+            shape = RoundedCornerShape(14.dp),
+            elevation = 6.dp,
+        ) {
+            SettingsRow(
+                title = "在浏览器中打开仓库",
+                subtitle = "github.com/$GITHUB_REPO_PATH",
+                icon = EcoIcons.External,
+                iconTint = MaterialTheme.eco.blue,
+                showChevron = true,
+                onClick = openRepo,
+            )
+        }
+
+        Spacer(Modifier.height(19.dp))
+        Text(
+            "•  MADE FOR ONE PERSON'S DAILY LEDGER  •",
+            style = EcoType.MicroQuiet.copy(fontSize = 8.sp, letterSpacing = 1.04.sp),
+            color = MaterialTheme.eco.quiet,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+
+    if (showLicenses) {
+        EcoSheet(
+            onDismiss = { showLicenses = false },
+            title = "开源许可",
+            subtitle = "本应用只使用以下开源组件，未包含广告或统计 SDK",
+        ) {
+            Column(Modifier.fillMaxWidth()) {
+                LICENSES.forEachIndexed { index, entry ->
+                    if (index > 0) SettingsDivider(inset = 0.dp)
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                entry.name,
+                                style = EcoType.RowTitle.copy(fontSize = 11.5.sp),
+                                color = MaterialTheme.eco.ink,
+                                maxLines = 1,
+                            )
+                            Spacer(Modifier.height(1.dp))
+                            Text(
+                                entry.note,
+                                style = EcoType.RowSub.copy(fontSize = 8.5.sp),
+                                color = MaterialTheme.eco.muted,
+                                maxLines = 1,
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            entry.license,
+                            style = EcoType.Pill,
+                            color = MaterialTheme.eco.quiet,
+                            maxLines = 1,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                SettingsNote("Apache-2.0 全文：www.apache.org/licenses/LICENSE-2.0；JUnit 4 为 EPL-1.0。")
+                Spacer(Modifier.height(6.dp))
+                EcoGhostButton(text = "关闭", onClick = { showLicenses = false }, height = 40.dp)
+            }
+        }
+    }
+}
+
+// ---------- 品牌 hero ----------
+
+@Composable
+private fun AboutHero() {
+    EcoHeroCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        shape = RoundedCornerShape(8.dp, 26.dp, 8.dp, 26.dp),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(Brush.linearGradient(listOf(LOGO_A, LOGO_B)))
+                    .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(15.dp)),
+                contentAlignment = Alignment.Center,
             ) {
-                Box(
-                    Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "账",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                }
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("我ECO 账本", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "本地记账 · 账单导入 · 自动捕获",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                Icon(
+                    EcoIcons.Leaf,
+                    contentDescription = "我ECO",
+                    tint = Color(0xFFF7FBF2),
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "我ECO 账本",
+                    style = EcoType.RowTitle.copy(
+                        fontSize = 17.sp,
+                        lineHeight = 22.sp,
+                        fontWeight = FontWeight.W800,
+                    ),
+                    color = HERO_INK,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "本地记账 · 账单导入 · 自动捕获",
+                    style = EcoType.RowSub.copy(fontSize = 8.5.sp, lineHeight = 13.sp),
+                    color = HERO_SUB,
+                    maxLines = 1,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Box(
+                Modifier
+                    .height(23.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.White.copy(alpha = 0.07f))
+                    .border(1.dp, Color.White.copy(alpha = 0.24f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
                 Text(
                     "v${BuildConfig.VERSION_NAME}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        SectionTitle("隐私与安全")
-        PaneCard {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                Bullet("只写本机数据库，不联网、不上传，无云端账号与第三方统计。")
-                Spacer(Modifier.height(8.dp))
-                Bullet("数据存于应用私有目录（Room / SQLite），卸载即清除，可被系统备份规则排除。")
-                Spacer(Modifier.height(8.dp))
-                Bullet("通知监听 / 无障碍 / 悬浮窗权限只用于识别支付信息与弹出确认卡片，捕获内容仅在本机解析与留存。")
-                Spacer(Modifier.height(8.dp))
-                Bullet("账单导入文件只在本机解析，识别与去重后写入本地账本。")
-            }
-        }
-
-        SectionTitle("版本")
-        PaneCard {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                Text(
-                    "版本号 v${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "构建类型：${if (BuildConfig.DEBUG) "debug（含调试开关）" else "release"}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = EcoType.Pill.copy(fontSize = 8.sp),
+                    color = HERO_PILL_INK,
+                    maxLines = 1,
                 )
             }
         }
     }
 }
 
+// ---------- 隐私条目 ----------
+
 @Composable
-private fun Bullet(text: String) {
-    Row {
-        Text("· ", style = MaterialTheme.typography.bodyMedium)
+private fun PrivacyBullet(bold: String, rest: String) {
+    val c = MaterialTheme.eco
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Icon(
+            EcoIcons.Check,
+            contentDescription = null,
+            tint = c.jade,
+            modifier = Modifier
+                .padding(top = 2.dp)
+                .size(13.dp),
+        )
+        Spacer(Modifier.width(8.dp))
         Text(
-            text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            buildAnnotatedString {
+                withStyle(SpanStyle(fontWeight = FontWeight.W700, color = c.ink2)) { append(bold) }
+                append(rest)
+            },
+            style = EcoType.RowSub.copy(fontSize = 9.sp, lineHeight = 15.sp),
+            color = c.muted,
         )
     }
 }

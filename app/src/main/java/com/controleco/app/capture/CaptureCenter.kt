@@ -216,10 +216,10 @@ object CaptureCenter {
             nm.deleteNotificationChannel(CHANNEL_LEGACY)
             val channel = android.app.NotificationChannel(
                 CHANNEL_CAPTURE,
-                "自动记账提醒",
+                "记账提醒",
                 android.app.NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "捕获到动账/退款时横幅提醒确认入账"
+                description = "捕获到动账或退款时提醒确认；点开可改分类、账户或忽略"
                 enableVibration(true)
             }
             nm.createNotificationChannel(channel)
@@ -279,7 +279,7 @@ object CaptureCenter {
     private fun pendingNotifText(sourceLabel: String, amountCents: Long, counterparty: String): String =
         "$sourceLabel ${Money.formatYuan(amountCents)}" +
             (if (counterparty.isNotBlank()) " · $counterparty" else "") +
-            " · 点击确认入账"
+            " · 点开确认入账"
 
     /**
      * 捕获入队后的提醒（卡片/通知互斥）：
@@ -352,10 +352,10 @@ object CaptureCenter {
         val text = if (amountCents > 0) {
             pendingNotifText(sourceLabel, amountCents, counterparty)
         } else {
-            "$sourceLabel 金额待补 · 点击补录或忽略"
+            "$sourceLabel 金额待补 · 点开补录或忽略"
         }
         postCaptureNotification(
-            "捕获到一笔$kind",
+            "有一笔${kind}待确认",
             text,
             ROUTE_PENDING,
             pendingNotifId(dedupKey),
@@ -384,8 +384,8 @@ object CaptureCenter {
         }
         val who = counterparty.ifBlank { sourceLabel }
         postCaptureNotification(
-            "已记入一笔$kind",
-            Money.formatYuan(amountCents) + " · $who · 点击可修改",
+            "已记好一笔$kind",
+            Money.formatYuan(amountCents) + " · $who · 点开可修改",
             "$ROUTE_EDIT_PREFIX$txId",
             entryNotifId(dedupKey),
             action = undoEntryAction(txId, dedupKey),
@@ -2167,7 +2167,7 @@ object CaptureCenter {
         val notifId = ("refund|$packageName|$postTime").hashCode()
         postCaptureNotification(
             "${label}退款到账",
-            "点击选择被退款的账单，记录退款收入",
+            "点开选择被退款的账单，记为退款收入",
             ROUTE_REFUND_LINK,
             notifId,
         )
@@ -2566,9 +2566,9 @@ object CaptureCenter {
     /** 红包询问卡无法展示时的兜底：点击进待确认列表，附「忽略」动作 */
     private fun postUserConfirmationNotification(pending: PendingTransactionEntity) {
         val text = if (pending.amountCents > 0) {
-            "检测到红包 ${Money.formatYuan(pending.amountCents)} · 点击确认是否记账"
+            "检测到红包 ${Money.formatYuan(pending.amountCents)} · 点开确认是否记账"
         } else {
-            "检测到红包领取页 · 点击补录金额或忽略"
+            "检测到红包领取页 · 点开补录金额或忽略"
         }
         postCaptureNotification(
             "微信红包待确认",

@@ -126,6 +126,19 @@ internal data class CategoryBarData(
 
 private data class HomeTrend(val spent: List<Float>, val deposit: List<Float>)
 
+/**
+ * 分类环数据（旧首页模式①的纯计算，保留给单测与历史口径）。
+ * 新分类条 UI 用 [CategoryBarData]；两者口径一致（含"其他"聚合）。
+ */
+internal data class CategoryRingData(
+    val name: String,
+    val remainingCents: Long,
+    val ratio: Float,
+    val tone: Budget.Tone,
+    val severity: Float,
+    val isOther: Boolean,
+)
+
 @Composable
 fun HomeScreen(
     vm: LedgerViewModel,
@@ -963,6 +976,55 @@ private fun ModeDots(current: Int, onSelect: (Int) -> Unit) {
 }
 
 // ---------- 纯逻辑 ----------
+
+internal fun buildCategoryRings(
+    budgets: Map<Long, Long>,
+    sums: List<CategorySumRow>,
+    categories: List<CategoryEntity>,
+    monthlyBudgetCents: Long,
+    totalSpentCents: Long,
+    thresholds: Budget.Thresholds = Budget.thresholds(1, 1),
+): List<CategoryRingData> {
+    val byId = categories.associateBy { it.id }
+    val spentById = sums.associate { it.categoryId to it.totalCents }
+    val budgeted = budgets.entries.mapNotNull { (id, budget) ->
+        if (budget <= 0L) return@mapNotNull null
+        val category = byId[id] ?: return@mapNotNull null
+        if (category.type != TxType.EXPENSE) return@mapNotNull null
+        category to budget
+    }
+
+    val rings = budgeted.map { (category, budget) ->
+        ringOf(category.name, budget, spentById[category.id] ?: 0L, thresholds, isOther = false)
+    }.toMutableList()
+
+    val allocatedBudget = budgeted.sumOf { it.second }
+    val allocatedSpent = budgeted.sumOf { (category, _) -> spentById[category.id] ?: 0L }
+    val otherBudget = monthlyBudgetCents - allocatedBudget
+    if (monthlyBudgetCents > 0L && otherBudget > 0L) {
+        rings += ringOf("其他", otherBudget, totalSpentCents - allocatedSpent, thresholds, isOther = true)
+    }
+    return rings.sortedBy { it.ratio }
+}
+
+private fun ringOf(
+    name: String,
+    budgetCents: Long,
+    spentCents: Long,
+    thresholds: Budget.Thresholds,
+    isOther: Boolean,
+): CategoryRingData {
+    val remaining = budgetCents - spentCents
+    val ratio = remaining.toDouble() / budgetCents.toDouble()
+    return CategoryRingData(
+        name = name,
+        remainingCents = remaining,
+        ratio = ratio.toFloat(),
+        tone = Budget.tone(ratio.toFloat(), thresholds),
+        severity = Budget.warningSeverity(ratio.toFloat(), thresholds.redBelow),
+        isOther = isOther,
+    )
+}
 
 internal fun buildCategoryBars(
     budgets: Map<Long, Long>,
