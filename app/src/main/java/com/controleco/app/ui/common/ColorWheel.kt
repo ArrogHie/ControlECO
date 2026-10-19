@@ -11,16 +11,15 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -39,6 +38,12 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.controleco.app.ui.eco.EcoDialog
+import com.controleco.app.ui.eco.EcoField
+import com.controleco.app.ui.eco.EcoGhostButton
+import com.controleco.app.ui.eco.EcoPrimaryButton
+import com.controleco.app.ui.theme.EcoType
+import com.controleco.app.ui.theme.eco
 import com.controleco.app.ui.theme.hsvToRgb
 import com.controleco.app.ui.theme.rgbToHsv
 import kotlin.math.atan2
@@ -94,178 +99,183 @@ fun ColorWheelDialog(
     fun channelInvalid(text: String): Boolean =
         text.isNotEmpty() && (text.toIntOrNull()?.let { it !in 0..255 } ?: true)
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("自定义颜色") },
-        text = {
-            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(Modifier.size(210.dp), contentAlignment = Alignment.Center) {
-                    // 色环：点 / 拖取色相
-                    Canvas(
-                        Modifier
-                            .fillMaxSize()
-                            .pointerInput(Unit) {
-                                fun pick(pos: Offset) {
-                                    val cx = size.width / 2f
-                                    val cy = size.height / 2f
-                                    val deg = Math.toDegrees(atan2((pos.y - cy).toDouble(), (pos.x - cx).toDouble())).toFloat()
-                                    hue = ((deg % 360f) + 360f) % 360f
-                                    refreshTexts()
-                                }
-                                detectTapGestures { pick(it) }
-                            }
-                            .pointerInput(Unit) {
-                                fun pick(pos: Offset) {
-                                    val cx = size.width / 2f
-                                    val cy = size.height / 2f
-                                    val deg = Math.toDegrees(atan2((pos.y - cy).toDouble(), (pos.x - cx).toDouble())).toFloat()
-                                    hue = ((deg % 360f) + 360f) % 360f
-                                    refreshTexts()
-                                }
-                                detectDragGestures(
-                                    onDragStart = { pick(it) },
-                                    onDrag = { change, _ ->
-                                        pick(change.position)
-                                        change.consume()
-                                    },
-                                )
-                            },
-                    ) {
-                        val stroke = size.minDimension * 0.16f
-                        val radius = (size.minDimension - stroke) / 2f
-                        drawCircle(
-                            brush = Brush.sweepGradient(hueRingColors(), center = center),
-                            radius = radius,
-                            center = center,
-                            style = Stroke(stroke),
-                        )
-                        // 色相光标：白圈 + 纯色相内点
-                        val angle = Math.toRadians(hue.toDouble())
-                        val marker = Offset(
-                            center.x + radius * cos(angle).toFloat(),
-                            center.y + radius * sin(angle).toFloat(),
-                        )
-                        drawCircle(Color.White, radius = stroke * 0.46f, center = marker)
-                        drawCircle(hsvColor(hue, 1f, 1f), radius = stroke * 0.30f, center = marker)
-                    }
+    EcoDialog(onDismiss = onDismiss) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text("自定义颜色", style = EcoType.SheetTitle, color = MaterialTheme.eco.ink)
+            Spacer(Modifier.height(2.dp))
 
-                    // 饱和度 / 明度方块：点 / 拖取 S、V
-                    Box(
-                        Modifier
-                            .size(128.dp)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Brush.horizontalGradient(listOf(Color.White, hsvColor(hue, 1f, 1f))))
-                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black)))
-                            .pointerInput(Unit) {
-                                fun pick(pos: Offset) {
-                                    sat = (pos.x / size.width).coerceIn(0f, 1f)
-                                    value = (1f - pos.y / size.height).coerceIn(0f, 1f)
-                                    refreshTexts()
-                                }
-                                detectTapGestures { pick(it) }
+            Box(Modifier.size(202.dp), contentAlignment = Alignment.Center) {
+                // 色环：点 / 拖取色相
+                Canvas(
+                    Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            fun pick(pos: Offset) {
+                                val cx = size.width / 2f
+                                val cy = size.height / 2f
+                                val deg = Math.toDegrees(atan2((pos.y - cy).toDouble(), (pos.x - cx).toDouble())).toFloat()
+                                hue = ((deg % 360f) + 360f) % 360f
+                                refreshTexts()
                             }
-                            .pointerInput(Unit) {
-                                fun pick(pos: Offset) {
-                                    sat = (pos.x / size.width).coerceIn(0f, 1f)
-                                    value = (1f - pos.y / size.height).coerceIn(0f, 1f)
-                                    refreshTexts()
-                                }
-                                detectDragGestures(
-                                    onDragStart = { pick(it) },
-                                    onDrag = { change, _ ->
-                                        pick(change.position)
-                                        change.consume()
-                                    },
-                                )
-                            },
-                    ) {
-                        Canvas(Modifier.fillMaxSize()) {
-                            val x = sat * size.width
-                            val y = (1f - value) * size.height
-                            drawCircle(Color.White, radius = 9.dp.toPx(), center = Offset(x, y), style = Stroke(2.dp.toPx()))
-                            drawCircle(preview, radius = 9.dp.toPx(), center = Offset(x, y), style = Stroke(1.dp.toPx()))
+                            detectTapGestures { pick(it) }
                         }
-                    }
+                        .pointerInput(Unit) {
+                            fun pick(pos: Offset) {
+                                val cx = size.width / 2f
+                                val cy = size.height / 2f
+                                val deg = Math.toDegrees(atan2((pos.y - cy).toDouble(), (pos.x - cx).toDouble())).toFloat()
+                                hue = ((deg % 360f) + 360f) % 360f
+                                refreshTexts()
+                            }
+                            detectDragGestures(
+                                onDragStart = { pick(it) },
+                                onDrag = { change, _ ->
+                                    pick(change.position)
+                                    change.consume()
+                                },
+                            )
+                        },
+                ) {
+                    val stroke = size.minDimension * 0.16f
+                    val radius = (size.minDimension - stroke) / 2f
+                    drawCircle(
+                        brush = Brush.sweepGradient(hueRingColors(), center = center),
+                        radius = radius,
+                        center = center,
+                        style = Stroke(stroke),
+                    )
+                    // 色相光标：白圈 + 纯色相内点
+                    val angle = Math.toRadians(hue.toDouble())
+                    val marker = Offset(
+                        center.x + radius * cos(angle).toFloat(),
+                        center.y + radius * sin(angle).toFloat(),
+                    )
+                    drawCircle(Color.White, radius = stroke * 0.46f, center = marker)
+                    drawCircle(hsvColor(hue, 1f, 1f), radius = stroke * 0.30f, center = marker)
                 }
 
-                // 预览 + 取值文本
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(preview),
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(hexOf(preview), style = MaterialTheme.typography.titleSmall)
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        "RGB ${channelOf(preview, 16)} ${channelOf(preview, 8)} ${channelOf(preview, 0)}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-
-                OutlinedTextField(
-                    value = hexText,
-                    onValueChange = { input ->
-                        hexText = input
-                        input.trim().removePrefix("#").toLongOrNull(16)?.let { v ->
-                            if (input.trim().removePrefix("#").length == 6) {
-                                val rgb = (v and 0xFFFFFF).toInt()
-                                val hsv = rgbToHsv(
-                                    ((rgb shr 16) and 0xFF) / 255f,
-                                    ((rgb shr 8) and 0xFF) / 255f,
-                                    (rgb and 0xFF) / 255f,
-                                )
-                                hue = hsv[0]
-                                sat = hsv[1]
-                                value = hsv[2]
-                                rText = ((rgb shr 16) and 0xFF).toString()
-                                gText = ((rgb shr 8) and 0xFF).toString()
-                                bText = (rgb and 0xFF).toString()
+                // 饱和度 / 明度方块：点 / 拖取 S、V
+                Box(
+                    Modifier
+                        .size(124.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Brush.horizontalGradient(listOf(Color.White, hsvColor(hue, 1f, 1f))))
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black)))
+                        .pointerInput(Unit) {
+                            fun pick(pos: Offset) {
+                                sat = (pos.x / size.width).coerceIn(0f, 1f)
+                                value = (1f - pos.y / size.height).coerceIn(0f, 1f)
+                                refreshTexts()
                             }
+                            detectTapGestures { pick(it) }
                         }
-                    },
-                    label = { Text("十六进制（如 #EF4444）") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = rText,
-                        onValueChange = { rText = it.filter { c -> c.isDigit() }.take(3); applyRgbTexts() },
-                        label = { Text("R") },
-                        singleLine = true,
-                        isError = channelInvalid(rText),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                    )
-                    OutlinedTextField(
-                        value = gText,
-                        onValueChange = { gText = it.filter { c -> c.isDigit() }.take(3); applyRgbTexts() },
-                        label = { Text("G") },
-                        singleLine = true,
-                        isError = channelInvalid(gText),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                    )
-                    OutlinedTextField(
-                        value = bText,
-                        onValueChange = { bText = it.filter { c -> c.isDigit() }.take(3); applyRgbTexts() },
-                        label = { Text("B") },
-                        singleLine = true,
-                        isError = channelInvalid(bText),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.weight(1f),
-                    )
+                        .pointerInput(Unit) {
+                            fun pick(pos: Offset) {
+                                sat = (pos.x / size.width).coerceIn(0f, 1f)
+                                value = (1f - pos.y / size.height).coerceIn(0f, 1f)
+                                refreshTexts()
+                            }
+                            detectDragGestures(
+                                onDragStart = { pick(it) },
+                                onDrag = { change, _ ->
+                                    pick(change.position)
+                                    change.consume()
+                                },
+                            )
+                        },
+                ) {
+                    Canvas(Modifier.fillMaxSize()) {
+                        val x = sat * size.width
+                        val y = (1f - value) * size.height
+                        drawCircle(Color.White, radius = 9.dp.toPx(), center = Offset(x, y), style = Stroke(2.dp.toPx()))
+                        drawCircle(preview, radius = 9.dp.toPx(), center = Offset(x, y), style = Stroke(1.dp.toPx()))
+                    }
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = { onConfirm(hsvColor(hue, sat, value)) }) { Text("确定") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-    )
+
+            // 预览 + 取值文本
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(preview),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(hexOf(preview), style = EcoType.RowTitle, color = MaterialTheme.eco.ink)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "RGB ${channelOf(preview, 16)} ${channelOf(preview, 8)} ${channelOf(preview, 0)}",
+                    style = EcoType.PageNote,
+                    color = MaterialTheme.eco.quiet,
+                )
+            }
+
+            EcoField(
+                label = "十六进制",
+                value = hexText,
+                onValueChange = { input ->
+                    hexText = input
+                    input.trim().removePrefix("#").toLongOrNull(16)?.let { v ->
+                        if (input.trim().removePrefix("#").length == 6) {
+                            val rgb = (v and 0xFFFFFF).toInt()
+                            val hsv = rgbToHsv(
+                                ((rgb shr 16) and 0xFF) / 255f,
+                                ((rgb shr 8) and 0xFF) / 255f,
+                                (rgb and 0xFF) / 255f,
+                            )
+                            hue = hsv[0]
+                            sat = hsv[1]
+                            value = hsv[2]
+                            rText = ((rgb shr 16) and 0xFF).toString()
+                            gText = ((rgb shr 8) and 0xFF).toString()
+                            bText = (rgb and 0xFF).toString()
+                        }
+                    }
+                },
+                placeholder = "#EF4444",
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                EcoField(
+                    label = "R",
+                    value = rText,
+                    onValueChange = { rText = it.filter { c -> c.isDigit() }.take(3); applyRgbTexts() },
+                    keyboardType = KeyboardType.Number,
+                    isError = channelInvalid(rText),
+                    modifier = Modifier.weight(1f),
+                )
+                EcoField(
+                    label = "G",
+                    value = gText,
+                    onValueChange = { gText = it.filter { c -> c.isDigit() }.take(3); applyRgbTexts() },
+                    keyboardType = KeyboardType.Number,
+                    isError = channelInvalid(gText),
+                    modifier = Modifier.weight(1f),
+                )
+                EcoField(
+                    label = "B",
+                    value = bText,
+                    onValueChange = { bText = it.filter { c -> c.isDigit() }.take(3); applyRgbTexts() },
+                    keyboardType = KeyboardType.Number,
+                    isError = channelInvalid(bText),
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                EcoGhostButton("取消", onClick = onDismiss, modifier = Modifier.weight(1f))
+                EcoPrimaryButton("确定", onClick = { onConfirm(hsvColor(hue, sat, value)) }, modifier = Modifier.weight(1f))
+            }
+        }
+    }
 }
 
 /** 色相环的 13 个停靠色（0°→360°，首尾同色，扫描渐变才不会在接缝处跳色） */
