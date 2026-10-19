@@ -6,24 +6,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -32,9 +17,12 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -48,7 +36,6 @@ import com.controleco.app.data.LedgerViewModel
 import com.controleco.app.ui.accounts.AccountsScreen
 import com.controleco.app.ui.accounts.CategoriesScreen
 import com.controleco.app.ui.common.PermissionReminderDialog
-import com.controleco.app.ui.common.QuickAddPill
 import com.controleco.app.ui.debug.CaptureLogScreen
 import com.controleco.app.ui.debug.CaptureTraceScreen
 import com.controleco.app.ui.home.HomeScreen
@@ -65,8 +52,12 @@ import com.controleco.app.ui.settings.SettingsPermissionScreen
 import com.controleco.app.ui.settings.SettingsMerchantRulesScreen
 import com.controleco.app.ui.settings.SettingsScreen
 import com.controleco.app.ui.settings.SettingsWatchedAppsScreen
+import com.controleco.app.ui.eco.EcoBackdrop
+import com.controleco.app.ui.eco.EcoBottomNav
+import com.controleco.app.ui.eco.EcoFab
+import com.controleco.app.ui.eco.EcoToastHost
+import com.controleco.app.ui.eco.ecoFabBottomOffset
 import com.controleco.app.ui.stats.StatsScreen
-import com.controleco.app.ui.theme.accBook
 import com.controleco.app.ui.transactions.EditTransactionScreen
 import com.controleco.app.ui.transactions.QuickAddScreen
 import com.controleco.app.ui.transactions.TransactionListScreen
@@ -149,9 +140,12 @@ fun AccBookNav(
         }
     }
     // 转场：默认的 700ms 淡入淡出太慢，改成 180ms 淡入 + 轻微横向位移（层级更清楚、手感利落）
-    NavHost(
+    Box(Modifier.fillMaxSize()) {
+        EcoBackdrop()
+        NavHost(
         navController = navController,
         startDestination = "main",
+        modifier = Modifier.fillMaxSize(),
         enterTransition = {
             fadeIn(animationSpec = tween(180)) +
                 slideInHorizontally(animationSpec = tween(180), initialOffsetX = { it / 14 })
@@ -257,6 +251,12 @@ fun AccBookNav(
                 onOpenAccessibilitySettings = openAccessibilitySettings,
             )
         }
+        }
+        EcoToastHost(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 112.dp),
+        )
     }
 
     // 冷启动权限提醒（与 NavHost 并列；调用方 Surface 内容即 Box，弹窗自带独立系统窗口）
@@ -286,44 +286,15 @@ private fun MainScaffold(
     var tab by rememberSaveable { mutableIntStateOf(0) }
     // 再次点击当前标签 → 计数 +1，由页面自己"回到顶部"（列表/滚动页通用）
     var reenterTick by rememberSaveable { mutableIntStateOf(0) }
-    Scaffold(
-        bottomBar = {
-            // 白底导航 + 顶部发丝线（页面底色是浅蓝，白底栏与内容自然分层）
-            Column(Modifier.background(MaterialTheme.colorScheme.surface)) {
-                HorizontalDivider(color = MaterialTheme.accBook.hairline)
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
-                    val tabs = listOf(
-                        Triple("首页", Icons.Filled.Home, 0),
-                        Triple("账单", Icons.Filled.List, 1),
-                        Triple("统计", Icons.Filled.DateRange, 2),
-                        Triple("个人", Icons.Filled.Person, 3),
-                    )
-                    tabs.forEach { (label, icon, index) ->
-                        NavigationBarItem(
-                            selected = tab == index,
-                            onClick = {
-                                if (tab == index) reenterTick++ else tab = index
-                            },
-                            icon = { Icon(icon, contentDescription = label) },
-                            label = { Text(label) },
-                            colors = NavigationBarItemDefaults.colors(
-                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                            ),
-                        )
-                    }
-                }
-            }
-        },
-        floatingActionButton = {
-            // 首页/账单页共用悬浮"记账"胶囊（填充主色 + 悬浮动效），随手补录都能一眼看到
-            if (tab == 0 || tab == 1) {
-                QuickAddPill(onClick = onQuickAdd)
-            }
-        },
-    ) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize()) {
+    val tabStates = rememberSaveableStateHolder()
+    Box(Modifier.fillMaxSize()) {
+        tabStates.SaveableStateProvider(tab) {
             when (tab) {
-                0 -> HomeScreen(vm = vm)
+                0 -> HomeScreen(
+                    vm = vm,
+                    onOpenSettings = onOpenSettings,
+                    onOpenCategories = onOpenCategories,
+                )
                 1 -> TransactionListScreen(
                     vm = vm,
                     onEditTransaction = onEditTransaction,
@@ -339,6 +310,21 @@ private fun MainScaffold(
                     onOpenCategories = onOpenCategories,
                 )
             }
+        }
+        EcoBottomNav(
+            selected = tab,
+            onSelect = { index ->
+                if (tab == index) reenterTick++ else tab = index
+            },
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
+        if (tab == 0 || tab == 1) {
+            EcoFab(
+                onClick = onQuickAdd,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 19.dp, bottom = ecoFabBottomOffset()),
+            )
         }
     }
 }

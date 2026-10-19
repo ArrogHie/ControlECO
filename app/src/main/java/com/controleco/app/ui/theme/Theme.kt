@@ -12,6 +12,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -19,125 +20,306 @@ import com.controleco.app.data.budget.Budget
 import kotlin.math.pow
 
 /**
- * 阶段四设计 token 体系。
+ * ECO v5 设计系统。
  *
- * 设计基调：现代、极简、成熟的移动金融产品——
- * 白色背景 + 低饱和蓝主色（冷色调），深墨蓝灰文字；金额数字用等宽字形（tnum）保证纵向对齐。
- * 语义色（收入/警示/危险）经 [MaterialTheme.accBook] 下发，全项目禁止散落硬编码色。
+ * 纸面/墨色/青蓝/玉绿/琥珀/陶土六组语义色，深浅两套；强调色有 6 套可切换。
+ * 业务代码只通过 [MaterialTheme.eco]（纸面、轨、强调色族等）与 [MaterialTheme.accBook]
+ * （旧语义：收入/警告/危险）取色，禁止散落硬编码。金额统一 tabular-nums。
  */
 
-// ---------- 语义扩展色（收入 / 警示 / 危险 / 发丝线 / 分类调色板） ----------
+// ---------- 主题色 ----------
+
+enum class EcoAccent(
+    val id: String,
+    val label: String,
+    val note: String,
+    val light: BlueFamily,
+    val dark: BlueFamily,
+    val heroA: Color,
+    val heroB: Color,
+    val heroC: Color,
+) {
+    Tide(
+        "default", "潮汐", "青蓝",
+        BlueFamily(0xFF24788A, 0xFF145B70, 0xFF419DAB, 0xFFA0DFDE, 0xFFE0F3F2, 0xFFECF7F4),
+        BlueFamily(0xFF88D5DF, 0xFFB8EDF0, 0xFF62B8C6, 0xFFC0F4E9, 0xFF264E54, 0xFF20434A),
+        Color(0xFF103945), Color(0xFF165A60), Color(0xFF1B766F),
+    ),
+    Meadow(
+        "meadow", "松林", "玉绿",
+        BlueFamily(0xFF2E8069, 0xFF22624E, 0xFF479C7B, 0xFFA3D9BE, 0xFFE6F4EA, 0xFFEEF8F2),
+        BlueFamily(0xFF94D8B5, 0xFFC5F0D8, 0xFF78BD9B, 0xFFB7E7CB, 0xFF29443B, 0xFF213A32),
+        Color(0xFF173B34), Color(0xFF216956), Color(0xFF339175),
+    ),
+    Iris(
+        "iris", "鸢尾", "暮紫",
+        BlueFamily(0xFF7964B1, 0xFF55438A, 0xFF9281C1, 0xFFCBBFEC, 0xFFEFEAF9, 0xFFF8F4FD),
+        BlueFamily(0xFFC5B1E8, 0xFFE4D9FA, 0xFFAC94DA, 0xFFDCCDF4, 0xFF383147, 0xFF2D2939),
+        Color(0xFF292840), Color(0xFF59507C), Color(0xFF8470A6),
+    ),
+    Coral(
+        "coral", "珊瑚", "陶红",
+        BlueFamily(0xFFB66678, 0xFF924A5E, 0xFFCA8B94, 0xFFF0BFC2, 0xFFFAE9EB, 0xFFFFF4F1),
+        BlueFamily(0xFFF0ADBB, 0xFFFFD5DB, 0xFFD78EA5, 0xFFF6C6D1, 0xFF47333B, 0xFF382A32),
+        Color(0xFF43303F), Color(0xFF874C65), Color(0xFFBB7180),
+    ),
+    Amber(
+        "amber", "暖金", "琥珀",
+        BlueFamily(0xFFB77E42, 0xFF885A2A, 0xFFC29461, 0xFFEFD1A0, 0xFFF8EDDB, 0xFFFFF8EB),
+        BlueFamily(0xFFEAC38E, 0xFFFFE3AF, 0xFFCEA66A, 0xFFF4DBAB, 0xFF43392B, 0xFF352F27),
+        Color(0xFF443627), Color(0xFF8A5B3B), Color(0xFFBA8A51),
+    ),
+    Sky(
+        "sky", "晴海", "天青",
+        BlueFamily(0xFF317FAB, 0xFF235E89, 0xFF579EC3, 0xFFA7D9EC, 0xFFE4F2F9, 0xFFF0F8FD),
+        BlueFamily(0xFFA4D8F3, 0xFFD0EEFC, 0xFF84B8D9, 0xFFC1E3F5, 0xFF294353, 0xFF233947),
+        Color(0xFF183548), Color(0xFF245E81), Color(0xFF368DB4),
+    ),
+    ;
+
+    companion object {
+        fun fromId(id: String?): EcoAccent = entries.firstOrNull { it.id == id } ?: Tide
+    }
+}
+
+@Immutable
+data class BlueFamily(
+    val blue: Long,
+    val deep: Long,
+    val mid: Long,
+    val hi: Long,
+    val soft: Long,
+    val wash: Long,
+)
+
+// ---------- 扩展色 ----------
+
+@Immutable
+data class EcoColors(
+    val isDark: Boolean,
+    val accent: EcoAccent,
+    val paper: Color,
+    val paperDeep: Color,
+    val surface: Color,
+    val surface2: Color,
+    val surface3: Color,
+    val surfaceInset: Color,
+    val ink: Color,
+    val ink2: Color,
+    val muted: Color,
+    val quiet: Color,
+    val rule: Color,
+    val ruleStrong: Color,
+    val track: Color,
+    val blue: Color,
+    val blueDeep: Color,
+    val blue2: Color,
+    val blueHi: Color,
+    val blueSoft: Color,
+    val blueWash: Color,
+    val jade: Color,
+    val jadeHi: Color,
+    val jadeSoft: Color,
+    val amber: Color,
+    val amberHi: Color,
+    val amberSoft: Color,
+    val clay: Color,
+    val clayHi: Color,
+    val claySoft: Color,
+    val violet: Color,
+    val violetSoft: Color,
+    val heroA: Color,
+    val heroB: Color,
+    val heroC: Color,
+)
+
+val LocalEcoColors = staticCompositionLocalOf {
+    ecoColors(false, EcoAccent.Tide)
+}
+
+val MaterialTheme.eco: EcoColors
+    @Composable get() = LocalEcoColors.current
+
+fun ecoColors(dark: Boolean, accent: EcoAccent): EcoColors {
+    val b = if (dark) accent.dark else accent.light
+    return if (dark) {
+        EcoColors(
+            isDark = true,
+            accent = accent,
+            paper = Color(0xFF10272D),
+            paperDeep = Color(0xFF142F35),
+            surface = Color(0xFF1B363C),
+            surface2 = Color(0xFF224047),
+            surface3 = Color(0xFF2D4B51),
+            surfaceInset = Color(0xFF1A373C),
+            ink = Color(0xFFF2F8F2),
+            ink2 = Color(0xFFD9E6DF),
+            muted = Color(0xFFB2C8C2),
+            quiet = Color(0xFF8CA7A5),
+            rule = Color(0xFF35555A),
+            ruleStrong = Color(0xFF496A6D),
+            track = Color(0xFF355358),
+            blue = Color(b.blue),
+            blueDeep = Color(b.deep),
+            blue2 = Color(b.mid),
+            blueHi = Color(b.hi),
+            blueSoft = Color(b.soft),
+            blueWash = Color(b.wash),
+            jade = Color(0xFF88DBB0),
+            jadeHi = Color(0xFFBBE9C9),
+            jadeSoft = Color(0xFF255044),
+            amber = Color(0xFFF0C278),
+            amberHi = Color(0xFFFFE1A0),
+            amberSoft = Color(0xFF4A4130),
+            clay = Color(0xFFF39F8E),
+            clayHi = Color(0xFFFFC4AE),
+            claySoft = Color(0xFF503C3B),
+            violet = Color(0xFFC4B3DF),
+            violetSoft = Color(0xFF3C354B),
+            heroA = accent.heroA,
+            heroB = accent.heroB,
+            heroC = accent.heroC,
+        )
+    } else {
+        EcoColors(
+            isDark = false,
+            accent = accent,
+            paper = Color(0xFFF7F8F3),
+            paperDeep = Color(0xFFEAF2EC),
+            surface = Color(0xFFFFFEFA),
+            surface2 = Color(0xFFF0F6F2),
+            surface3 = Color(0xFFE4EFE9),
+            surfaceInset = Color(0xFFEAF3EE),
+            ink = Color(0xFF142F37),
+            ink2 = Color(0xFF38545A),
+            muted = Color(0xFF607B7D),
+            quiet = Color(0xFF899E9C),
+            rule = Color(0xFFDCE9E1),
+            ruleStrong = Color(0xFFC6DAD0),
+            track = Color(0xFFDFE9E1),
+            blue = Color(b.blue),
+            blueDeep = Color(b.deep),
+            blue2 = Color(b.mid),
+            blueHi = Color(b.hi),
+            blueSoft = Color(b.soft),
+            blueWash = Color(b.wash),
+            jade = Color(0xFF268E70),
+            jadeHi = Color(0xFF98DDB1),
+            jadeSoft = Color(0xFFE4F5EB),
+            amber = Color(0xFFB98937),
+            amberHi = Color(0xFFF4D58D),
+            amberSoft = Color(0xFFFAF0DA),
+            clay = Color(0xFFCC6854),
+            clayHi = Color(0xFFF1A28F),
+            claySoft = Color(0xFFFCEAE4),
+            violet = Color(0xFF907BA8),
+            violetSoft = Color(0xFFF1EAF5),
+            heroA = accent.heroA,
+            heroB = accent.heroB,
+            heroC = accent.heroC,
+        )
+    }
+}
+
+// ---------- 旧语义色（保留给尚未迁移的组件与业务逻辑） ----------
 
 @Immutable
 data class AccBookColors(
     val income: Color,
     val warning: Color,
-    /** 危险/超支红（饱和度高于常规提示色，用于超支状态） */
     val critical: Color,
-    /** 警报红：超支越严重越向此色过渡（心跳警示用，饱和度最高） */
     val criticalAlert: Color,
-    /** 悬浮"记账"按钮底色：比 primary 略高饱和，用于需要一眼看到的主操作 */
     val primaryStrong: Color,
-    /** 发丝分隔线 */
     val hairline: Color,
-    /** 圆环底轨：比 hairline 略深，保证在浅蓝页面底色上仍能看清未完成部分 */
     val ringTrack: Color,
-    /** 红包等喜庆色（分类 logo 专用，明亮红） */
     val festiveRed: Color,
-    /** 叠加在图片/照片上的前景色（图片编辑器参考框、角落标记用；深浅色主题都是白） */
     val overlayInk: Color,
-    /** 结余卡浅底配色（浅色背景图/默认浅蓝卡面用） */
     val cardOnLight: CardTones,
-    /** 结余卡深底配色（深色背景图/深色主题卡面用） */
     val cardOnDark: CardTones,
-    /** 分类徽标调色板：按分类名稳定取色，避免 emoji/图标依赖 */
     val categoryPalette: List<Color>,
 )
 
 internal fun lightAccBookColors() = AccBookColors(
-    income = Color(0xFF3D7A50),
-    warning = Color(0xFFB47B10),
-    critical = Color(0xFFC1352B),
-    criticalAlert = Color(0xFFE01F1F),
-    primaryStrong = Color(0xFF3C6CA8),
-    hairline = Color(0xFFE3EAF1),
-    ringTrack = Color(0xFFD6E1ED),
-    festiveRed = Color(0xFFD2453C),
+    income = Color(0xFF268E70),
+    warning = Color(0xFFB98937),
+    critical = Color(0xFFCC6854),
+    criticalAlert = Color(0xFFB44A38),
+    primaryStrong = Color(0xFF145B70),
+    hairline = Color(0xFFDCE9E1),
+    ringTrack = Color(0xFFDFE9E1),
+    festiveRed = Color(0xFFCC6854),
     overlayInk = Color(0xFFFFFFFF),
     cardOnLight = CardTones(
-        ink = Color(0xFF14212E),
-        sub = Color(0xFF4E6175),
-        income = Color(0xFF2F6B45),
-        expense = Color(0xFFC1352B),
+        ink = Color(0xFF142F37),
+        sub = Color(0xFF38545A),
+        income = Color(0xFF268E70),
+        expense = Color(0xFFB44A38),
         scrim = Color(0xFFFFFFFF),
-        pillContainer = Color(0x263C6CA8),
-        pillSelected = Color(0xFF3C6CA8),
+        pillContainer = Color(0x2624788A),
+        pillSelected = Color(0xFF145B70),
         pillSelectedContent = Color(0xFFFFFFFF),
     ),
     cardOnDark = CardTones(
-        ink = Color(0xFFFFFFFF),
-        sub = Color(0xCCFFFFFF),
-        income = Color(0xFF8FE3A6),
-        expense = Color(0xFFFFA694),
+        ink = Color(0xFFF2F8F2),
+        sub = Color(0xCCF2F8F2),
+        income = Color(0xFF98DDB1),
+        expense = Color(0xFFF1A28F),
         scrim = Color(0xFF000000),
         pillContainer = Color(0x33FFFFFF),
         pillSelected = Color(0xFFFFFFFF),
-        pillSelectedContent = Color(0xFF16202B),
+        pillSelectedContent = Color(0xFF142F37),
     ),
-    // 分类调色板：8 色（红→橙→黄→绿→青绿→蓝→紫→玫红），色相大致等间隔、明度都在"中亮"档。
-    // 16 色时相邻两色的 ΔE 最小只有 ~23（肉眼要对比才分得清）；收到 8 色后最小 ΔE ≈ 35，
-    // 差别一眼可见——想要更细的区分就用「自定义」色环自己挑（见 ColorWheelDialog）。
     categoryPalette = listOf(
-        Color(0xFFEF4444), // 红
-        Color(0xFFF97316), // 橙
-        Color(0xFFEAB308), // 黄
-        Color(0xFF22C55E), // 绿
-        Color(0xFF14B8A6), // 青绿
-        Color(0xFF3B82F6), // 蓝
-        Color(0xFF8B5CF6), // 紫
-        Color(0xFFEC4899), // 玫红
+        Color(0xFF24788A), // 青蓝
+        Color(0xFF268E70), // 玉绿
+        Color(0xFFB98937), // 琥珀
+        Color(0xFFCC6854), // 陶土
+        Color(0xFF907BA8), // 鸢尾
+        Color(0xFF317FAB), // 晴海
+        Color(0xFFB66678), // 珊瑚
+        Color(0xFF2E8069), // 松林
     ),
 )
 
 internal fun darkAccBookColors() = AccBookColors(
-    income = Color(0xFF8FC79E),
-    warning = Color(0xFFE0B35C),
-    critical = Color(0xFFF07C64),
-    criticalAlert = Color(0xFFFF5844),
-    primaryStrong = Color(0xFF5B93D4),
-    hairline = Color(0xFF2A323B),
-    ringTrack = Color(0xFF333C47),
-    festiveRed = Color(0xFFE88272),
+    income = Color(0xFF88DBB0),
+    warning = Color(0xFFF0C278),
+    critical = Color(0xFFF39F8E),
+    criticalAlert = Color(0xFFFF8A73),
+    primaryStrong = Color(0xFFB8EDF0),
+    hairline = Color(0xFF35555A),
+    ringTrack = Color(0xFF355358),
+    festiveRed = Color(0xFFF39F8E),
     overlayInk = Color(0xFFFFFFFF),
     cardOnLight = CardTones(
-        ink = Color(0xFF14212E),
-        sub = Color(0xFF4E6175),
-        income = Color(0xFF2F6B45),
-        expense = Color(0xFFC1352B),
+        ink = Color(0xFF142F37),
+        sub = Color(0xFF38545A),
+        income = Color(0xFF268E70),
+        expense = Color(0xFFB44A38),
         scrim = Color(0xFFFFFFFF),
-        pillContainer = Color(0x263C6CA8),
-        pillSelected = Color(0xFF3C6CA8),
+        pillContainer = Color(0x2624788A),
+        pillSelected = Color(0xFF145B70),
         pillSelectedContent = Color(0xFFFFFFFF),
     ),
     cardOnDark = CardTones(
-        ink = Color(0xFFFFFFFF),
-        sub = Color(0xCCFFFFFF),
-        income = Color(0xFF8FE3A6),
-        expense = Color(0xFFFFA694),
+        ink = Color(0xFFF2F8F2),
+        sub = Color(0xCCF2F8F2),
+        income = Color(0xFF98DDB1),
+        expense = Color(0xFFF1A28F),
         scrim = Color(0xFF000000),
         pillContainer = Color(0x33FFFFFF),
         pillSelected = Color(0xFFFFFFFF),
-        pillSelectedContent = Color(0xFF16202B),
+        pillSelectedContent = Color(0xFF142F37),
     ),
     categoryPalette = listOf(
-        Color(0xFFF87171), // 红
-        Color(0xFFFB923C), // 橙
-        Color(0xFFFCD34D), // 黄
-        Color(0xFF4ADE80), // 绿
-        Color(0xFF2DD4BF), // 青绿
-        Color(0xFF60A5FA), // 蓝
-        Color(0xFFA78BFA), // 紫
-        Color(0xFFF472B6), // 玫红
+        Color(0xFF88D5DF),
+        Color(0xFF88DBB0),
+        Color(0xFFF0C278),
+        Color(0xFFF39F8E),
+        Color(0xFFC4B3DF),
+        Color(0xFFA4D8F3),
+        Color(0xFFF0ADBB),
+        Color(0xFF94D8B5),
     ),
 )
 
@@ -146,10 +328,6 @@ val LocalAccBookColors = staticCompositionLocalOf { lightAccBookColors() }
 val MaterialTheme.accBook: AccBookColors
     @Composable get() = LocalAccBookColors.current
 
-/**
- * 结余卡的用色方案：浅底/深底各一套，由背景亮度自动选择，
- * 对比度不足时再叠一层 [scrim]（透明度按 WCAG 对比度 ≥ 3 反算）。
- */
 @Immutable
 data class CardTones(
     val ink: Color,
@@ -162,20 +340,11 @@ data class CardTones(
     val pillSelectedContent: Color,
 )
 
-/** 分类名 → 调色板稳定取色（同一分类全 App 同色，跨会话不变） */
 fun categoryColor(palette: List<Color>, categoryName: String): Color {
     if (palette.isEmpty()) return Color.Unspecified
     return palette[preferredSlot(palette.size, categoryName)]
 }
 
-/**
- * 圆环/图例配色：先摆"颜色已经定好"的分类（[fixed]，一般是**与图标同色**——见 `sliceColorsOf`），
- * 再给 [names] 里的分类（图标是 emoji / 相册图片，本来就没有"颜色"）从调色板里挑一个
- * **离所有已用颜色最远**的（最远点贪心，距离用 CIELAB ΔE）。
- *
- * 分配顺序按名字排序，结果只取决于名字集合与 [fixed]，换月换年不跳色；
- * 挑不到够远的颜色时（分类比调色板还多）也保证每个名字都有值。
- */
 fun ringColors(palette: List<Color>, fixed: Map<String, Color>, names: List<String>): Map<String, Color> {
     val out = LinkedHashMap<String, Color>(fixed)
     if (names.isEmpty()) return out
@@ -184,7 +353,6 @@ fun ringColors(palette: List<Color>, fixed: Map<String, Color>, names: List<Stri
     names.filter { it.isNotEmpty() }.distinct().sorted().forEach { name ->
         if (out.containsKey(name)) return@forEach
         val slot = palette.indices.maxByOrNull { candidate ->
-            // 与"已经用掉的颜色"的最小 ΔE 最大 = 最远点
             if (used.isEmpty()) 0f else used.minOf { colorDistance(palette[candidate], it) }
         } ?: 0
         out[name] = palette[slot]
@@ -193,10 +361,8 @@ fun ringColors(palette: List<Color>, fixed: Map<String, Color>, names: List<Stri
     return out
 }
 
-/** 圆环上两个分类颜色至少要拉开这么多 ΔE，自动分配时才算是"够远" */
 internal const val RING_MIN_DELTA = 26f
 
-/** 两个颜色的 CIELAB ΔE（CIE76）：越大越"不像"，> 30 基本一眼能分 */
 internal fun colorDistance(a: Color, b: Color): Float {
     val la = toLab(a)
     val lb = toLab(b)
@@ -206,7 +372,6 @@ internal fun colorDistance(a: Color, b: Color): Float {
     return kotlin.math.sqrt(dl * dl + da * da + db * db)
 }
 
-/** sRGB → CIELAB（D65 白点），纯 Kotlin 实现（不依赖 android.graphics，可单测） */
 private fun toLab(color: Color): FloatArray {
     val r = linearize(color.red)
     val g = linearize(color.green)
@@ -226,7 +391,6 @@ private fun linearize(v: Float): Float =
 private fun labF(t: Float): Float =
     if (t > 0.008856f) t.pow(1f / 3f) else 7.787f * t + 16f / 116f
 
-/** RGB（0..1）→ HSV（色相 0..360，饱和度/明度 0..1） */
 internal fun rgbToHsv(r: Float, g: Float, b: Float): FloatArray {
     val max = maxOf(r, g, b)
     val min = minOf(r, g, b)
@@ -240,7 +404,6 @@ internal fun rgbToHsv(r: Float, g: Float, b: Float): FloatArray {
     return floatArrayOf(if (rawHue < 0f) rawHue + 360f else rawHue, if (max == 0f) 0f else d / max, max)
 }
 
-/** HSV → RGB（0..1） */
 internal fun hsvToRgb(h: Float, s: Float, v: Float): FloatArray {
     val c = v * s
     val hp = (((h % 360f) + 360f) % 360f) / 60f
@@ -260,7 +423,6 @@ internal fun hsvToRgb(h: Float, s: Float, v: Float): FloatArray {
     return floatArrayOf(r + m, g + m, b + m)
 }
 
-/** 名字哈希 → 调色板首选位（同一名字永远从同一位开始） */
 private fun preferredSlot(size: Int, name: String): Int {
     if (size <= 0) return 0
     var h = 0
@@ -268,129 +430,209 @@ private fun preferredSlot(size: Int, name: String): Int {
     return h % size
 }
 
-/**
- * 剩余额度档位 → 语义色（绿 / 黄 / 红）。首页（含超支渐强）与个人页预算卡共用这套映射，
- * 避免同一档位在两处出现不同颜色。
- */
 fun toneColor(tone: Budget.Tone, colors: AccBookColors): Color = when (tone) {
     Budget.Tone.OK -> colors.income
     Budget.Tone.MID -> colors.warning
     Budget.Tone.LOW -> colors.critical
 }
 
-// ---------- 明暗两套 Material 配色（白 + 浅蓝 / 冷墨蓝） ----------
+/** 新设计：档位色直接取纸面语义色 */
+fun toneColor(tone: Budget.Tone, colors: EcoColors): Color = when (tone) {
+    Budget.Tone.OK -> colors.jade
+    Budget.Tone.MID -> colors.amber
+    Budget.Tone.LOW -> colors.clay
+}
 
-private fun lightScheme() = lightColorScheme(
-    // 页面底色用带蓝的白（卡片为纯白）——全 App 冷色调，不再有暖黄感
-    background = Color(0xFFF1F5FB),
-    onBackground = Color(0xFF1B2430),
-    surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF1B2430),
-    surfaceVariant = Color(0xFFE9EFF7),
-    onSurfaceVariant = Color(0xFF5B6B7C),
-    surfaceDim = Color(0xFFE3EAF3),
-    surfaceBright = Color(0xFFFCFDFF),
-    surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFF7FAFD),
-    surfaceContainer = Color(0xFFF4F8FC),
-    surfaceContainerHigh = Color(0xFFEAF0F8),
-    surfaceContainerHighest = Color(0xFFE2EAF4),
-    // 海拔叠加色跟随主色（默认是 M3 基线的暖紫，会在浅底上透出暖调）
-    surfaceTint = Color(0xFF4E6E8E),
-    primary = Color(0xFF4E6E8E),
+// ---------- Material 配色 ----------
+
+private fun lightScheme(eco: EcoColors) = lightColorScheme(
+    background = eco.paper,
+    onBackground = eco.ink,
+    surface = eco.surface,
+    onSurface = eco.ink,
+    surfaceVariant = eco.surface2,
+    onSurfaceVariant = eco.muted,
+    surfaceDim = eco.paperDeep,
+    surfaceBright = eco.surface,
+    surfaceContainerLowest = eco.surface,
+    surfaceContainerLow = eco.surface2,
+    surfaceContainer = eco.surface2,
+    surfaceContainerHigh = eco.surface3,
+    surfaceContainerHighest = eco.surface3,
+    surfaceTint = eco.blue,
+    primary = eco.blue,
     onPrimary = Color(0xFFFFFFFF),
-    primaryContainer = Color(0xFFDCE8F5),
-    onPrimaryContainer = Color(0xFF0F2740),
-    secondary = Color(0xFF5F6B77),
+    primaryContainer = eco.blueSoft,
+    onPrimaryContainer = eco.blueDeep,
+    secondary = eco.jade,
     onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFFE3E9F0),
-    onSecondaryContainer = Color(0xFF1E262E),
-    tertiary = Color(0xFF456B63),
+    secondaryContainer = eco.jadeSoft,
+    onSecondaryContainer = eco.ink,
+    tertiary = eco.amber,
     onTertiary = Color(0xFFFFFFFF),
-    tertiaryContainer = Color(0xFFD6E8E4),
-    onTertiaryContainer = Color(0xFF0E211D),
-    error = Color(0xFFC1352B),
+    tertiaryContainer = eco.amberSoft,
+    onTertiaryContainer = eco.ink,
+    error = eco.clay,
     onError = Color(0xFFFFFFFF),
-    errorContainer = Color(0xFFFFD9D2),
-    onErrorContainer = Color(0xFF410001),
-    outline = Color(0xFF8B97A3),
-    outlineVariant = Color(0xFFE1E8EF),
-    inverseSurface = Color(0xFF2A3139),
-    inverseOnSurface = Color(0xFFF0F4F8),
-    inversePrimary = Color(0xFFA5C6E8),
+    errorContainer = eco.claySoft,
+    onErrorContainer = eco.ink,
+    outline = eco.ruleStrong,
+    outlineVariant = eco.rule,
+    inverseSurface = eco.ink,
+    inverseOnSurface = eco.paper,
+    inversePrimary = eco.blueHi,
 )
 
-private fun darkScheme() = darkColorScheme(
-    background = Color(0xFF101419),
-    onBackground = Color(0xFFE4EAF1),
-    surface = Color(0xFF171C23),
-    onSurface = Color(0xFFE4EAF1),
-    surfaceVariant = Color(0xFF212832),
-    onSurfaceVariant = Color(0xFFA3AFBC),
-    surfaceDim = Color(0xFF101419),
-    surfaceBright = Color(0xFF333C47),
-    surfaceContainerLowest = Color(0xFF0C1015),
-    surfaceContainerLow = Color(0xFF151A21),
-    surfaceContainer = Color(0xFF191F27),
-    surfaceContainerHigh = Color(0xFF232A34),
-    surfaceContainerHighest = Color(0xFF2D353F),
-    surfaceTint = Color(0xFFA5C6E8),
-    primary = Color(0xFFA5C6E8),
-    onPrimary = Color(0xFF12283E),
-    primaryContainer = Color(0xFF2C4A69),
-    onPrimaryContainer = Color(0xFFD3E5F6),
-    secondary = Color(0xFFAAB6C2),
-    onSecondary = Color(0xFF1A2029),
-    secondaryContainer = Color(0xFF2A323C),
-    onSecondaryContainer = Color(0xFFD5DEE7),
-    tertiary = Color(0xFFA9CFC7),
-    onTertiary = Color(0xFF14302B),
-    tertiaryContainer = Color(0xFF27453F),
-    onTertiaryContainer = Color(0xFFCDE9E3),
-    error = Color(0xFFF07C64),
-    onError = Color(0xFF4A1002),
-    errorContainer = Color(0xFF6A2A18),
-    onErrorContainer = Color(0xFFFFDAD2),
-    outline = Color(0xFF828E9B),
-    outlineVariant = Color(0xFF333B45),
-    inverseSurface = Color(0xFFE4EAF1),
-    inverseOnSurface = Color(0xFF2A3139),
-    inversePrimary = Color(0xFF4E6E8E),
+private fun darkScheme(eco: EcoColors) = darkColorScheme(
+    background = eco.paper,
+    onBackground = eco.ink,
+    surface = eco.surface,
+    onSurface = eco.ink,
+    surfaceVariant = eco.surface2,
+    onSurfaceVariant = eco.muted,
+    surfaceDim = eco.paperDeep,
+    surfaceBright = eco.surface3,
+    surfaceContainerLowest = eco.paperDeep,
+    surfaceContainerLow = eco.surface,
+    surfaceContainer = eco.surface,
+    surfaceContainerHigh = eco.surface2,
+    surfaceContainerHighest = eco.surface3,
+    surfaceTint = eco.blue,
+    primary = eco.blue,
+    onPrimary = eco.paper,
+    primaryContainer = eco.blueSoft,
+    onPrimaryContainer = eco.blueDeep,
+    secondary = eco.jade,
+    onSecondary = eco.paper,
+    secondaryContainer = eco.jadeSoft,
+    onSecondaryContainer = eco.jade,
+    tertiary = eco.amber,
+    onTertiary = eco.paper,
+    tertiaryContainer = eco.amberSoft,
+    onTertiaryContainer = eco.amber,
+    error = eco.clay,
+    onError = eco.paper,
+    errorContainer = eco.claySoft,
+    onErrorContainer = eco.clay,
+    outline = eco.ruleStrong,
+    outlineVariant = eco.rule,
+    inverseSurface = eco.ink,
+    inverseOnSurface = eco.paper,
+    inversePrimary = eco.blueDeep,
 )
 
-// ---------- 字体：金额用等宽数字（tnum），层级靠字号与留白 ----------
+// ---------- 字体 ----------
 
-private fun tabular(style: TextStyle) = style.copy(fontFeatureSettings = "tnum")
+private fun tracking(size: Float, em: Float) = (size * em).sp
+
+private fun ecoText(
+    size: Float,
+    weight: Int,
+    em: Float = 0f,
+    lineHeight: Float = size * 1.25f,
+) = TextStyle(
+    fontFamily = FontFamily.SansSerif,
+    fontSize = size.sp,
+    fontWeight = FontWeight(weight),
+    letterSpacing = tracking(size, em),
+    lineHeight = lineHeight.sp,
+    fontFeatureSettings = "tnum",
+)
+
+/** 命名版式：新代码直接引用，避免每处猜字号/字距 */
+object EcoType {
+    val TopTitle = ecoText(28f, 800, -0.064f, 32f)
+    val SubTitle = ecoText(23f, 800, -0.064f, 28f)
+    val TopLow = ecoText(28f, 500, -0.064f, 32f)
+    val Micro = ecoText(9f, 800, 0.145f, 12f)
+    val MicroQuiet = ecoText(9f, 700, 0.17f, 12f)
+    val SectionNo = ecoText(8f, 800, 0f, 10f)
+    val SectionTitle = ecoText(13f, 800, -0.015f, 17f)
+    val SectionAside = ecoText(8.5f, 500, 0f, 11f)
+    val RowTitle = ecoText(13f, 700, -0.014f, 17f)
+    val RowSub = ecoText(9.5f, 400, 0f, 15f)
+    val RowTrail = ecoText(10.5f, 500, 0f, 14f)
+    val PageLead = ecoText(10f, 400, 0f, 17.5f)
+    val PageNote = ecoText(9f, 400, 0f, 15f)
+    val HeroAmount = ecoText(48f, 800, -0.078f, 48f)
+    val MeterMoney = ecoText(39f, 700, -0.065f, 46f)
+    val TodayAmount = ecoText(47f, 700, -0.065f, 51f)
+    val CatTotal = ecoText(38f, 800, -0.065f, 39f)
+    val AssetAmount = ecoText(48f, 800, -0.07f, 53f)
+    val CoverMoney = ecoText(32f, 800, -0.07f, 32f)
+    val ConclusionAmount = ecoText(29f, 700, -0.065f, 35f)
+    val PendingAmount = ecoText(16f, 800, -0.05f, 20f)
+    val BillAmount = ecoText(13.5f, 800, -0.025f, 18f)
+    val CatAmount = ecoText(16.5f, 800, -0.045f, 21f)
+    val KeyAmount = ecoText(53f, 800, -0.075f, 53f)
+    val EditAmount = ecoText(33f, 800, -0.06f, 40f)
+    val ConfirmAmount = ecoText(29f, 800, -0.06f, 35f)
+    val PendingCount = ecoText(35f, 800, -0.07f, 37f)
+    val DailyValue = ecoText(31f, 800, -0.065f, 35f)
+    val Seg = ecoText(10.5f, 700, 0f, 14f)
+    val SegSmall = ecoText(10f, 700, 0f, 13f)
+    val Chip = ecoText(10.5f, 700, 0f, 14f)
+    val Pill = ecoText(9f, 700, 0.02f, 12f)
+    val Btn = ecoText(12f, 800, 0f, 16f)
+    val FieldLabel = ecoText(10f, 700, 0.04f, 13f)
+    val Input = ecoText(12f, 500, 0f, 16f)
+    val AssetLabel = ecoText(11f, 700, 0.16f, 14f)
+    val MeterLabel = ecoText(11f, 700, 0.06f, 14f)
+    val DatePill = ecoText(9.5f, 700, 0.02f, 12f)
+    val SheetTitle = ecoText(20f, 800, -0.05f, 24f)
+    val SheetSub = ecoText(8.5f, 400, 0f, 13f)
+    val ModalTitle = ecoText(18f, 800, -0.04f, 22f)
+    val ModalBody = ecoText(10f, 400, 0f, 17f)
+    val EmptyTitle = ecoText(13f, 700, 0f, 17f)
+    val EmptyBody = ecoText(12f, 400, 0f, 21f)
+    val LogChannel = ecoText(7.5f, 700, 0.04f, 9f)
+    val TraceTime = ecoText(8f, 400, 0f, 11f)
+    val Nav = ecoText(10f, 600, 0f, 12f)
+    val SheetTitleSmall = ecoText(17f, 800, -0.04f, 21f)
+}
 
 private fun appTypography(): Typography {
     val base = Typography()
     return base.copy(
-        // 首页"剩余可用金额"——全页视觉层级最高的信息
-        displayMedium = tabular(
-            base.displayMedium.copy(fontWeight = FontWeight.SemiBold, letterSpacing = (-0.5).sp),
-        ),
-        displaySmall = tabular(base.displaySmall.copy(fontWeight = FontWeight.SemiBold)),
-        // 快速记账金额输入
-        headlineLarge = tabular(base.headlineLarge.copy(fontWeight = FontWeight.SemiBold)),
-        // 列表/汇总里的金额列
-        titleMedium = tabular(base.titleMedium),
-        titleSmall = tabular(base.titleSmall),
+        displayLarge = EcoType.HeroAmount,
+        displayMedium = EcoType.MeterMoney,
+        displaySmall = EcoType.ConclusionAmount,
+        headlineLarge = EcoType.TopTitle,
+        headlineMedium = EcoType.SubTitle,
+        headlineSmall = EcoType.SheetTitle,
+        titleLarge = EcoType.ModalTitle,
+        titleMedium = EcoType.CatAmount,
+        titleSmall = EcoType.RowTitle,
+        bodyLarge = ecoText(13f, 500, 0f, 19f),
+        bodyMedium = ecoText(11f, 400, 0f, 16f),
+        bodySmall = EcoType.RowSub,
+        labelLarge = EcoType.Btn,
+        labelMedium = EcoType.Chip,
+        labelSmall = EcoType.Pill,
     )
 }
 
 private val appShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(14.dp),
-    large = RoundedCornerShape(18.dp),
-    extraLarge = RoundedCornerShape(24.dp),
+    extraSmall = RoundedCornerShape(9.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(17.dp),
+    large = RoundedCornerShape(19.dp),
+    extraLarge = RoundedCornerShape(25.dp),
 )
 
 @Composable
-fun AccBookTheme(darkTheme: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    val colorScheme = if (darkTheme) darkScheme() else lightScheme()
+fun AccBookTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    accent: EcoAccent = EcoAccent.Tide,
+    content: @Composable () -> Unit,
+) {
+    val eco = ecoColors(darkTheme, accent)
+    val colorScheme = if (darkTheme) darkScheme(eco) else lightScheme(eco)
     val extended = if (darkTheme) darkAccBookColors() else lightAccBookColors()
-    androidx.compose.runtime.CompositionLocalProvider(LocalAccBookColors provides extended) {
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalEcoColors provides eco,
+        LocalAccBookColors provides extended,
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography = appTypography(),

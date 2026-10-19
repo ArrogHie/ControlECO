@@ -1,9 +1,13 @@
 package com.controleco.app
 
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -13,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -32,6 +35,7 @@ import com.controleco.app.capture.CapturePermissions
 import com.controleco.app.data.LedgerViewModel
 import com.controleco.app.ui.AccBookNav
 import com.controleco.app.ui.theme.AccBookTheme
+import com.controleco.app.ui.theme.AccentThemeStore
 import com.controleco.app.update.AppUpdate
 
 class MainActivity : ComponentActivity() {
@@ -41,6 +45,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 纸面要铺到状态栏/手势条后面；系统栏图标颜色由 auto 按系统深浅色决定
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(Color.TRANSPARENT, Color.TRANSPARENT),
+        )
         consumeRoute(intent)
         // 权限自检只在"冷启动"提醒一次（重建/旋转不重弹），且从捕获通知进入时不打扰
         val coldStart = savedInstanceState == null
@@ -49,9 +58,9 @@ class MainActivity : ComponentActivity() {
         // 自动更新检查：同样只认冷启动、从捕获通知进入时不打扰（结果就绪后弹对话框）
         if (coldStart && !fromCaptureRoute) AppUpdate.maybeCheck(this)
         setContent {
-            AccBookTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    val vm: LedgerViewModel = viewModel()
+            AccBookTheme(accent = AccentThemeStore.current) {
+                val vm: LedgerViewModel = viewModel()
+                Box(Modifier.fillMaxSize()) {
                     AccBookNav(vm, navEvent, promptPermissions)
                     UpdateAvailableDialog()
                 }

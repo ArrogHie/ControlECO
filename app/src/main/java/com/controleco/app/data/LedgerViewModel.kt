@@ -343,6 +343,16 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
+     * 首页"资产"视图的走势数据：当前会计月全部交易行。
+     * 只用于画两条很淡的趋势线（累计支出 / 存款），不复用账单页翻月状态。
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val homePeriodRows: StateFlow<List<TransactionRow>?> = currentPeriod.flatMapLatest { period ->
+        val (start, end) = period.toMillisRange(zone)
+        txDao.observeRows(start, end, true)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
      * 首页"本日剩余"用：**今日净支出** = 今日支出 − **今日退款到账**。
      *
      * 预算看的是"花了多少"，所以**工资/红包这类收入不参与**（收入进来不会让今天的额度变多），

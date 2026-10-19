@@ -1,11 +1,11 @@
 package com.controleco.app.ui.transactions
 
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,21 +28,14 @@ import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -61,12 +56,16 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.controleco.app.data.CardTransform
 import com.controleco.app.data.PeriodMode
@@ -76,13 +75,25 @@ import com.controleco.app.data.LedgerViewModel
 import com.controleco.app.data.db.RefundMark
 import com.controleco.app.data.db.TransactionRow
 import com.controleco.app.data.db.TxType
-import com.controleco.app.ui.common.CategoryLogo
+import com.controleco.app.ui.common.EcoIcons
 import com.controleco.app.ui.common.PeriodPickerSheet
-import com.controleco.app.ui.common.PeriodStepper
-import com.controleco.app.ui.common.SegmentedSwitch
 import com.controleco.app.ui.common.dayOfWeekZh
 import com.controleco.app.ui.common.periodScopeLabel
+import com.controleco.app.ui.eco.EcoCategoryTile
+import com.controleco.app.ui.eco.EcoConfirm
+import com.controleco.app.ui.eco.EcoFilterStrip
+import com.controleco.app.ui.eco.EcoGhostButton
+import com.controleco.app.ui.eco.EcoIconButton
+import com.controleco.app.ui.eco.EcoPane
+import com.controleco.app.ui.eco.EcoPillTone
+import com.controleco.app.ui.eco.EcoSheet
+import com.controleco.app.ui.eco.EcoTextAction
+import com.controleco.app.ui.eco.EcoToast
+import com.controleco.app.ui.eco.EcoTopBar
+import com.controleco.app.ui.eco.ecoBottomContentPadding
+import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.accBook
+import com.controleco.app.ui.theme.eco
 import com.controleco.app.util.Money
 import java.time.Instant
 import java.time.LocalDate
@@ -99,18 +110,15 @@ import kotlinx.coroutines.withContext
 /** 范围/多选删除的二次确认（标题 + 说明 + 执行动作） */
 private data class DeleteConfirm(val title: String, val body: String, val onConfirm: () -> Unit)
 
-/** 收支类型筛选：三段式（全部 / 支出 / 收入），选中段主色实底 */
+/** 收支类型筛选：三段式（全部 / 支出 / 收入） */
 private enum class TxFilter(val label: String) {
     ALL("全部"),
     EXPENSE("支出"),
     INCOME("收入"),
 }
 
-/** 分页：首屏先给这么多条，滑到底再追加一页（年账单几千条不会一次性排完） */
 private const val FIRST_PAGE_ROWS = 30
 private const val PAGE_ROWS = 30
-
-/** 滑动条拇指长度占比的上下限：太短不好抓，太长看着不像滑动条 */
 private const val MIN_THUMB_FRACTION = 0.12f
 private const val MAX_THUMB_FRACTION = 0.9f
 
@@ -119,11 +127,6 @@ private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 /** 账单行文案：标题 + 小行第一行 + 备注行（备注为空时不占位） */
 internal data class BillRowText(val title: String, val subLine1: String, val note: String)
 
-/**
- * 账单行的文案规则（纯函数，`BillRowTextTest` 覆盖）：
- * - 有商户：名称显示**商户**，小行第一行「时间　类别」（空白间隔，不用「·」），备注在小行第二行；
- * - 无商户：名称显示**类别**，小行第一行只留时间，备注在小行第二行。
- */
 internal fun billRowText(counterparty: String, categoryName: String, time: String, note: String): BillRowText {
     val merchant = counterparty.trim()
     return if (merchant.isNotEmpty()) {
@@ -133,10 +136,6 @@ internal fun billRowText(counterparty: String, categoryName: String, time: Strin
     }
 }
 
-/**
- * 分页取天（纯函数，`BillPagingTest` 覆盖）：从最近的一天开始往回取，累计到 [limit] 条为止；
- * **整天推进**（不切开某一天），至少给一天。返回实际显示的天与条数。
- */
 internal fun pageDays(
     days: List<LocalDate>,
     grouped: Map<LocalDate, List<TransactionRow>>,
@@ -153,7 +152,6 @@ internal fun pageDays(
     return out to rows
 }
 
-/** 要显示到 [day] 那天，至少得加载多少条（这天不在列表里时返回全部条数 = 全加载） */
 internal fun rowsUpToDay(
     days: List<LocalDate>,
     grouped: Map<LocalDate, List<TransactionRow>>,
@@ -167,7 +165,6 @@ internal fun rowsUpToDay(
     return acc
 }
 
-/** 第 [index] 天的日期头在列表里的位置（每天 = 1 个日期头 + 当天的账单行） */
 internal fun headerIndexForDay(
     days: List<LocalDate>,
     grouped: Map<LocalDate, List<TransactionRow>>,
@@ -179,9 +176,8 @@ internal fun headerIndexForDay(
 }
 
 /**
- * 账单页：顶部一张悬浮结余卡（大字结余 + 右侧收入/支出，可换背景图），下面是周期步进与列表。
- * 周期支持月/年（PeriodMode），列表按日期分组（今天/昨天浅蓝胶囊，右侧当天结余 +绿 −红），
- * 先看最近 3 天、页脚一键展开；单按钮循环筛选；右侧常显可拖动滑动条；重按底部标签回到顶部。
+ * 账单页：结余封面 + 周期工具条 + 筛选 + 日期分组列表。
+ * 月/年周期、月首日、退款显示、分页、跳日期、多选批删、封面图裁剪全部沿用 ViewModel 契约。
  */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -196,16 +192,13 @@ fun TransactionListScreen(
     val mode by vm.periodMode.collectAsStateWithLifecycle()
     val currentAccountingMonth by vm.currentAccountingMonth.collectAsStateWithLifecycle()
     val monthStartDay by vm.monthStartDay.collectAsStateWithLifecycle()
-    val showRefunds by vm.showRefunds.collectAsStateWithLifecycle()
     val refundTotal by vm.periodRefundTotal.collectAsStateWithLifecycle()
     val cardImageUri by vm.cardImageUri.collectAsStateWithLifecycle()
     val cardTransform by vm.cardTransform.collectAsStateWithLifecycle()
     val cardImage by vm.cardImage.collectAsStateWithLifecycle()
     val cardImageColor by vm.cardImageColor.collectAsStateWithLifecycle()
     val cardImageLuminance by vm.cardImageLuminance.collectAsStateWithLifecycle()
-    val ab = MaterialTheme.accBook
 
-    // 数据未到位前整页不画：不显示空列表、也不显示默认卡面
     val rowsReady = rows ?: return
     val totalsReady = totals ?: return
     val refundReady = refundTotal ?: return
@@ -214,13 +207,13 @@ fun TransactionListScreen(
     val income = totalsReady.firstOrNull { it.type == TxType.INCOME }?.totalCents ?: 0L
 
     var filter by remember { mutableStateOf(TxFilter.ALL) }
-    var loadedLimit by remember { mutableIntStateOf(FIRST_PAGE_ROWS) }  // 已排到多少条（滑到底自动加一页）
-    var jumpTarget by remember { mutableStateOf<LocalDate?>(null) }     // 点日期头 → 挑日期跳过去
-    var pendingJump by remember { mutableStateOf<LocalDate?>(null) }    // 选好日期，等这天排出来再滚
+    var loadedLimit by remember { mutableIntStateOf(FIRST_PAGE_ROWS) }
+    var jumpTarget by remember { mutableStateOf<LocalDate?>(null) }
+    var pendingJump by remember { mutableStateOf<LocalDate?>(null) }
     var showPicker by remember { mutableStateOf(false) }
-    var showImageDialog by remember { mutableStateOf(false) }
+    var showCoverSheet by remember { mutableStateOf(false) }
     var showImageEditor by remember { mutableStateOf(false) }
-    // 本次选图还没「应用」：取消时要把上一张卡面原样放回去（图片文件在应用前不会删）
+    var showBatchSheet by remember { mutableStateOf(false) }
     var pendingImage by remember { mutableStateOf<String?>(null) }
     var imageSnapshot by remember { mutableStateOf<CardImageSnapshot?>(null) }
     var selecting by remember { mutableStateOf(false) }
@@ -229,56 +222,46 @@ fun TransactionListScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val listState = rememberLazyListState()
-    // 相册选图 → 持久化读取权限，重启后仍能显示
-    // 系统照片选择器（相册 UI，不是文件管理）：选完立刻拷进应用内部存储
+
     val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
             scope.launch {
                 val saved = withContext(Dispatchers.IO) { importCardImage(context, uri) }
                 if (saved != null) {
-                    // 先把当前卡面记下来：编辑器里点「取消」要回到选图前，而不是把新图留在卡上
                     imageSnapshot = CardImageSnapshot(cardImageUri, cardImageColor, cardImageLuminance, cardTransform)
                     pendingImage = saved.path
                     vm.setCardImage(saved.path)
                     vm.setCardImageStats(saved.colorArgb, saved.luminance)
                     vm.setCardTransform(CardTransform.DEFAULT)
+                    showCoverSheet = false
                     showImageEditor = true
                 } else {
-                    Toast.makeText(context, "这张图片读取失败，换一张试试", Toast.LENGTH_SHORT).show()
+                    EcoToast.show("这张图片读取失败，换一张试试", EcoPillTone.Bad)
                 }
             }
         }
     }
 
-    // 再次点击底部「账单」标签：回到顶部
     LaunchedEffect(scrollToTopTick) {
         if (scrollToTopTick > 0) listState.animateScrollToItem(0)
     }
-
-    // 切周期（月/年切换或换月换年）即退出多选、回到第一页并从顶部看起
     LaunchedEffect(month, mode) {
         selecting = false
         selected = emptySet()
         loadedLimit = FIRST_PAGE_ROWS
         listState.scrollToItem(0)
     }
-
-    // 换筛选：列表内容整体换了一批，同样回到第一页顶部
     LaunchedEffect(filter) {
         loadedLimit = FIRST_PAGE_ROWS
         listState.scrollToItem(0)
     }
 
-    val report: (String?) -> Unit = { err ->
-        if (err != null) Toast.makeText(context, err, Toast.LENGTH_SHORT).show()
-    }
+    val report: (String?) -> Unit = { err -> if (err != null) EcoToast.show(err, EcoPillTone.Bad) }
 
-    // 范围删除的区间与页面口径一致：按会计月/会计年（月首日 ≠ 1 时不是自然月）
     fun monthRange(m: YearMonth): Pair<Long, Long> = MonthPeriod.of(m, monthStartDay).toMillisRange()
 
     fun yearRange(m: YearMonth): Pair<Long, Long> = MonthPeriod.year(m.year, monthStartDay).toMillisRange()
 
-    // 范围删除先查条数再弹确认，让用户明确将删掉多少条
     fun confirmRange(title: String, range: Pair<Long, Long>) {
         scope.launch {
             val n = vm.countTransactionsInRange(range.first, range.second)
@@ -308,13 +291,11 @@ fun TransactionListScreen(
         filtered.groupBy { Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate() }
     }
     val allDays = grouped.keys.toList()
-    // 分页：先排一页，滑到底自动追加（整天推进，不把某一天切成两半）
     val (shownDays, shownCount) = remember(allDays, grouped, loadedLimit) {
         pageDays(allDays, grouped, loadedLimit)
     }
     val hasMoreDays = shownDays.size < allDays.size
 
-    // 滑到离底部 3 项以内就再排一页（替代原来底部的「查看全部账单」按钮）
     val loadMore by rememberUpdatedState(hasMoreDays)
     LaunchedEffect(listState, filtered) {
         snapshotFlow {
@@ -329,11 +310,9 @@ fun TransactionListScreen(
             }
     }
 
-    // 选完日期：先保证这天已经排出来，再滚到它的日期头
     LaunchedEffect(pendingJump, shownDays) {
         val target = pendingJump ?: return@LaunchedEffect
         if (allDays.isEmpty()) return@LaunchedEffect
-        // 那天没有记录时退到"它之前最近的一天"：能看到这天该在的位置，而不是没反应
         val day = allDays.firstOrNull { it <= target } ?: allDays.last()
         val index = shownDays.indexOf(day)
         if (index < 0) {
@@ -347,7 +326,18 @@ fun TransactionListScreen(
     }
 
     Column(Modifier.fillMaxSize()) {
-        // ---- 悬浮结余卡（取代页眉与汇总行）----
+        EcoTopBar(
+            micro = "LEDGER / ${month.year}",
+            title = "账单",
+            action = {
+                EcoIconButton(
+                    icon = EcoIcons.Image,
+                    contentDescription = "更换结余封面",
+                    onClick = { showCoverSheet = true },
+                    size = 38.dp,
+                )
+            },
+        )
         BalanceCard(
             mode = mode,
             balanceCents = income - expense,
@@ -358,132 +348,67 @@ fun TransactionListScreen(
             transform = cardTransform,
             placeholderColor = cardImageColor,
             placeholderLuminance = cardImageLuminance,
+            style = CoverStyleStore.current,
             onModeChange = { vm.setPeriodMode(it) },
-            onOpenImageSettings = { showImageDialog = true },
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+            onOpenImageSettings = { showCoverSheet = true },
+            modifier = Modifier.padding(horizontal = 22.dp),
         )
-
-        // ---- 周期步进 + 批量菜单 ----
-        Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 6.dp, top = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            PeriodStepper(
-                yearMonth = month,
-                mode = mode,
-                onPrev = { vm.prevPeriod() },
-                onNext = { vm.nextPeriod() },
-                onOpenPicker = { showPicker = true },
-                compact = true,
-            )
-            Spacer(Modifier.weight(1f))
-            if (!selecting) {
-                Box {
-                    var menuOpen by remember { mutableStateOf(false) }
-                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(38.dp)) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = "批量操作", modifier = Modifier.size(20.dp))
-                    }
-                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("批量管理") },
-                            onClick = { menuOpen = false; selecting = true; selected = emptySet() },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("删除本月全部记录…") },
-                            onClick = { menuOpen = false; confirmRange("删除本月记录", monthRange(month)) },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("删除本年全部记录…") },
-                            onClick = { menuOpen = false; confirmRange("删除本年记录", yearRange(month)) },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("删除全部记录…") },
-                            onClick = { menuOpen = false; confirmDeleteAll() },
-                        )
-                    }
-                }
-            }
-        }
-
-        // ---- 收支筛选（三段式）+ 记录数 ----
-        Row(
-            Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SegmentedSwitch(
-                options = TxFilter.entries,
-                selected = filter,
-                label = { it.label },
-                onSelect = { filter = it },
-                compact = true,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                when {
-                    rowsReady.isEmpty() -> "${periodScopeLabel(mode)}暂无记录"
-                    hasMoreDays -> "已显示 $shownCount / ${filtered.size} 笔"
-                    else -> "${periodScopeLabel(mode)} $shownCount 笔"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
+        BillToolbar(
+            month = month,
+            mode = mode,
+            filter = filter,
+            count = filtered.size,
+            onPrev = { vm.prevPeriod() },
+            onNext = { vm.nextPeriod() },
+            onOpenPicker = { showPicker = true },
+            onFilter = { filter = it },
+            onMore = { showBatchSheet = true },
+        )
         if (selecting) {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "已选 ${selected.size}",
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = { selected = rowsReady.map { it.id }.toSet() }) { Text("全选") }
-                TextButton(
-                    onClick = {
-                        if (selected.isNotEmpty()) {
-                            confirm = DeleteConfirm("删除已选记录", "将删除 ${selected.size} 条记录，删除后不可恢复。") {
-                                vm.deleteTransactionsByIds(selected) { err ->
-                                    report(err)
-                                    if (err == null) {
-                                        selecting = false
-                                        selected = emptySet()
-                                    }
+            BatchBar(
+                selectedCount = selected.size,
+                onSelectAll = { selected = rowsReady.map { it.id }.toSet() },
+                onDelete = {
+                    if (selected.isNotEmpty()) {
+                        confirm = DeleteConfirm("删除已选记录", "将删除 ${selected.size} 条记录，删除后不可恢复。") {
+                            vm.deleteTransactionsByIds(selected) { err ->
+                                report(err)
+                                if (err == null) {
+                                    selecting = false
+                                    selected = emptySet()
                                 }
                             }
                         }
-                    },
-                ) { Text("删除", color = ab.critical) }
-                TextButton(onClick = { selecting = false; selected = emptySet() }) { Text("取消") }
-            }
+                    }
+                },
+                onCancel = { selecting = false; selected = emptySet() },
+            )
         }
+        Text(
+            "${filtered.size} 笔",
+            style = EcoType.PageNote.copy(fontSize = 9.sp),
+            color = MaterialTheme.eco.quiet,
+            textAlign = TextAlign.End,
+            modifier = Modifier.fillMaxWidth().padding(end = 22.dp, top = 2.dp, bottom = 4.dp),
+        )
 
         when {
-            rowsReady.isEmpty() -> {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "${periodScopeLabel(mode)}暂无记录\n点右下角「记账」记一笔，或在「个人」页导入账单",
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-            filtered.isEmpty() -> {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "${periodScopeLabel(mode)}没有${filter.label}记录",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            rowsReady.isEmpty() -> BillEmpty(
+                title = "${periodScopeLabel(mode)}还没有记录",
+                body = "点右下角「记账」补一笔，或到「个人」页导入账单。",
+                modifier = Modifier.weight(1f),
+            )
+            filtered.isEmpty() -> BillEmpty(
+                title = "${periodScopeLabel(mode)}没有${filter.label}记录",
+                body = "切回「全部」看看其它记录。",
+                modifier = Modifier.weight(1f),
+            )
             else -> {
                 Box(Modifier.weight(1f)) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
-                        // 底部给悬浮"记账"胶囊留位，右侧给滑动条留位
-                        contentPadding = PaddingValues(bottom = 96.dp, end = 8.dp),
+                        contentPadding = PaddingValues(bottom = 96.dp, end = 10.dp),
                     ) {
                         shownDays.forEach { day ->
                             val dayRows = grouped[day].orEmpty()
@@ -509,7 +434,11 @@ fun TransactionListScreen(
                                         }
                                     },
                                 )
-                                HorizontalDivider(color = ab.hairline, modifier = Modifier.padding(start = 64.dp))
+                                HorizontalDivider(
+                                    color = MaterialTheme.eco.rule,
+                                    thickness = 1.dp,
+                                    modifier = Modifier.padding(start = 55.dp),
+                                )
                             }
                         }
                     }
@@ -518,12 +447,13 @@ fun TransactionListScreen(
                         modifier = Modifier
                             .align(Alignment.CenterEnd)
                             .fillMaxHeight()
-                            .width(18.dp)
+                            .width(14.dp)
                             .padding(vertical = 4.dp),
                     )
                 }
             }
         }
+        Spacer(Modifier.height(ecoBottomContentPadding(extra = 0.dp)))
     }
 
     if (showPicker) {
@@ -537,40 +467,17 @@ fun TransactionListScreen(
         )
     }
 
-    if (showImageDialog) {
-        val hasImage = !cardImageUri.isNullOrBlank()
-        AlertDialog(
-            onDismissRequest = { showImageDialog = false },
-            title = { Text("结余卡背景") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        "从相册选一张图片做结余卡背景（会自动压暗，保证卡上文字清晰）；" +
-                            "不选则使用默认的几何背景。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (hasImage) {
-                        TextButton(onClick = { showImageDialog = false; showImageEditor = true }) {
-                            Text("调整位置 / 缩放 / 旋转")
-                        }
-                        TextButton(onClick = { vm.setCardImage(null); showImageDialog = false }) {
-                            Text("恢复默认背景")
-                        }
-                    }
-                }
+    if (showCoverSheet) {
+        CoverSheet(
+            hasImage = !cardImageUri.isNullOrBlank(),
+            onPickPreset = { CoverStyleStore.set(context, it) },
+            onPickImage = {
+                showCoverSheet = false
+                imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    showImageDialog = false
-                    imagePicker.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                    )
-                }) { Text("从相册选择") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showImageDialog = false }) { Text("取消") }
-            },
+            onAdjust = { showCoverSheet = false; showImageEditor = true },
+            onRemove = { vm.setCardImage(null); showCoverSheet = false },
+            onDismiss = { showCoverSheet = false },
         )
     }
 
@@ -580,14 +487,12 @@ fun TransactionListScreen(
             initial = cardTransform,
             onApply = {
                 vm.setCardTransform(it)
-                // 真正落地了才收尾：清掉这回选图留下的其它图片文件
                 vm.pruneCardImages()
                 pendingImage = null
                 imageSnapshot = null
                 showImageEditor = false
             },
             onDismiss = {
-                // 「取消」= 这次选图整条作废：卡面回到选图前（含位移/缩放/旋转），新图删掉
                 val snapshot = imageSnapshot
                 if (pendingImage != null && snapshot != null) {
                     vm.setCardImage(snapshot.path)
@@ -604,11 +509,29 @@ fun TransactionListScreen(
         )
     }
 
+    if (showBatchSheet) {
+        BatchSheet(
+            onBatch = { showBatchSheet = false; selecting = true; selected = emptySet() },
+            onDeletePeriod = {
+                showBatchSheet = false
+                confirmRange(
+                    if (mode == PeriodMode.MONTH) "删除本月记录" else "删除本年记录",
+                    if (mode == PeriodMode.MONTH) monthRange(month) else yearRange(month),
+                )
+            },
+            onDeleteYear = {
+                showBatchSheet = false
+                confirmRange("删除本年记录", yearRange(month))
+            },
+            onDeleteAll = { showBatchSheet = false; confirmDeleteAll() },
+            onDismiss = { showBatchSheet = false },
+        )
+    }
+
     jumpTarget?.let { day ->
         DayJumpDialog(
             current = day,
             onPick = { picked ->
-                // 挑到别的月/年：先把周期切过去（数据到位后由 pendingJump 负责滚过去）
                 when {
                     mode == PeriodMode.MONTH && YearMonth.from(picked) != month ->
                         vm.setMonth(YearMonth.from(picked))
@@ -623,55 +546,271 @@ fun TransactionListScreen(
     }
 
     confirm?.let { c ->
-        AlertDialog(
-            onDismissRequest = { confirm = null },
-            title = { Text(c.title) },
-            text = { Text(c.body) },
-            confirmButton = {
-                TextButton(onClick = { confirm = null; c.onConfirm() }) {
-                    Text("删除", color = MaterialTheme.accBook.critical)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirm = null }) { Text("取消") }
-            },
+        EcoConfirm(
+            title = c.title,
+            body = c.body,
+            confirmText = "删除",
+            onConfirm = { confirm = null; c.onConfirm() },
+            onDismiss = { confirm = null },
+            danger = true,
         )
+    }
+
+}
+
+@Composable
+private fun BillToolbar(
+    month: YearMonth,
+    mode: PeriodMode,
+    filter: TxFilter,
+    count: Int,
+    onPrev: () -> Unit,
+    onNext: () -> Unit,
+    onOpenPicker: () -> Unit,
+    onFilter: (TxFilter) -> Unit,
+    onMore: () -> Unit,
+) {
+    val c = MaterialTheme.eco
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(45.dp)
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ToolbarArrow(EcoIcons.Back, "上一周期", onPrev)
+        Column(
+            Modifier
+                .width(82.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(onClick = onOpenPicker)
+                .padding(vertical = 2.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                if (mode == PeriodMode.MONTH) "${month.year}年${month.monthValue}月" else "${month.year}年",
+                style = EcoType.RowTitle.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold),
+                color = c.ink,
+                maxLines = 1,
+            )
+            Text(
+                if (mode == PeriodMode.MONTH) "MONTH" else "YEAR",
+                style = EcoType.Micro.copy(fontSize = 7.5.sp, letterSpacing = 0.8.sp),
+                color = c.quiet,
+            )
+        }
+        ToolbarArrow(EcoIcons.Next, "下一周期", onNext)
+        Spacer(Modifier.weight(1f))
+        EcoFilterStrip(
+            options = TxFilter.entries.map { it.label },
+            selectedIndex = filter.ordinal,
+            onSelect = { onFilter(TxFilter.entries[it]) },
+        )
+        Spacer(Modifier.width(4.dp))
+        ToolbarArrow(EcoIcons.More, "批量操作", onMore)
+    }
+}
+
+@Composable
+private fun ToolbarArrow(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, onClick: () -> Unit) {
+    val c = MaterialTheme.eco
+    Box(
+        Modifier
+            .size(26.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = desc, tint = c.muted, modifier = Modifier.size(14.dp))
+    }
+}
+
+@Composable
+private fun BatchBar(
+    selectedCount: Int,
+    onSelectAll: () -> Unit,
+    onDelete: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val c = MaterialTheme.eco
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .drawBehind {
+                drawLine(
+                    color = c.rule,
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, 0f),
+                    strokeWidth = 1.dp.toPx(),
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(5f, 4f)),
+                )
+            }
+            .padding(horizontal = 22.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("已选 $selectedCount", style = EcoType.Pill.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold), color = c.ink)
+        Spacer(Modifier.weight(1f))
+        EcoTextAction("全选", onSelectAll)
+        Spacer(Modifier.width(4.dp))
+        EcoTextAction("删除", onDelete, color = c.clay)
+        Spacer(Modifier.width(4.dp))
+        EcoTextAction("取消", onCancel, color = c.muted)
+    }
+}
+
+@Composable
+private fun BillEmpty(title: String, body: String, modifier: Modifier = Modifier) {
+    val c = MaterialTheme.eco
+    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 40.dp)) {
+            Text(title, style = EcoType.EmptyTitle, color = c.muted, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(6.dp))
+            Text(body, style = EcoType.PageLead, color = c.quiet, textAlign = TextAlign.Center)
+        }
+    }
+}
+
+@Composable
+private fun CoverSheet(
+    hasImage: Boolean,
+    onPickPreset: (String) -> Unit,
+    onPickImage: () -> Unit,
+    onAdjust: () -> Unit,
+    onRemove: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val c = MaterialTheme.eco
+    EcoSheet(
+        onDismiss = onDismiss,
+        title = "更换结余卡背景",
+        subtitle = "选一个底色，或从相册挑一张图",
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(
+                Triple(CoverStyleStore.NIGHT, "夜色", listOf(Color(0xFF102F3B), Color(0xFF135565))),
+                Triple(CoverStyleStore.MIST, "薄雾", listOf(Color(0xFFE7ECE5), Color(0xFFF1F0E7))),
+                Triple(CoverStyleStore.CLAY, "陶土", listOf(Color(0xFF5E2F2A), Color(0xFF8E5241))),
+            ).forEach { (id, label, colors) ->
+                val on = CoverStyleStore.current == id && !hasImage
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { onPickPreset(id) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(66.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Brush.linearGradient(colors))
+                            .then(if (on) Modifier.border(1.5.dp, c.blue, RoundedCornerShape(12.dp)) else Modifier),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (on) Text("当前", style = EcoType.Pill.copy(fontSize = 9.sp), color = Color.White)
+                    }
+                    Spacer(Modifier.height(5.dp))
+                    Text(label, style = EcoType.PageNote, color = if (on) c.blueDeep else c.muted)
+                }
+            }
+        }
+        Spacer(Modifier.height(18.dp))
+        EcoGhostButton(text = "从相册选择图片…", onClick = onPickImage)
+        if (hasImage) {
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.weight(1f)) {
+                    EcoGhostButton(text = "调整图片…", onClick = onAdjust)
+                }
+                Box(Modifier.weight(1f)) {
+                    EcoGhostButton(text = "移除图片", onClick = onRemove)
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "有图片时优先用图片；移除后回到当前底色。调整可平移、缩放、旋转。",
+            style = EcoType.PageNote,
+            color = c.quiet,
+        )
+    }
+}
+
+@Composable
+private fun BatchSheet(
+    onBatch: () -> Unit,
+    onDeletePeriod: () -> Unit,
+    onDeleteYear: () -> Unit,
+    onDeleteAll: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val c = MaterialTheme.eco
+    EcoSheet(
+        onDismiss = onDismiss,
+        title = "批量操作",
+        subtitle = "删除后不可恢复",
+    ) {
+        BatchChoice(EcoIcons.Check, "批量管理", "逐笔勾选后删除", c.blue, onBatch)
+        BatchChoice(EcoIcons.Calendar, "删除本周期全部记录…", "只删当前月/年", c.amber, onDeletePeriod)
+        BatchChoice(EcoIcons.Trash, "删除本年全部记录…", "按会计年删除", c.amber, onDeleteYear)
+        BatchChoice(EcoIcons.Warning, "删除全部记录…", "所有月份，含导入的账单", c.clay, onDeleteAll)
+    }
+}
+
+@Composable
+private fun BatchChoice(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    sub: String,
+    tint: Color,
+    onClick: () -> Unit,
+) {
+    val c = MaterialTheme.eco
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(tint.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(16.dp))
+        }
+        Spacer(Modifier.width(11.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, style = EcoType.RowTitle, color = if (tint == c.clay) c.clay else c.ink)
+            Text(sub, style = EcoType.PageNote.copy(fontSize = 9.sp), color = c.quiet)
+        }
     }
 }
 
 /**
  * 列表滑动条（自绘）：拇指长度 = 视口/内容比例，位置 = 已滚像素比例；
  * 拖动把位移换算成滚动像素直接交给列表（`dispatchRawDelta`），拖多少内容走多少。
- *
- * 实机排查后改掉的三处（原来是"闪动 + 不跟手"）：
- * 1. **位置改用最后一个可见项算**：列表带 sticky 日期头，被钉住的那一项会被当作
- *    "第一个可见项"报出来（实测 `vis=2:o0 6:o0 ...`），用它算位置会让拇指一直卡在顶部；
- *    从最后一个可见项倒推（最后一项永远不会是钉住的头）才拿到真实滚动量。
- * 2. **高度按 index 缓存**：见过的是实测值，没见过的按已测平均补；没测到任何一项时
- *    干脆先不画拇指（硬猜平均高度会画出一根长度离谱的拇指，下一帧又跳回正常 = 闪动）。
- * 3. **拖动比例按下时定死**：拖动中列表在滚、比例若每帧重算，拇指就追不上手指。
- *
- * 卡顿排查（实机 gfxinfo 对比）：位置 / 长度原来是**每帧**把全部条目高度加一遍，
- * 年账单上千条时就是每帧 O(n) 的装箱哈希查找；现在高度表 → 前缀和只在"测到新高度"时
- * 重算一次（见 [buildScrollMetrics]），滚动帧全部落在 draw 阶段做 O(1) 查表——
- * 滚列表不再触发这个组件的重组与重新布局。
  */
 @Composable
 private fun ListScrollbar(state: LazyListState, modifier: Modifier = Modifier) {
-    val idleColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.28f)
-    val activeColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.58f)
+    val c = MaterialTheme.eco
+    val idleColor = c.quiet.copy(alpha = 0.24f)
+    val activeColor = c.quiet.copy(alpha = 0.55f)
     var dragging by remember { mutableStateOf(false) }
     val density = LocalDensity.current
-    val thumbWidthPx = with(density) { 6.dp.toPx() }
+    val thumbWidthPx = with(density) { 4.dp.toPx() }
 
-    // 高度表 + 前缀和：只在"测到新条目高度"时更新一次（组合/绘制期间不写状态）
     var metrics by remember(state) { mutableStateOf<ScrollMetrics?>(null) }
     LaunchedEffect(state) {
         var heights = HashMap<Int, Int>()
         var knownTotal = -1
         snapshotFlow { state.layoutInfo }.collect { info ->
             if (info.totalItemsCount != knownTotal) {
-                // 换周期 / 换筛选 / 追加分页后条目集合变了，旧高度不能复用
                 heights = HashMap()
                 knownTotal = info.totalItemsCount
             }
@@ -695,7 +834,6 @@ private fun ListScrollbar(state: LazyListState, modifier: Modifier = Modifier) {
                     onDragStart = {
                         active = metrics != null && (state.canScrollForward || state.canScrollBackward)
                         dragging = active
-                        // 按下时定死比例：整个手势都用它，拇指才会贴着手指走
                         val m = metrics
                         if (active && m != null) {
                             val ratio = scrollbarGeometry(state.layoutInfo, m, size.height.toFloat())
@@ -711,14 +849,12 @@ private fun ListScrollbar(state: LazyListState, modifier: Modifier = Modifier) {
                     }
                 }
             }
-            // 拇指的位移/长度都在 draw 阶段算：滚动帧只需要重画，不用重组
             .drawBehind {
                 val m = metrics ?: return@drawBehind
                 val info = state.layoutInfo
                 val last = info.visibleItemsInfo.lastOrNull() ?: return@drawBehind
                 val geo = scrollbarGeometry(info, m, size.height)
                 if (geo.scrollablePx <= 0f) return@drawBehind
-                // 从最后一个可见项倒推滚动量（上面第 1 条）
                 val scrolled = (m.offsetOf(last.index) - last.offset).coerceIn(0f, geo.scrollablePx)
                 val thumbHeight = size.height * geo.thumbFraction
                 val top = (scrolled / geo.scrollablePx) * (size.height - thumbHeight)
@@ -732,7 +868,6 @@ private fun ListScrollbar(state: LazyListState, modifier: Modifier = Modifier) {
     )
 }
 
-/** 滑动条几何：内容高 / 可滚量 / 拇指占比 / 拇指可走距离 */
 private class ScrollbarGeometry(
     val scrollablePx: Float,
     val thumbFraction: Float,
@@ -750,10 +885,6 @@ private fun scrollbarGeometry(info: LazyListLayoutInfo, m: ScrollMetrics, trackH
     )
 }
 
-/**
- * 高度表 → 前缀和（未测到的按"已测平均"补）+ 内容总高。
- * 只在测到新高度时构建一次；滚动帧用 [ScrollMetrics.offsetOf] 做 O(1) 查表。
- */
 private class ScrollMetrics(val prefix: LongArray, val contentPx: Float) {
     fun offsetOf(index: Int): Float = prefix[index.coerceIn(0, prefix.lastIndex)].toFloat()
 }
@@ -775,51 +906,137 @@ private fun buildScrollMetrics(heights: HashMap<Int, Int>, total: Int): ScrollMe
     return ScrollMetrics(prefix, prefix[total].toFloat())
 }
 
-/** 日期分组头：**统一样式**（浅蓝底、日期在前，今天/昨天/周几在后，不用描边框住）+ 当天结余（+ 绿 / − 红）；
- *  点日期胶囊可以挑日期直接跳过去看（见 [DayJumpDialog]） */
 @Composable
 private fun DayHeader(day: LocalDate, dayRows: List<TransactionRow>, onClickDay: () -> Unit) {
-    val ab = MaterialTheme.accBook
+    val c = MaterialTheme.eco
     val today = LocalDate.now()
     val relative = when (day) {
         today -> "今天"
         today.minusDays(1) -> "昨天"
         else -> dayOfWeekZh(day.dayOfWeek)
     }
-    val label = "${day.monthValue}月${day.dayOfMonth}日  $relative"
-    // 日期头随滚动反复进出视野，汇总只在数据变化时算一次
     val dayExpense = remember(dayRows) { dayRows.filter { it.type == TxType.EXPENSE }.sumOf { it.amountCents } }
     val dayIncome = remember(dayRows) { dayRows.filter { it.type == TxType.INCOME }.sumOf { it.amountCents } }
     val dayBalance = dayIncome - dayExpense
     Row(
         Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 5.dp),
+            .background(
+                Brush.verticalGradient(
+                    listOf(c.paper, c.paper.copy(alpha = 0.96f), c.paper.copy(alpha = 0.72f)),
+                ),
+            )
+            .heightIn(min = 33.dp)
+            .padding(start = 22.dp, end = 22.dp, top = 4.dp, bottom = 3.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Surface(
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClickDay),
+        Row(
+            Modifier
+                .height(24.dp)
+                .clip(RoundedCornerShape(9.dp))
+                .background(c.blueWash)
+                .border(1.dp, c.rule, RoundedCornerShape(9.dp))
+                .clickable(onClick = onClickDay)
+                .padding(horizontal = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-            )
+            Text("${day.dayOfMonth}日", style = EcoType.Pill.copy(fontSize = 9.5.sp, fontWeight = FontWeight.Bold), color = c.blueDeep)
+            Spacer(Modifier.width(5.dp))
+            Text(relative, style = EcoType.PageNote.copy(fontSize = 8.5.sp), color = c.muted)
         }
         Text(
             Money.formatSignedPlain(dayBalance),
-            style = MaterialTheme.typography.titleSmall,
-            color = if (dayBalance >= 0L) ab.income else ab.critical,
+            style = EcoType.Micro.copy(fontSize = 10.sp, letterSpacing = 0.sp),
+            color = if (dayBalance >= 0L) c.jade else c.clay,
         )
     }
 }
 
-/** 从日期头跳转：选一天（支持跨月/跨年），落到那天的账 */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BillRow(
+    row: TransactionRow,
+    selecting: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    val c = MaterialTheme.eco
+    val isExpense = row.type == TxType.EXPENSE
+    val time = remember(row.timestamp) {
+        Instant.ofEpochMilli(row.timestamp).atZone(ZoneId.systemDefault()).toLocalTime().format(timeFormatter)
+    }
+    val texts = billRowText(row.counterparty, row.categoryName, time, row.note)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .heightIn(min = 56.dp)
+            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (selecting) {
+            Box(
+                Modifier
+                    .size(20.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (selected) c.blue else Color.Transparent)
+                    .border(1.5.dp, if (selected) c.blue else c.ruleStrong, RoundedCornerShape(6.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (selected) Icon(EcoIcons.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+            }
+            Spacer(Modifier.width(9.dp))
+        }
+        EcoCategoryTile(categoryName = row.categoryName, icon = row.categoryIcon, size = 30.dp, radius = 10.dp)
+        Spacer(Modifier.width(9.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    texts.title,
+                    style = EcoType.RowTitle.copy(fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold),
+                    color = c.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (row.refundMark != RefundMark.NONE) {
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        if (row.refundMark == RefundMark.REFUND_INCOME) "退款" else "已退",
+                        style = EcoType.Pill.copy(fontSize = 8.sp, fontWeight = FontWeight.Bold),
+                        color = if (row.refundMark == RefundMark.REFUND_INCOME) c.jade else c.amber,
+                    )
+                }
+            }
+            Text(
+                texts.subLine1,
+                style = EcoType.PageNote.copy(fontSize = 9.5.sp),
+                color = c.muted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (texts.note.isNotBlank()) {
+                Text(
+                    texts.note,
+                    style = EcoType.PageNote.copy(fontSize = 9.5.sp),
+                    color = c.quiet,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            Money.formatSignedPlain(if (isExpense) -row.amountCents else row.amountCents),
+            style = EcoType.RowTitle.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp),
+            color = if (isExpense) c.ink else c.jade,
+            maxLines = 1,
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DayJumpDialog(current: LocalDate, onPick: (LocalDate) -> Unit, onDismiss: () -> Unit) {
@@ -848,82 +1065,3 @@ private data class CardImageSnapshot(
     val luminance: Float?,
     val transform: CardTransform,
 )
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun BillRow(
-    row: TransactionRow,
-    selecting: Boolean,
-    selected: Boolean,
-    onClick: () -> Unit,
-    onLongClick: () -> Unit,
-) {
-    val ab = MaterialTheme.accBook
-    val isExpense = row.type == TxType.EXPENSE
-    // 时间字符串按时间戳缓存：滚动时行会被反复组合，日期转换 + 格式化不必每帧重来
-    val time = remember(row.timestamp) {
-        Instant.ofEpochMilli(row.timestamp).atZone(ZoneId.systemDefault()).toLocalTime().format(timeFormatter)
-    }
-    val texts = billRowText(row.counterparty, row.categoryName, time, row.note)
-    val subStyle = MaterialTheme.typography.labelSmall
-    val subColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val subModifier = Modifier.fillMaxWidth()
-
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(horizontal = 20.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (selecting) {
-            Checkbox(checked = selected, onCheckedChange = { onClick() })
-            Spacer(Modifier.width(4.dp))
-        }
-        CategoryLogo(categoryName = row.categoryName, icon = row.categoryIcon, size = 34.dp)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    texts.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                if (row.refundMark != RefundMark.NONE) {
-                    Spacer(Modifier.padding(start = 6.dp))
-                    Text(
-                        if (row.refundMark == RefundMark.REFUND_INCOME) "退款收入" else "已退款",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (row.refundMark == RefundMark.REFUND_INCOME) ab.income else ab.warning,
-                    )
-                }
-            }
-            Text(
-                texts.subLine1,
-                style = subStyle,
-                color = subColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = subModifier,
-            )
-            if (texts.note.isNotBlank()) {
-                Text(
-                    texts.note,
-                    style = subStyle,
-                    color = subColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = subModifier,
-                )
-            }
-        }
-        Spacer(Modifier.width(8.dp))
-        Text(
-            Money.formatSignedPlain(if (isExpense) -row.amountCents else row.amountCents),
-            style = MaterialTheme.typography.titleSmall,
-            color = if (isExpense) MaterialTheme.colorScheme.onSurface else ab.income,
-        )
-    }
-}

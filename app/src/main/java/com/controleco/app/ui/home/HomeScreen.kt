@@ -1,13 +1,8 @@
 package com.controleco.app.ui.home
 
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -15,6 +10,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -24,15 +20,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -42,25 +40,28 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -70,58 +71,67 @@ import com.controleco.app.data.budget.Budget
 import com.controleco.app.data.budget.MonthPeriod
 import com.controleco.app.data.db.CategoryEntity
 import com.controleco.app.data.db.CategorySumRow
+import com.controleco.app.data.db.RefundMark
+import com.controleco.app.data.db.TransactionRow
 import com.controleco.app.data.db.TxType
-import com.controleco.app.ui.common.AutoScaledText
-import com.controleco.app.ui.common.BudgetEditDialog
+import com.controleco.app.ui.common.EcoIcons
 import com.controleco.app.ui.common.rememberReducedMotion
+import com.controleco.app.ui.eco.EcoAutoMoney
+import com.controleco.app.ui.eco.EcoBudgetSheet
+import com.controleco.app.ui.eco.EcoCategoryTile
+import com.controleco.app.ui.eco.EcoIconTile
+import com.controleco.app.ui.eco.EcoMicro
+import com.controleco.app.ui.eco.EcoPane
+import com.controleco.app.ui.eco.EcoPill
+import com.controleco.app.ui.eco.EcoPillTone
+import com.controleco.app.ui.eco.EcoPrimaryButton
+import com.controleco.app.ui.eco.EcoProgressBar
+import com.controleco.app.ui.eco.EcoSettingsPill
+import com.controleco.app.ui.eco.EcoTopBar
+import com.controleco.app.ui.eco.ecoBottomContentPadding
+import com.controleco.app.ui.theme.EcoColors
+import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.accBook
+import com.controleco.app.ui.theme.categoryColor
+import com.controleco.app.ui.theme.eco
 import com.controleco.app.util.Money
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sin
 import kotlinx.coroutines.launch
 
-/**
- * 首页：三个预览模式，点击中心或圆点在 1→2→3→1 间**翻转切换**（绕 Y 轴翻转，不滑动）。
- *   1. 总剩余预算 —— 中心大环（弧长 = 剩余比例，绿/黄/红随额度变化），环内再套一条淡蓝细环
- *      表示本月**剩余**时间：与主环同口径（饱和度高的弧 = 还剩多少），两环直接比长短即可
- *      （蓝弧比绿弧短 = 花钱比时间快）；环内"本月还可以花"+ 剩余天数，环下方大字"本日剩余"；
- *   2. 分类剩余预算 —— 每个设了预算的分类一个环 + "其他"聚合环（未设预算分类的剩余与支出），
- *      数量自适应网格缩放以容纳全部，不足一行的行内居中；
- *   3. 已花费与总存款 —— 无圆环，中央大字。
- *
- * 金额小数点前超过 4 位时逐档进位 K/M/B；环内金额按可用宽度自动缩放，不与环重叠。
- * 翻转跟手：滑动 30% 宽度转满 90°，也可快速甩动触发；翻转途中相机拉近 + 缩小 + 变暗营造立体感。
- * 超支/临界的红色数字带心跳与轻微摇晃警示，强度随剩余比例加深（设上限），
- * 系统"减少动画"时全部降级（含切换改为瞬时）。
- */
 private const val MODE_COUNT = 3
-
-/** 滑动翻页阈值：跟手旋转超过该角度视为一次翻页，否则回弹 */
 private const val DRAG_FLIP_THRESHOLD_DEG = 45f
-
-/** 跟手灵敏度：横向划过卡片宽度的该比例即转满 90°（越小越跟手） */
 private const val DRAG_FULL_TURN_WIDTH_FRACTION = 0.3f
-
-/** 快速甩动阈值：速度达到每秒划过卡片宽度的该比例即翻页，不必达到角度阈值 */
 private const val FLICK_WIDTHS_PER_SECOND = 1.1f
 
-/** 分类环数据：分类预算 + 当月支出 → 剩余、额度档位；isOther = "其他"聚合环 */
-internal data class CategoryRingData(
+/** 分类条数据：预算/已花/剩余 + 图标规格 + 分类色 */
+internal data class CategoryBarData(
     val name: String,
+    val icon: String,
+    val budgetCents: Long,
+    val spentCents: Long,
     val remainingCents: Long,
     val ratio: Float,
     val tone: Budget.Tone,
-    /** 超支警示强度（红线位置随剩余天数动态变化，见 Budget.warningSeverity） */
-    val severity: Float,
     val isOther: Boolean = false,
 )
 
+private data class HomeTrend(val spent: List<Float>, val deposit: List<Float>)
+
 @Composable
-fun HomeScreen(vm: LedgerViewModel) {
+fun HomeScreen(
+    vm: LedgerViewModel,
+    onOpenSettings: () -> Unit,
+    onOpenCategories: () -> Unit,
+) {
     val budgetCents by vm.monthlyBudgetCents.collectAsStateWithLifecycle()
     val spentCents by vm.homeNetSpent.collectAsStateWithLifecycle()
     val todaySpentCents by vm.homeTodayNetSpent.collectAsStateWithLifecycle()
@@ -132,22 +142,22 @@ fun HomeScreen(vm: LedgerViewModel) {
     val monthStartDay by vm.monthStartDay.collectAsStateWithLifecycle()
     val dailyBudgetMode by vm.dailyBudgetMode.collectAsStateWithLifecycle()
     val dailyBudgetCents by vm.dailyBudgetCents.collectAsStateWithLifecycle()
+    val periodRows by vm.homePeriodRows.collectAsStateWithLifecycle()
 
-    // 数据未到位前整页不画任何东西（避免"先空/先默认，再跳成真实数据"的闪动）
     val spentReady = spentCents
     val todaySpentReady = todaySpentCents
     val sumsReady = categorySums
     val depositReady = totalDepositCents
     if (spentReady == null || todaySpentReady == null || sumsReady == null || depositReady == null) return
 
-    var showBudgetDialog by remember { mutableStateOf(false) }
+    var showBudgetSheet by remember { mutableStateOf(false) }
     var todayState by remember { mutableStateOf(LocalDate.now()) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 todayState = LocalDate.now()
-                vm.refreshToday() // 跨零点后"今日净支出"要换成新的一天
+                vm.refreshToday()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -165,13 +175,10 @@ fun HomeScreen(vm: LedgerViewModel) {
             dailyBudgetCents = if (dailyBudgetMode) dailyBudgetCents else 0L,
         )
     }
-
-    // budget > 0 时 compute 必返回非空
     val s = snapshot
-
     val reducedMotion = rememberReducedMotion()
     val scope = rememberCoroutineScope()
-    var mode by remember { mutableIntStateOf(0) }
+    var mode by rememberSaveable { mutableIntStateOf(0) }
     val flip = remember { Animatable(0f) }
     val density = LocalDensity.current.density
     var dragging by remember { mutableStateOf(false) }
@@ -179,8 +186,6 @@ fun HomeScreen(vm: LedgerViewModel) {
 
     fun wrap(target: Int): Int = ((target % MODE_COUNT) + MODE_COUNT) % MODE_COUNT
 
-    // 翻转方向约定：下一个 = 负向旋转（视觉上向左翻，与左滑一致）；上一个 = 正向
-    // 点击/圆点：切到目标模式；翻转进行中防重入；减少动画时瞬时
     val flipTo: (Int) -> Unit = { target ->
         val t = wrap(target)
         if (!flip.isRunning && t != mode) {
@@ -201,8 +206,6 @@ fun HomeScreen(vm: LedgerViewModel) {
     val latestFlipTo by rememberUpdatedState(flipTo)
     val advance: () -> Unit = { latestFlipTo(mode + 1) }
 
-    // 滑动翻转：跟手旋转，越过角度阈值或快速甩动即翻页（快甩时角度可能还很小），
-    // 未触发则回弹；翻页方向始终跟随手指，与跟手旋转同向
     val onDragEnd: (rotation: Float, velocityX: Float, widthPx: Float) -> Unit = { rotation, velocityX, widthPx ->
         if (dragging) {
             scope.launch {
@@ -226,549 +229,749 @@ fun HomeScreen(vm: LedgerViewModel) {
             }
         }
     }
-
     val latestOnDragEnd by rememberUpdatedState(onDragEnd)
 
-    val rings = remember(categoryBudgets, sumsReady, categories, budgetCents, spentReady, period) {
-        buildCategoryRings(
-            categoryBudgets, sumsReady, categories, budgetCents, spentReady,
+    val bars = remember(categoryBudgets, sumsReady, categories, budgetCents, spentReady, period, today) {
+        buildCategoryBars(
+            categoryBudgets,
+            sumsReady,
+            categories,
+            budgetCents,
+            spentReady,
             thresholds = s?.thresholds ?: Budget.thresholds(1, 1),
         )
     }
+    val trend = remember(periodRows, period, depositReady) {
+        buildHomeTrend(periodRows.orEmpty(), period, depositReady)
+    }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-        Spacer(Modifier.height(10.dp))
-        Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            // 月份胶囊按**会计月**显示（首日 ≠ 1 时，月初那几天仍属于上一个月）
-            MonthChip("${period.start.year}年${period.start.monthValue}月")
-        }
+    val monthCn = chineseMonth(period.start.monthValue)
+    val monthEn = period.start.format(DateTimeFormatter.ofPattern("MMM", Locale.ENGLISH)).uppercase(Locale.ENGLISH)
+    val modeLow = when (mode) {
+        0 -> " / 预算"
+        1 -> " / 分类"
+        else -> " / 资产"
+    }
 
+    Column(Modifier.fillMaxSize()) {
+        EcoTopBar(
+            micro = "${period.start.year} / $monthEn · 账本",
+            title = monthCn,
+            low = modeLow,
+            action = { EcoSettingsPill(onClick = onOpenSettings) },
+        )
         Box(
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .graphicsLayer {
-                    // 旋转角度只在 draw 阶段读取，不触发重组
-                    val rot = if (dragging) dragRotation else flip.value
-                    rotationY = rot
-                    // 立体感：越接近侧立，相机越近（透视越强）+ 轻微后退缩小 + 变暗，
-                    // 读起来像一张卡片翻过去，而不是平面瞬间换内容
-                    val p = (abs(rot) / 90f).coerceIn(0f, 1f)
-                    cameraDistance = (14f - 8f * p) * density
-                    val s = 1f - 0.06f * p
-                    scaleX = s
-                    scaleY = s
-                    alpha = 1f - 0.2f * p
-                }
-                .pointerInput(Unit) { detectTapGestures { advance() } }
-                .pointerInput(Unit) {
-                    val tracker = VelocityTracker()
-                    detectHorizontalDragGestures(
-                        onDragStart = {
-                            if (!flip.isRunning) {
-                                dragging = true
-                                dragRotation = 0f
-                                tracker.resetTracking()
-                            }
-                        },
-                        onHorizontalDrag = { change, dragAmount ->
-                            if (dragging) {
-                                change.consume()
-                                tracker.addPosition(change.uptimeMillis, change.position)
-                                val k = 90f / (size.width * DRAG_FULL_TURN_WIDTH_FRACTION)
-                                dragRotation = (dragRotation + dragAmount * k).coerceIn(-90f, 90f)
-                            }
-                        },
-                        onDragEnd = {
-                            latestOnDragEnd(dragRotation, tracker.calculateVelocity().x, size.width.toFloat())
-                        },
-                        onDragCancel = {
-                            if (dragging) {
-                                dragging = false
-                                dragRotation = 0f
-                            }
-                        },
-                    )
-                },
-            contentAlignment = Alignment.Center,
+                .padding(horizontal = 22.dp),
         ) {
-            when (mode) {
-                0 -> if (s != null) {
-                    ModeRemaining(s, today, period)
-                } else {
-                    ModeNeedsBudget(mode = 1, dailyMode = dailyBudgetMode, onSetBudget = { showBudgetDialog = true })
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        val rot = if (dragging) dragRotation else flip.value
+                        rotationY = rot
+                        val p = (abs(rot) / 90f).coerceIn(0f, 1f)
+                        cameraDistance = (14f - 8f * p) * density
+                        val scale = 1f - 0.06f * p
+                        scaleX = scale
+                        scaleY = scale
+                        alpha = 1f - 0.2f * p
+                    }
+                    .pointerInput(Unit) { detectTapGestures { advance() } }
+                    .pointerInput(Unit) {
+                        val tracker = VelocityTracker()
+                        detectHorizontalDragGestures(
+                            onDragStart = {
+                                if (!flip.isRunning) {
+                                    dragging = true
+                                    dragRotation = 0f
+                                    tracker.resetTracking()
+                                }
+                            },
+                            onHorizontalDrag = { change, dragAmount ->
+                                if (dragging) {
+                                    change.consume()
+                                    tracker.addPosition(change.uptimeMillis, change.position)
+                                    val k = 90f / (size.width * DRAG_FULL_TURN_WIDTH_FRACTION)
+                                    dragRotation = (dragRotation + dragAmount * k).coerceIn(-90f, 90f)
+                                }
+                            },
+                            onDragEnd = {
+                                latestOnDragEnd(dragRotation, tracker.calculateVelocity().x, size.width.toFloat())
+                            },
+                            onDragCancel = {
+                                if (dragging) {
+                                    dragging = false
+                                    dragRotation = 0f
+                                }
+                            },
+                        )
+                    },
+            ) {
+                when (mode) {
+                    0 -> if (s != null) {
+                        ModeRemaining(s, period, today)
+                    } else {
+                        ModeNeedsBudget(dailyMode = dailyBudgetMode, title = "预算", onSetBudget = { showBudgetSheet = true })
+                    }
+                    1 -> if (s != null) {
+                        ModeCategories(
+                            totalRemaining = s.remainingCents,
+                            period = period,
+                            today = today,
+                            bars = bars,
+                        )
+                    } else {
+                        ModeNeedsBudget(dailyMode = dailyBudgetMode, title = "分类预算", onSetBudget = { showBudgetSheet = true })
+                    }
+                    else -> ModeSpentAndDeposit(
+                        spentCents = spentReady,
+                        depositCents = depositReady,
+                        tone = s?.tone ?: Budget.Tone.OK,
+                        trend = trend,
+                    )
                 }
-                1 -> if (s != null) {
-                    ModeCategories(rings)
-                } else {
-                    ModeNeedsBudget(mode = 2, dailyMode = dailyBudgetMode, onSetBudget = { showBudgetDialog = true })
+            }
+            if (mode == 1 && s != null) {
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 10.dp, end = 0.dp),
+                ) {
+                    ManageButton(onClick = onOpenCategories)
                 }
-                else -> ModeSpentAndDeposit(snapshot = s, spentCents = spentReady, totalDepositCents = depositReady)
             }
         }
-
-        ModeIndicator(
-            current = mode,
-            onSelect = { index -> flipTo(index) },
-        )
+        ModeDots(current = mode, onSelect = { flipTo(it) })
+        Spacer(Modifier.height(ecoBottomContentPadding(extra = 4.dp)))
     }
 
-    if (showBudgetDialog) {
-        BudgetEditDialog(
+    if (showBudgetSheet) {
+        EcoBudgetSheet(
             dailyMode = dailyBudgetMode,
             daysInPeriod = period.days,
             currentCents = if (dailyBudgetMode) dailyBudgetCents else budgetCents,
             onSave = {
                 if (dailyBudgetMode) vm.setDailyBudget(it) else vm.setMonthlyBudget(it)
-                showBudgetDialog = false
+                showBudgetSheet = false
             },
-            onDismiss = { showBudgetDialog = false },
+            onDismiss = { showBudgetSheet = false },
         )
     }
 }
 
-// ---------------- 模式 1：总剩余预算（大环 + 时间细环 + 本日剩余） ----------------
+@Composable
+private fun ModeRemaining(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate) {
+    val c = MaterialTheme.eco
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val ringSize = min(maxWidth.value * 0.84f, maxHeight.value * 0.60f).coerceIn(200f, 306f).dp
+        Column(
+            Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(Modifier.weight(1f))
+            BudgetRing(s = s, period = period, today = today, size = ringSize)
+            Spacer(Modifier.height(10.dp))
+            TodayCard(s = s)
+            Spacer(Modifier.weight(0.45f))
+        }
+    }
+}
 
 @Composable
-private fun ModeRemaining(s: Budget.Snapshot, today: LocalDate, period: MonthPeriod) {
-    val ab = MaterialTheme.accBook
-    val tone = s.tone
-    val severity = Budget.warningSeverity(s.remainingRatio, s.thresholds.redBelow)
-    val alarming = tone == Budget.Tone.LOW
-    val mainColor by animateColorAsState(toneColor(tone, severity), tween(420), label = "mode1Ring")
+private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate, size: Dp) {
+    val c = MaterialTheme.eco
+    val tone = when (s.tone) {
+        Budget.Tone.OK -> c.jade
+        Budget.Tone.MID -> c.amber
+        Budget.Tone.LOW -> c.clay
+    }
+    val toneHi = when (s.tone) {
+        Budget.Tone.OK -> c.jadeHi
+        Budget.Tone.MID -> c.amberHi
+        Budget.Tone.LOW -> c.clayHi
+    }
     val ratio = s.remainingRatio.coerceIn(0f, 1f)
-    val percent = (s.remainingRatio * 100).roundToInt().coerceIn(0, 100)
-    // 时间细环与主环同口径：饱和度高的弧 = 还剩多少，所以画"本期剩余"而非"已过"。
-    // 已过天数含今天（与旧自然月口径一致）；月首日 ≠1 时区间两端都按会计月算
-    val timeRatio = (period.daysElapsed(today).toFloat() / period.days).coerceIn(0f, 1f)
-    val monthLeftRatio = (1f - timeRatio).coerceIn(0f, 1f)
-    val daysLeftInMonth = period.daysAfter(today)
-    // 底轨用比发丝线略深的 ringTrack：页面底色是浅蓝，hairline 会糊在背景里
-    val trackColor = ab.ringTrack
-    // 月份环（本月剩余时间）：饱和蓝，与预算主环明显区分（此前灰调不起眼）
-    val timeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
-    val timeColor = ab.primaryStrong
-    val ink = MaterialTheme.colorScheme.onBackground
-    val overColor = toneColor(Budget.Tone.LOW, severity)
+    val daysLeft = period.daysLeft(today)
+    val timeRatio = (daysLeft.toFloat() / period.days.coerceAtLeast(1)).coerceIn(0f, 1f)
 
-    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        val ringSize = minOf(maxWidth * 0.84f, maxHeight * 0.58f).coerceIn(200.dp, 290.dp)
-        val stroke = ringSize * 0.105f
-        val timeStroke = 4.dp
-        val amountMaxWidth = ringSize * 0.62f
-        val bottomMaxWidth = maxWidth - 32.dp
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val u = this.size.minDimension / 320f
+            val cx = this.size.width / 2f
+            val cy = this.size.height / 2f
+            val stroke = 34f * u
+            val r = this.size.minDimension / 2f - stroke / 2f - 2f * u
 
+            // 底部投影环（错位 3.5u）
+            drawCircle(
+                color = c.ink.copy(alpha = if (c.isDark) 0.24f else 0.07f),
+                radius = r,
+                center = Offset(cx, cy + 3.5f * u),
+                style = Stroke(stroke),
+            )
+            // 主轨
+            drawCircle(c.track, radius = r, center = Offset(cx, cy), style = Stroke(stroke))
+            // 外描边 + 内亮线
+            drawCircle(
+                color = c.rule.copy(alpha = 0.8f),
+                radius = r + 18.3f * u,
+                center = Offset(cx, cy),
+                style = Stroke(1.3f * u),
+            )
+            drawCircle(
+                color = c.surface.copy(alpha = 0.9f),
+                radius = r - 17.3f * u,
+                center = Offset(cx, cy),
+                style = Stroke(1.7f * u),
+            )
+            // 液面
+            drawArc(
+                brush = Brush.sweepGradient(
+                    colors = listOf(tone.copy(alpha = 0.7f), tone, toneHi, tone),
+                    center = Offset(cx, cy),
+                ),
+                startAngle = -90f,
+                sweepAngle = 360f * ratio,
+                useCenter = false,
+                topLeft = Offset(cx - r, cy - r),
+                size = Size(r * 2, r * 2),
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+            // 时间细环（蓝色，弧长 = 本月还剩多少时间）
+            val timeR = r - 27.5f * u
+            drawCircle(
+                color = c.blueSoft,
+                radius = timeR,
+                center = Offset(cx, cy),
+                style = Stroke(7f * u),
+            )
+            drawArc(
+                brush = Brush.sweepGradient(
+                    colors = listOf(c.blueHi, c.blue, c.blueHi),
+                    center = Offset(cx, cy),
+                ),
+                startAngle = -90f,
+                sweepAngle = 360f * timeRatio,
+                useCenter = false,
+                topLeft = Offset(cx - timeR, cy - timeR),
+                size = Size(timeR * 2, timeR * 2),
+                style = Stroke(width = 5.5f * u, cap = StrokeCap.Round),
+            )
+            // 虚线装饰
+            drawCircle(
+                color = c.rule.copy(alpha = 0.55f),
+                radius = r - 37f * u,
+                center = Offset(cx, cy),
+                style = Stroke(
+                    width = 1f * u,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(1f * u, 7f * u)),
+                ),
+            )
+        }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(contentAlignment = Alignment.Center) {
-                Canvas(Modifier.size(ringSize)) {
-                    val strokePx = stroke.toPx()
-                    val mainR = (size.minDimension - strokePx) / 2f
-                    // 轨道与弧用同一半径/同一包围盒，避免弧相对轨道偏移
-                    drawCircle(color = trackColor, radius = mainR, style = Stroke(strokePx))
-                    if (s.remainingCents <= 0L) {
-                        drawCircle(color = mainColor, radius = mainR, style = Stroke(strokePx))
-                    } else if (ratio > 0f) {
-                        drawArc(
-                            color = mainColor,
-                            startAngle = -90f,
-                            sweepAngle = 360f * ratio,
-                            useCenter = false,
-                            topLeft = Offset(center.x - mainR, center.y - mainR),
-                            size = Size(mainR * 2f, mainR * 2f),
-                            style = Stroke(strokePx),
-                        )
-                    }
-                    // 时间细环：本月剩余比例（与预算主环同口径，直接比长短；不表达金额）
-                    val timeR = mainR - strokePx / 2f - 10.dp.toPx() - timeStroke.toPx() / 2f
-                    drawCircle(color = timeTrackColor, radius = timeR, style = Stroke(timeStroke.toPx()))
-                    if (monthLeftRatio > 0f) {
-                        drawArc(
-                            color = timeColor,
-                            startAngle = -90f,
-                            sweepAngle = 360f * monthLeftRatio,
-                            useCenter = false,
-                            topLeft = Offset(center.x - timeR, center.y - timeR),
-                            size = Size(timeR * 2f, timeR * 2f),
-                            style = Stroke(timeStroke.toPx()),
-                        )
-                    }
-                }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.warningHeartbeat(alarming, severity),
-                    ) {
-                        AutoScaledText(
-                            text = Money.formatYuanCompact(s.remainingCents),
-                            style = MaterialTheme.typography.displaySmall,
-                            color = mainColor,
-                            maxWidth = amountMaxWidth,
-                        )
-                        Text("$percent%", style = MaterialTheme.typography.titleSmall, color = mainColor)
-                    }
-                    // 细环口径说明：避免"这条蓝环还剩多少"再被读反
-                    Text(
-                        "$daysLeftInMonth Day",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            Text("本月剩余", style = EcoType.MeterLabel, color = c.muted)
+            Spacer(Modifier.height(4.dp))
+            EcoAutoMoney(
+                text = Money.formatYuanGroupedFixed(s.remainingCents),
+                style = EcoType.MeterMoney,
+                color = tone,
+                widthLimit = size * 0.62f,
+                minSize = 23.sp,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "${(s.remainingRatio * 100).roundToInt()}%",
+                style = EcoType.Chip.copy(fontSize = 11.sp),
+                color = c.muted,
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier
+                    .clip(CircleShape)
+                    .background(c.blueSoft.copy(alpha = 0.6f))
+                    .border(1.dp, c.blue.copy(alpha = 0.18f), CircleShape)
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(5.dp).clip(CircleShape).background(c.blue))
+                Spacer(Modifier.width(5.dp))
+                Text("$daysLeft 天", style = EcoType.Pill.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold), color = c.blueDeep)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TodayCard(s: Budget.Snapshot) {
+    val c = MaterialTheme.eco
+    val over = s.todayLeftCents < 0
+    val tone = when {
+        over -> c.clay
+        s.todayLeftCents <= s.suggestedDailyCents * 0.25f -> c.amber
+        else -> c.ink
+    }
+    EcoPane(
+        modifier = Modifier
+            .fillMaxWidth(0.92f)
+            .height(118.dp),
+        shape = RoundedCornerShape(24.dp),
+        elevation = 12.dp,
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    if (over) "今日已超支" else "本日剩余",
+                    style = EcoType.AssetLabel.copy(fontSize = 10.sp),
+                    color = c.muted,
+                )
+                Spacer(Modifier.height(4.dp))
+                EcoAutoMoney(
+                    text = Money.formatYuanGroupedFixed(if (over) -s.todayLeftCents else s.todayLeftCents),
+                    style = EcoType.TodayAmount,
+                    color = tone,
+                    widthLimit = 270.dp,
+                    minSize = 30.sp,
+                )
+                Spacer(Modifier.height(6.dp))
+                Canvas(Modifier.width(92.dp).height(8.dp)) {
+                    val mid = size.width / 2
+                    drawLine(c.jade.copy(alpha = 0.55f), Offset(0f, mid), Offset(mid - 12f, mid), 1f)
+                    drawLine(c.jade.copy(alpha = 0.55f), Offset(mid + 12f, mid), Offset(size.width, mid), 1f)
+                    drawCircle(c.jade.copy(alpha = 0.7f), radius = 2.5f, center = Offset(mid, mid), style = Stroke(1f))
                 }
             }
-            Spacer(Modifier.height(36.dp))
-            if (s.remainingCents > 0L) {
-                Text(
-                    "本日剩余",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Icon(
+                EcoIcons.Spark,
+                contentDescription = null,
+                tint = c.jade.copy(alpha = 0.63f),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 16.dp, end = 22.dp)
+                    .size(16.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModeCategories(
+    totalRemaining: Long,
+    period: MonthPeriod,
+    today: LocalDate,
+    bars: List<CategoryBarData>,
+) {
+    val c = MaterialTheme.eco
+    Column(Modifier.fillMaxSize().padding(top = 4.dp)) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Column(Modifier.weight(1f)) {
+                Text("分类剩余", style = EcoType.AssetLabel.copy(fontSize = 10.sp), color = c.muted)
+                Spacer(Modifier.height(5.dp))
+                EcoAutoMoney(
+                    text = Money.formatYuanGroupedFixed(totalRemaining),
+                    style = EcoType.CatTotal,
+                    color = c.ink,
+                    widthLimit = 250.dp,
+                    minSize = 24.sp,
+                    textAlign = TextAlign.Start,
                 )
-                AutoScaledText(
-                    text = Money.formatYuanCompact(s.todayLeftCents),
-                    style = MaterialTheme.typography.displayMedium,
-                    // 今天已经花超：转警示色，别让人以为还能继续花
-                    color = if (s.todayLeftCents < 0L) overColor else ink,
-                    maxWidth = bottomMaxWidth,
+            }
+            Spacer(Modifier.width(54.dp))
+        }
+        Spacer(Modifier.height(10.dp))
+        MonthProgress(period, today)
+        Spacer(Modifier.height(8.dp))
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 8.dp),
+        ) {
+            bars.forEachIndexed { index, bar ->
+                CategoryBarRow(bar, compact = bars.size >= 6, dense = bars.size >= 8)
+                if (index != bars.lastIndex) Spacer(Modifier.height(2.dp))
+            }
+            if (bars.isEmpty()) {
+                Text(
+                    "还没有分类预算。到「个人 → 分类」为支出分类设定预算后，这里会显示每条预算的剩余。",
+                    style = EcoType.PageNote,
+                    color = c.quiet,
+                    modifier = Modifier.padding(vertical = 14.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MonthProgress(period: MonthPeriod, today: LocalDate) {
+    val c = MaterialTheme.eco
+    val elapsed = period.daysElapsed(today)
+    Column(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            EcoIconTile(icon = EcoIcons.Calendar, tint = c.blue, size = 30.dp, radius = 10.dp, iconSize = 16.dp)
+            Spacer(Modifier.width(10.dp))
+            Text("本月进度", style = EcoType.RowTitle.copy(fontSize = 14.sp), color = c.muted)
+            Spacer(Modifier.weight(1f))
+            Text("$elapsed / ${period.days}", style = EcoType.RowTitle.copy(fontSize = 13.sp), color = c.ink2)
+        }
+        Spacer(Modifier.height(7.dp))
+        EcoProgressBar(
+            progress = elapsed.toFloat() / period.days.coerceAtLeast(1),
+            height = 6.dp,
+            track = c.track,
+            fill = Brush.horizontalGradient(listOf(c.blue.copy(alpha = 0.31f), c.blue.copy(alpha = 0.55f))),
+        )
+        Spacer(Modifier.height(5.dp))
+        Row(Modifier.fillMaxWidth()) {
+            Text("$elapsed 天已过", style = EcoType.PageNote.copy(fontSize = 8.5.sp), color = c.quiet)
+            Spacer(Modifier.weight(1f))
+            Text("剩余 ${period.daysLeft(today)} 天", style = EcoType.PageNote.copy(fontSize = 8.5.sp), color = c.quiet)
+        }
+    }
+}
+
+@Composable
+private fun CategoryBarRow(bar: CategoryBarData, compact: Boolean, dense: Boolean) {
+    val c = MaterialTheme.eco
+    val tint = if (bar.isOther) {
+        c.amber
+    } else {
+        categoryColor(MaterialTheme.accBook.categoryPalette, bar.name)
+    }
+    val over = bar.remainingCents < 0
+    val amountColor = when {
+        over -> c.clay
+        bar.ratio < 0.35f -> c.amber
+        else -> c.jade
+    }
+    val titleSize = when {
+        dense -> 13.5.sp
+        compact -> 14.sp
+        else -> 14.5.sp
+    }
+    val iconSize = when {
+        dense -> 23.dp
+        compact -> 25.dp
+        else -> 27.dp
+    }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = if (dense) 58.dp else if (compact) 64.dp else 70.dp)
+            .padding(vertical = 5.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (bar.isOther) {
+                EcoIconTile(
+                    icon = EcoIcons.Spark,
+                    tint = c.amber,
+                    size = iconSize,
+                    radius = iconSize * 0.33f,
+                    iconSize = iconSize * 0.58f,
                 )
             } else {
-                Text("本月已超支", style = MaterialTheme.typography.bodyMedium, color = overColor)
-                AutoScaledText(
-                    text = Money.formatYuanCompact(-s.remainingCents),
-                    style = MaterialTheme.typography.displayMedium,
-                    color = overColor,
-                    maxWidth = bottomMaxWidth,
-                    modifier = Modifier.warningHeartbeat(true, severity),
+                EcoCategoryTile(
+                    categoryName = bar.name,
+                    icon = bar.icon,
+                    size = iconSize,
+                    radius = iconSize * 0.33f,
                 )
             }
-        }
-    }
-}
-
-// ---------------- 模式 2：分类剩余预算（含"其他"聚合环，弹性网格） ----------------
-
-@Composable
-private fun ModeCategories(items: List<CategoryRingData>) {
-    if (items.isEmpty()) return
-    val trackColor = MaterialTheme.accBook.ringTrack
-    val showHint = items.all { it.isOther }
-
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val n = items.size
-        val cols = when {
-            n <= 2 -> n
-            n <= 4 -> 2
-            n <= 9 -> 3
-            else -> 4
-        }
-        val rows = ceil(n / cols.toFloat()).toInt()
-        val gap = 16.dp
-        val hintSpace = if (showHint) 54.dp else 0.dp
-        val sizeByWidth = (maxWidth - gap * (cols - 1)) / cols
-        val sizeByHeight = (maxHeight - gap * (rows - 1) - hintSpace) / rows
-        val ringSize = minOf(sizeByWidth, sizeByHeight, 124.dp).coerceAtLeast(68.dp)
-        val stroke = (ringSize * 0.09f).coerceAtLeast(5.dp)
-        // 仅内容溢出时启用纵向滚动（避免与横向翻转滑动争手势）
-        val contentHeight = ringSize * rows + gap * (rows - 1) + hintSpace
-        val needsScroll = contentHeight > maxHeight
-
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(
-                modifier = if (needsScroll) Modifier.verticalScroll(rememberScrollState()) else Modifier,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                items.chunked(cols).forEach { rowItems ->
-                    // 不足一行的行内居中（fillMaxWidth + CenterHorizontally），不靠左/右对齐
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        rowItems.forEach { CategoryRing(it, ringSize, stroke, trackColor) }
-                    }
-                    Spacer(Modifier.height(gap))
-                }
-                if (showHint) {
-                    Text(
-                        "在「个人 → 分类预算」可为分类设定预算",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CategoryRing(data: CategoryRingData, ringSize: Dp, stroke: Dp, trackColor: Color) {
-    val severity = data.severity
-    val alarming = data.tone == Budget.Tone.LOW
-    val color by animateColorAsState(toneColor(data.tone, severity), tween(420), label = "categoryRing")
-    val textMaxWidth = ringSize - stroke * 2 - 14.dp
-
-    Box(Modifier.size(ringSize), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxSize()) {
-            val strokePx = stroke.toPx()
-            val r = (size.minDimension - strokePx) / 2f
-            // 浅灰轨道 + 颜色弧同半径同包围盒（修复此前弧相对轨道外偏的问题）
-            drawCircle(color = trackColor, radius = r, style = Stroke(strokePx))
-            if (data.remainingCents <= 0L) {
-                drawCircle(color = color, radius = r, style = Stroke(strokePx))
-            } else if (data.ratio > 0f) {
-                drawArc(
-                    color = color,
-                    startAngle = -90f,
-                    sweepAngle = (360f * data.ratio).coerceAtLeast(12f),
-                    useCenter = false,
-                    topLeft = Offset(center.x - r, center.y - r),
-                    size = Size(r * 2f, r * 2f),
-                    style = Stroke(strokePx),
-                )
-            }
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            AutoScaledText(
-                text = data.name,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxWidth = textMaxWidth,
-            )
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.warningHeartbeat(alarming, severity),
-            ) {
-                AutoScaledText(
-                    text = Money.formatYuanCompact(data.remainingCents),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = color,
-                    maxWidth = textMaxWidth,
-                )
-            }
-        }
-    }
-}
-
-// ---------------- 模式 3：已花费与总存款（中央大字，无圆环） ----------------
-
-@Composable
-private fun ModeSpentAndDeposit(snapshot: Budget.Snapshot?, spentCents: Long, totalDepositCents: Long) {
-    val ab = MaterialTheme.accBook
-    val severity = snapshot?.let { Budget.warningSeverity(it.remainingRatio, it.thresholds.redBelow) } ?: 0f
-    val spentAlarm = snapshot?.tone == Budget.Tone.LOW
-    val spentTarget = if (snapshot != null) {
-        toneColor(snapshot.tone, severity)
-    } else {
-        MaterialTheme.colorScheme.onBackground
-    }
-    val spentColor by animateColorAsState(spentTarget, tween(420), label = "mode3Spent")
-    val depositNegative = totalDepositCents < 0L
-    val depositColor by animateColorAsState(
-        if (depositNegative) ab.criticalAlert else MaterialTheme.colorScheme.primary,
-        tween(420),
-        label = "mode3Deposit",
-    )
-    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        val textMaxWidth = maxWidth - 32.dp
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(Modifier.width(9.dp))
             Text(
-                "本月已花",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                bar.name,
+                style = EcoType.RowTitle.copy(fontSize = titleSize, fontWeight = FontWeight.Bold),
+                color = if (over) c.clay else c.ink,
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
             )
-            AutoScaledText(
-                text = Money.formatYuanCompact(snapshot?.spentCents ?: spentCents),
-                style = MaterialTheme.typography.displayMedium,
-                color = spentColor,
-                maxWidth = textMaxWidth,
-                modifier = Modifier.warningHeartbeat(spentAlarm, severity),
-            )
-            Spacer(Modifier.height(46.dp))
-            Text(
-                "总存款",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            AutoScaledText(
-                text = Money.formatYuanCompact(totalDepositCents),
-                style = MaterialTheme.typography.displayMedium,
-                color = depositColor,
-                maxWidth = textMaxWidth,
-                modifier = Modifier.warningHeartbeat(depositNegative, if (depositNegative) 0.5f else 0f),
-            )
+            if (bar.budgetCents <= 0) {
+                Text("未设预算", style = EcoType.Pill.copy(fontSize = 11.sp), color = c.quiet)
+            } else {
+                Text(
+                    Money.formatYuanGrouped(bar.remainingCents),
+                    style = EcoType.CatAmount.copy(fontSize = if (dense) 14.5.sp else 16.5.sp),
+                    color = amountColor,
+                    maxLines = 1,
+                )
+            }
         }
-    }
-}
-
-// ---------------- 子组件 ----------------
-
-/**
- * 剩余额度档位 → 用色：充足绿 / 中等黄（warning）/ 紧张红；
- * 红档随 severity（超支越重）向饱和度更高的警报红过渡。
- */
-@Composable
-private fun toneColor(tone: Budget.Tone, severity: Float = 0f): Color {
-    val ab = MaterialTheme.accBook
-    return when (tone) {
-        Budget.Tone.OK -> ab.income
-        Budget.Tone.MID -> ab.warning
-        Budget.Tone.LOW -> if (severity > 0f) {
-            lerp(ab.critical, ab.criticalAlert, severity.coerceIn(0f, 1f))
+        Spacer(Modifier.height(5.dp))
+        if (bar.budgetCents > 0) {
+            EcoProgressBar(
+                progress = (bar.spentCents.toFloat() / bar.budgetCents).coerceIn(0f, 1f),
+                height = 9.dp,
+                track = c.track,
+                fill = Brush.horizontalGradient(
+                    if (over) {
+                        listOf(c.clayHi, c.clay)
+                    } else {
+                        listOf(tint.copy(alpha = 0.58f), tint)
+                    },
+                ),
+            )
         } else {
-            ab.critical
-        }
-    }
-}
-
-/**
- * 红色数字警示动效：心跳缩放（幅度/频率随 severity 增强，封顶 1.10 倍、周期不短于 650ms）
- * + 间隔性的快速轻微摇晃（幅度封顶 2.2°，每 2.6s 只摇晃一小段）。
- * 只在 draw 阶段读取动画状态，不触发重组；系统"减少动画"或非告警状态时原样返回。
- *
- * severity 由 [com.controleco.app.data.budget.Budget.warningSeverity] 按动态红线（剩余天数比例）算。
- */
-@Composable
-private fun Modifier.warningHeartbeat(active: Boolean, severity: Float): Modifier {
-    if (!active || severity <= 0.01f) return this
-    val reduced = rememberReducedMotion()
-    if (reduced) return this
-    val peak = 1f + 0.10f * severity
-    val pulseMs = (1400 - 750 * severity).roundToInt().coerceAtLeast(650)
-    val shakeDeg = 2.2f * severity
-
-    val transition = rememberInfiniteTransition(label = "warning")
-    val pulse = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(pulseMs, easing = LinearEasing)),
-        label = "warningPulse",
-    )
-    val shake = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(2600, easing = LinearEasing)),
-        label = "warningShake",
-    )
-    return this.graphicsLayer {
-        val p = pulse.value
-        val beat = if (p < 0.34f) sin(p / 0.34f * PI).toFloat() else 0f
-        val scale = 1f + (peak - 1f) * beat
-        scaleX = scale
-        scaleY = scale
-        val q = shake.value
-        rotationZ = if (q < 0.18f) (shakeDeg * sin(q / 0.18f * PI * 3.0)).toFloat() else 0f
-    }
-}
-
-/** 月份胶囊：与账单页月份浏览解耦（首页固定当前自然月） */
-@Composable
-private fun MonthChip(text: String) {
-    val shape = MaterialTheme.shapes.small
-    Box(
-        Modifier
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
-    ) {
-        Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurface)
-    }
-}
-
-/** 模式指示圆点：当前项为拉长的胶囊；点击可直接切换 */
-@Composable
-private fun ModeIndicator(current: Int, onSelect: (Int) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().height(78.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        repeat(MODE_COUNT) { i ->
-            val active = i == current
-            val width by animateDpAsState(if (active) 20.dp else 8.dp, tween(220), label = "modeDotWidth")
-            val color by animateColorAsState(
-                if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                tween(220),
-                label = "modeDotColor",
-            )
             Box(
                 Modifier
-                    .clickable(enabled = !active) { onSelect(i) }
-                    .padding(horizontal = 5.dp, vertical = 14.dp),
-            ) {
-                Box(Modifier.height(8.dp).width(width).clip(CircleShape).background(color))
-            }
+                    .fillMaxWidth()
+                    .height(9.dp)
+                    .clip(CircleShape)
+                    .background(c.track.copy(alpha = 0.6f))
+                    .border(1.dp, c.rule, CircleShape),
+            )
+        }
+        Spacer(Modifier.height(5.dp))
+        Row(Modifier.fillMaxWidth()) {
+            Text(
+                "已花 ${Money.formatYuanGrouped(bar.spentCents)}",
+                style = EcoType.PageNote.copy(fontSize = if (dense) 8.sp else 9.sp),
+                color = c.muted,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                if (bar.budgetCents > 0) "预算 ${Money.formatYuanGrouped(bar.budgetCents)}" else "未设预算",
+                style = EcoType.PageNote.copy(fontSize = if (dense) 8.sp else 9.sp),
+                color = c.muted,
+            )
         }
     }
 }
 
-/** 未设预算时的模式内提示（模式①/②保留可切换，只是引导先设置预算） */
 @Composable
-private fun ModeNeedsBudget(mode: Int, dailyMode: Boolean, onSetBudget: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(horizontal = 28.dp),
+private fun ManageButton(onClick: () -> Unit) {
+    val c = MaterialTheme.eco
+    Box(
+        Modifier
+            .size(35.dp)
+            .clip(CircleShape)
+            .background(c.surface)
+            .border(1.dp, c.rule, CircleShape)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
     ) {
-        BudgetRingPlaceholder()
-        Spacer(Modifier.height(20.dp))
+        Icon(EcoIcons.Edit, contentDescription = "分类预算", tint = c.ink2, modifier = Modifier.size(15.dp))
+    }
+}
+
+@Composable
+private fun ModeSpentAndDeposit(
+    spentCents: Long,
+    depositCents: Long,
+    tone: Budget.Tone,
+    trend: HomeTrend,
+) {
+    val c = MaterialTheme.eco
+    val spentTone = when (tone) {
+        Budget.Tone.OK -> c.ink
+        Budget.Tone.MID -> c.amber
+        Budget.Tone.LOW -> c.clay
+    }
+    Column(Modifier.fillMaxSize()) {
+        AssetStage(
+            label = "本月已花",
+            amount = Money.formatYuanGroupedFixed(spentCents),
+            color = spentTone,
+            dotColor = c.amber,
+            values = trend.spent,
+            stageColor = c.amber,
+            modifier = Modifier.weight(1f),
+        )
+        Row(
+            Modifier
+                .fillMaxWidth(0.88f)
+                .height(26.dp)
+                .align(Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.weight(1f).height(1.dp).background(c.rule))
+            Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(5.dp).clip(CircleShape).border(1.dp, c.ruleStrong, CircleShape))
+            }
+            Box(Modifier.weight(1f).height(1.dp).background(c.rule))
+        }
+        AssetStage(
+            label = "总存款",
+            amount = Money.formatYuanGroupedFixed(depositCents),
+            color = if (depositCents < 0) c.clay else c.blue,
+            dotColor = if (depositCents < 0) c.clay else c.jade,
+            values = trend.deposit,
+            stageColor = c.jade,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun AssetStage(
+    label: String,
+    amount: String,
+    color: Color,
+    dotColor: Color,
+    values: List<Float>,
+    stageColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    val c = MaterialTheme.eco
+    Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        AssetChart(values = values, color = stageColor, modifier = Modifier.fillMaxSize())
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(5.dp).clip(CircleShape).background(dotColor))
+                Spacer(Modifier.width(6.dp))
+                Text(label, style = EcoType.AssetLabel, color = c.muted)
+            }
+            Spacer(Modifier.height(6.dp))
+            EcoAutoMoney(
+                text = amount,
+                style = EcoType.AssetAmount,
+                color = color,
+                widthLimit = 320.dp,
+                minSize = 32.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AssetChart(values: List<Float>, color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        if (values.size < 2) return@Canvas
+        val w = size.width
+        val h = size.height
+        val top = h * 0.22f
+        val bottom = h * 0.86f
+        fun point(i: Int): Offset {
+            val x = w * i / (values.size - 1).coerceAtLeast(1)
+            val y = bottom - (bottom - top) * values[i].coerceIn(0f, 1f)
+            return Offset(x, y)
+        }
+        val line = Path().apply {
+            moveTo(point(0).x, point(0).y)
+            for (i in 1 until values.size) {
+                val prev = point(i - 1)
+                val cur = point(i)
+                val midX = (prev.x + cur.x) / 2f
+                cubicTo(midX, prev.y, midX, cur.y, cur.x, cur.y)
+            }
+        }
+        val area = Path().apply {
+            addPath(line)
+            lineTo(w, h)
+            lineTo(0f, h)
+            close()
+        }
+        drawPath(
+            path = area,
+            brush = Brush.verticalGradient(
+                listOf(color.copy(alpha = 0.16f), color.copy(alpha = 0.03f), Color.Transparent),
+                startY = top,
+                endY = h,
+            ),
+        )
+        drawPath(
+            path = line,
+            color = color.copy(alpha = 0.48f),
+            style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round),
+        )
+    }
+}
+
+@Composable
+private fun ModeNeedsBudget(dailyMode: Boolean, title: String, onSetBudget: () -> Unit) {
+    val c = MaterialTheme.eco
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Box(Modifier.size(132.dp), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.fillMaxSize()) {
+                drawCircle(c.track, radius = size.minDimension / 2f - 7.dp.toPx(), style = Stroke(14.dp.toPx()))
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(if (dailyMode) "日预算" else "月预算", style = EcoType.PageNote, color = c.quiet)
+                Text("未设置", style = EcoType.SubTitle.copy(fontSize = 24.sp), color = c.muted)
+            }
+        }
+        Spacer(Modifier.height(24.dp))
         Text(
-            if (mode == 1) {
-                if (dailyMode) "还没有设置日预算" else "还没有设置月预算"
-            } else {
-                "还没有分类预算"
-            },
-            style = MaterialTheme.typography.titleMedium,
+            if (dailyMode) "还没有设置日预算" else "还没有设置月预算",
+            style = EcoType.EmptyTitle,
+            color = c.ink,
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            if (mode == 1) {
-                if (dailyMode) {
-                    "设置日预算后，这里显示本月还可以花与本日剩余"
-                } else {
-                    "设置月预算后，这里显示本月还可以花与本日剩余"
-                }
+            if (dailyMode) {
+                "设置每日预算后，这里会显示今天还能花多少。"
             } else {
-                "设置月预算后到「个人 → 分类预算」为分类设定预算，这里显示各分类剩余"
+                "设置本月预算后，这里显示本月还可以花与本日剩余。"
             },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = EcoType.PageLead,
+            color = c.muted,
             textAlign = TextAlign.Center,
         )
-        Spacer(Modifier.height(12.dp))
-        TextButton(onClick = onSetBudget) { Text(if (dailyMode) "设置日预算" else "设置本月预算") }
+        Spacer(Modifier.height(18.dp))
+        Box(Modifier.width(190.dp)) {
+            EcoPrimaryButton(
+                text = if (dailyMode) "设置日预算" else if (title == "分类预算") "先设置本月预算" else "设置本月预算",
+                onClick = onSetBudget,
+            )
+        }
     }
 }
 
-/** 未设预算时的中性占位环（与正式圆环同构，不表达比例） */
 @Composable
-private fun BudgetRingPlaceholder(modifier: Modifier = Modifier) {
-    val trackColor = MaterialTheme.accBook.ringTrack
-    Canvas(modifier.size(132.dp)) {
-        drawCircle(
-            color = trackColor,
-            radius = (size.minDimension - 14.dp.toPx()) / 2f,
-            style = Stroke(14.dp.toPx()),
-        )
+private fun ModeDots(current: Int, onSelect: (Int) -> Unit) {
+    val c = MaterialTheme.eco
+    Row(
+        Modifier.fillMaxWidth().height(37.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        repeat(MODE_COUNT) { index ->
+            val selected = index == current
+            val width by animateDpAsState(if (selected) 25.dp else 7.dp, tween(220), label = "dot-w")
+            Box(
+                Modifier
+                    .padding(horizontal = 4.dp)
+                    .width(width)
+                    .height(7.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (selected) {
+                            Brush.horizontalGradient(listOf(c.jade, c.blue))
+                        } else {
+                            Brush.horizontalGradient(listOf(c.ruleStrong, c.ruleStrong))
+                        },
+                    )
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        enabled = !selected,
+                    ) { onSelect(index) },
+            )
+        }
     }
 }
 
-// ---------------- 纯逻辑 ----------------
+// ---------- 纯逻辑 ----------
 
-/**
- * 分类预算 + 当月分类支出 + 总预算 → 分类环数据（按剩余比例升序 = 最紧张的在前，不截断）。
- *
- * 除设了预算的分类外，追加一个"其他"聚合环：预算 = 月总预算 − 已分配分类预算，
- * 支出 = 当月总支出 − 已计入分类环的支出——使 Σ分类剩余 + 其他剩余 = 月总剩余（模式①口径）。
- * 仅当"其他"预算 > 0 时出现（全部分类预算超过总预算时无处归属，跳过）。
- * 仅支出分类与仍存在的分类参与；分类预算未设置的分类不计入已分配。
- *
- * [thresholds] = 当前动态阈值（剩余天数比例），分类环与主环共用同一套档位与警示强度。
- */
-internal fun buildCategoryRings(
+internal fun buildCategoryBars(
     budgets: Map<Long, Long>,
     sums: List<CategorySumRow>,
     categories: List<CategoryEntity>,
     monthlyBudgetCents: Long,
     totalSpentCents: Long,
     thresholds: Budget.Thresholds = Budget.thresholds(1, 1),
-): List<CategoryRingData> {
+): List<CategoryBarData> {
     val byId = categories.associateBy { it.id }
     val spentById = sums.associate { it.categoryId to it.totalCents }
     val budgeted = budgets.entries.mapNotNull { (id, budget) ->
@@ -777,35 +980,87 @@ internal fun buildCategoryRings(
         if (category.type != TxType.EXPENSE) return@mapNotNull null
         category to budget
     }
-
-    val rings = budgeted.map { (category, budget) ->
-        ringOf(category.name, budget, spentById[category.id] ?: 0L, thresholds, isOther = false)
+    val rows = budgeted.map { (category, budget) ->
+        barOf(
+            name = category.name,
+            icon = category.icon,
+            budgetCents = budget,
+            spentCents = spentById[category.id] ?: 0L,
+            thresholds = thresholds,
+        )
     }.toMutableList()
-
     val allocatedBudget = budgeted.sumOf { it.second }
     val allocatedSpent = budgeted.sumOf { (category, _) -> spentById[category.id] ?: 0L }
     val otherBudget = monthlyBudgetCents - allocatedBudget
     if (monthlyBudgetCents > 0L && otherBudget > 0L) {
-        rings += ringOf("其他", otherBudget, totalSpentCents - allocatedSpent, thresholds, isOther = true)
+        rows += barOf(
+            name = "其他",
+            icon = "",
+            budgetCents = otherBudget,
+            spentCents = totalSpentCents - allocatedSpent,
+            thresholds = thresholds,
+            isOther = true,
+        )
     }
-    return rings.sortedBy { it.ratio }
+    return rows.sortedBy { it.ratio }
 }
 
-private fun ringOf(
+private fun barOf(
     name: String,
+    icon: String,
     budgetCents: Long,
     spentCents: Long,
     thresholds: Budget.Thresholds,
-    isOther: Boolean,
-): CategoryRingData {
+    isOther: Boolean = false,
+): CategoryBarData {
     val remaining = budgetCents - spentCents
     val ratio = remaining.toDouble() / budgetCents.toDouble()
-    return CategoryRingData(
+    return CategoryBarData(
         name = name,
+        icon = icon,
+        budgetCents = budgetCents,
+        spentCents = spentCents,
         remainingCents = remaining,
         ratio = ratio.toFloat(),
         tone = Budget.tone(ratio.toFloat(), thresholds),
-        severity = Budget.warningSeverity(ratio.toFloat(), thresholds.redBelow),
         isOther = isOther,
     )
+}
+
+private fun buildHomeTrend(rows: List<TransactionRow>, period: MonthPeriod, depositCents: Long): HomeTrend {
+    val zone = ZoneId.systemDefault()
+    val byDay = Array(period.days) { 0L }
+    rows.forEach { row ->
+        val date = Instant.ofEpochMilli(row.timestamp).atZone(zone).toLocalDate()
+        val index = (period.dayIndexOf(date) - 1).coerceIn(0, period.days - 1)
+        val signed = when {
+            row.type == TxType.EXPENSE -> -row.amountCents
+            row.refundMark == RefundMark.REFUND_INCOME -> row.amountCents
+            else -> row.amountCents
+        }
+        byDay[index] += signed
+    }
+    val spent = ArrayList<Float>(period.days)
+    val deposit = ArrayList<Float>(period.days)
+    var spentSum = 0L
+    var depositSum = depositCents - byDay.sum()
+    byDay.forEach { net ->
+        spentSum += -net
+        depositSum += net
+        spent += spentSum.toFloat()
+        deposit += depositSum.toFloat()
+    }
+    fun normalize(values: List<Float>): List<Float> {
+        if (values.isEmpty()) return listOf(0f)
+        val min = values.min()
+        val max = values.max()
+        if (max - min < 1f) return values.map { 0.5f }
+        return values.map { (it - min) / (max - min) }
+    }
+    return HomeTrend(spent = normalize(spent), deposit = normalize(deposit))
+}
+
+private fun chineseMonth(month: Int): String {
+    val names = listOf("一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二")
+    return names.getOrElse(month - 1) { "$month" } + "月"
 }

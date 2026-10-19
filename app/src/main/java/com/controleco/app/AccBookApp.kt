@@ -5,6 +5,8 @@ import com.controleco.app.capture.CaptureCenter
 import com.controleco.app.data.db.AccBookDatabase
 import com.controleco.app.data.db.DefaultData
 import com.controleco.app.util.AppLog
+import com.controleco.app.ui.theme.AccentThemeStore
+import com.controleco.app.ui.transactions.CoverStyleStore
 import com.controleco.app.util.Money
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +26,9 @@ class AccBookApp : Application() {
         // 货币符号在任何进程启动时就绪（服务/通知进程里格式化金额也要用对符号）
         Money.symbol = getSharedPreferences("settings", MODE_PRIVATE)
             .getString("currency_symbol", Money.DEFAULT_SYMBOL) ?: Money.DEFAULT_SYMBOL
+        // 强调色与结余封面底色（纯展示偏好）在任何 Compose 内容之前恢复
+        AccentThemeStore.init(this)
+        CoverStyleStore.init(this)
         CaptureCenter.init(this)
         // 覆盖安装后提示复查通知使用权（广播可能被系统吞掉，冷启动再兜一次）
         CaptureCenter.checkAppUpdated(BuildConfig.VERSION_CODE)

@@ -37,7 +37,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,8 +50,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.controleco.app.data.PeriodMode
+import com.controleco.app.ui.common.EcoIcons
+import com.controleco.app.ui.eco.EcoIconButton
+import com.controleco.app.ui.eco.EcoSheet
+import com.controleco.app.ui.eco.EcoTextAction
+import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.accBook
+import com.controleco.app.ui.theme.eco
 import java.time.YearMonth
 import kotlinx.coroutines.launch
 
@@ -301,110 +311,139 @@ fun PeriodPickerSheet(
     currentMonth: YearMonth = YearMonth.now(),
     currentYear: Int = currentMonth.year,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val scope = rememberCoroutineScope()
-
-    fun dismiss(after: () -> Unit = {}) {
-        scope.launch { sheetState.hide() }.invokeOnCompletion {
-            after()
-            onDismiss()
-        }
+    val c = MaterialTheme.eco
+    var year by remember(current.year) { mutableIntStateOf(current.year) }
+    var yearPageStart by remember(current.year) {
+        mutableIntStateOf(
+            (current.year - PICKER_YEAR_MIN) / YEARS_PER_PAGE * YEARS_PER_PAGE + PICKER_YEAR_MIN,
+        )
     }
+    val monthMode = mode == PeriodMode.MONTH
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
+    EcoSheet(
+        onDismiss = onDismiss,
+        title = if (monthMode) "选择月份" else "选择年份",
+        subtitle = if (monthMode) "按会计月查看；月份标题可随时再切" else "按会计年查看，12 个月连续统计",
+        scrollable = false,
     ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp)
-                .navigationBarsPadding()
-                .padding(bottom = 18.dp),
-        ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (mode == PeriodMode.MONTH) "选择月份" else "选择年份",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Spacer(Modifier.weight(1f))
-                TextButton(
-                    onClick = {
-                        dismiss {
-                            if (mode == PeriodMode.MONTH) onSelectMonth(currentMonth) else onSelectYear(currentYear)
-                        }
-                    },
-                ) { Text(if (mode == PeriodMode.MONTH) "回到本月" else "回到今年") }
-            }
-
-            if (mode == PeriodMode.MONTH) {
-                val pageCount = PICKER_YEAR_MAX - PICKER_YEAR_MIN + 1
-                val pager = rememberPagerState(
-                    initialPage = (current.year - PICKER_YEAR_MIN).coerceIn(0, pageCount - 1),
-                ) { pageCount }
-                PickerStepper(
-                    label = "${PICKER_YEAR_MIN + pager.currentPage} 年",
-                    onPrev = { scope.launch { pager.animateScrollToPage((pager.currentPage - 1).coerceAtLeast(0)) } },
-                    onNext = {
-                        scope.launch { pager.animateScrollToPage((pager.currentPage + 1).coerceAtMost(pageCount - 1)) }
-                    },
-                )
-                HorizontalPager(state = pager) { page ->
-                    val year = PICKER_YEAR_MIN + page
-                    Column(Modifier.fillMaxWidth()) {
-                        repeat(3) { row ->
-                            Row(
-                                Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                repeat(4) { col ->
-                                    val month = row * 4 + col + 1
-                                    PickerCell(
-                                        label = "$month 月",
-                                        selected = year == current.year && month == current.monthValue,
-                                        highlighted = year == currentMonth.year && month == currentMonth.monthValue,
-                                        onClick = { dismiss { onSelectMonth(YearMonth.of(year, month)) } },
-                                    )
-                                }
-                            }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            EcoIconButton(
+                icon = EcoIcons.Back,
+                contentDescription = "上一年",
+                onClick = {
+                    if (monthMode) year = (year - 1).coerceAtLeast(PICKER_YEAR_MIN)
+                    else yearPageStart = (yearPageStart - YEARS_PER_PAGE).coerceAtLeast(PICKER_YEAR_MIN)
+                },
+                size = 28.dp,
+                container = c.surface2,
+                border = false,
+                tint = c.ink2,
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (monthMode) "$year 年" else "$yearPageStart – ${(yearPageStart + YEARS_PER_PAGE - 1).coerceAtMost(PICKER_YEAR_MAX)}",
+                style = EcoType.SubTitle.copy(fontSize = 20.sp),
+                color = c.ink,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.width(8.dp))
+            EcoIconButton(
+                icon = EcoIcons.Next,
+                contentDescription = "下一年",
+                onClick = {
+                    if (monthMode) year = (year + 1).coerceAtMost(PICKER_YEAR_MAX)
+                    else yearPageStart = (yearPageStart + YEARS_PER_PAGE).coerceAtMost(PICKER_YEAR_MAX - YEARS_PER_PAGE + 1)
+                },
+                size = 28.dp,
+                container = c.surface2,
+                border = false,
+                tint = c.ink2,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            EcoTextAction(
+                text = if (monthMode) "回到本月" else "回到今年",
+                onClick = {
+                    if (monthMode) onSelectMonth(currentMonth) else onSelectYear(currentYear)
+                    onDismiss()
+                },
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        if (monthMode) {
+            repeat(4) { row ->
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 9.dp),
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
+                    repeat(3) { col ->
+                        val month = row * 3 + col + 1
+                        val selected = year == current.year && month == current.monthValue
+                        val highlighted = year == currentMonth.year && month == currentMonth.monthValue
+                        val future = YearMonth.of(year, month) > currentMonth
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .height(43.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (selected) c.blueDeep else c.surface2)
+                                .then(
+                                    if (highlighted && !selected) Modifier.border(1.dp, c.blue.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                                    else Modifier,
+                                )
+                                .clickable {
+                                    onSelectMonth(YearMonth.of(year, month))
+                                    onDismiss()
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "$month 月",
+                                style = EcoType.RowTitle.copy(fontSize = 12.sp),
+                                color = when {
+                                    selected -> Color.White
+                                    future -> c.quiet.copy(alpha = 0.38f)
+                                    else -> c.ink2
+                                },
+                            )
                         }
                     }
                 }
-            } else {
-                val pageCount = (PICKER_YEAR_MAX - PICKER_YEAR_MIN + 1 + YEARS_PER_PAGE - 1) / YEARS_PER_PAGE
-                val pager = rememberPagerState(
-                    initialPage = ((current.year - PICKER_YEAR_MIN) / YEARS_PER_PAGE).coerceIn(0, pageCount - 1),
-                ) { pageCount }
-                val firstYear = PICKER_YEAR_MIN + pager.currentPage * YEARS_PER_PAGE
-                PickerStepper(
-                    label = "$firstYear – ${firstYear + YEARS_PER_PAGE - 1}",
-                    onPrev = { scope.launch { pager.animateScrollToPage((pager.currentPage - 1).coerceAtLeast(0)) } },
-                    onNext = {
-                        scope.launch { pager.animateScrollToPage((pager.currentPage + 1).coerceAtMost(pageCount - 1)) }
-                    },
-                )
-                HorizontalPager(state = pager) { page ->
-                    Column(Modifier.fillMaxWidth()) {
-                        repeat(3) { row ->
-                            Row(
-                                Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                repeat(4) { col ->
-                                    val year = PICKER_YEAR_MIN + page * YEARS_PER_PAGE + row * 4 + col
-                                    if (year > PICKER_YEAR_MAX) {
-                                        Spacer(Modifier.weight(1f).height(46.dp))
-                                    } else {
-                                        PickerCell(
-                                            label = "$year",
-                                            selected = year == current.year,
-                                            highlighted = year == currentYear,
-                                            onClick = { dismiss { onSelectYear(year) } },
-                                        )
-                                    }
-                                }
-                            }
+            }
+        } else {
+            val years = (0 until YEARS_PER_PAGE).map { yearPageStart + it }
+            repeat(4) { row ->
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 9.dp),
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
+                ) {
+                    repeat(3) { col ->
+                        val y = years[row * 3 + col]
+                        val selected = y == current.year
+                        val highlighted = y == currentYear
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .height(43.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (selected) c.blueDeep else c.surface2)
+                                .then(
+                                    if (highlighted && !selected) Modifier.border(1.dp, c.blue.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                                    else Modifier,
+                                )
+                                .clickable(enabled = y <= PICKER_YEAR_MAX) {
+                                    onSelectYear(y)
+                                    onDismiss()
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "$y",
+                                style = EcoType.RowTitle.copy(fontSize = 12.sp),
+                                color = if (selected) Color.White else c.ink2,
+                            )
                         }
                     }
                 }
