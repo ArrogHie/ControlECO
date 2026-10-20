@@ -687,7 +687,6 @@ private fun CoverSheet(
     EcoSheet(
         onDismiss = onDismiss,
         title = "更换结余卡背景",
-        subtitle = "选一个底色，或从相册挑一张图",
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(
@@ -997,7 +996,13 @@ private fun BillRow(
             }
             Spacer(Modifier.width(9.dp))
         }
-        EcoCategoryTile(categoryName = row.categoryName, icon = row.categoryIcon, size = 30.dp, radius = 10.dp)
+        EcoCategoryTile(
+            categoryName = row.categoryName,
+            icon = row.categoryIcon,
+            size = 30.dp,
+            radius = 10.dp,
+            bare = true,
+        )
         Spacer(Modifier.width(9.dp))
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

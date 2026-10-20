@@ -67,9 +67,6 @@ fun SettingsMerchantRulesScreen(vm: LedgerViewModel, onBack: () -> Unit) {
 
     SettingsLazyPage(micro = "MERCHANT RULES", title = "商户归类", onBack = onBack) {
         item {
-            SettingsLead("确认捕获账单时自动学习：同一商户下次捕获会预选学到的分类与账户。")
-        }
-        item {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -121,7 +118,6 @@ fun SettingsMerchantRulesScreen(vm: LedgerViewModel, onBack: () -> Unit) {
             }
         }
         item {
-            SettingsNote("删除规则只影响之后的自动归类，不会改动已入账的账单。")
         }
     }
 

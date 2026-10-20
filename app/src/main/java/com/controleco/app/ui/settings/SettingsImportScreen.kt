@@ -65,7 +65,6 @@ fun SettingsImportScreen(
             RefundDisplaySetting(vm)
         }
 
-        SettingsNote("导入文件只在本机解析；识别与去重后写入本地账本。原始文件不会上传。")
     }
 }
 
@@ -74,7 +73,6 @@ private fun RefundDisplaySetting(vm: LedgerViewModel) {
     val showRefunds by vm.showRefunds.collectAsStateWithLifecycle()
     SettingsSwitchRow(
         title = "显示退款记录",
-        subtitle = "关闭后，退款相关记录不计入流水与汇总",
         checked = showRefunds,
         onCheckedChange = { vm.setShowRefunds(it) },
     )

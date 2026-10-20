@@ -75,6 +75,8 @@ fun BalanceCard(
     onModeChange: (PeriodMode) -> Unit,
     onOpenImageSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 统计页复用同一张封面，但不在这里改背景图（入口仍在账单页） */
+    showEdit: Boolean = true,
 ) {
     val drawable = remember(image?.full, image?.preview) { image?.asImage() }
     val customImage = image != null || !imagePath.isNullOrBlank()
@@ -354,21 +356,23 @@ fun BalanceCard(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                Box(
-                    Modifier
-                        .size(29.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = if (lightText) 0.12f else 0.55f))
-                        .border(1.dp, Color.White.copy(alpha = if (lightText) 0.15f else 0.65f), CircleShape)
-                        .clickable(onClick = onOpenImageSettings),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        EcoIcons.Edit,
-                        contentDescription = "更换结余卡背景",
-                        tint = sub,
-                        modifier = Modifier.size(13.dp),
-                    )
+                if (showEdit) {
+                    Box(
+                        Modifier
+                            .size(29.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = if (lightText) 0.12f else 0.55f))
+                            .border(1.dp, Color.White.copy(alpha = if (lightText) 0.15f else 0.65f), CircleShape)
+                            .clickable(onClick = onOpenImageSettings),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            EcoIcons.Edit,
+                            contentDescription = "更换结余卡背景",
+                            tint = sub,
+                            modifier = Modifier.size(13.dp),
+                        )
+                    }
                 }
             }
             Spacer(Modifier.weight(1f))

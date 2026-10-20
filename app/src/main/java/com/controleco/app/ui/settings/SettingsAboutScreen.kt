@@ -128,7 +128,6 @@ fun SettingsAboutScreen(onBack: () -> Unit) {
             SettingsDivider()
             SettingsRow(
                 title = "检查更新",
-                subtitle = "从 GitHub Release 检查是否有新版本",
                 icon = EcoIcons.Refresh,
                 iconTint = MaterialTheme.eco.blue,
                 trail = if (checking) "检查中…" else "v${BuildConfig.VERSION_NAME}",
@@ -151,7 +150,6 @@ fun SettingsAboutScreen(onBack: () -> Unit) {
             SettingsDivider()
             SettingsRow(
                 title = "开源许可",
-                subtitle = "第三方开源组件与许可证",
                 icon = EcoIcons.File,
                 iconTint = MaterialTheme.eco.violet,
                 showChevron = true,
@@ -188,7 +186,6 @@ fun SettingsAboutScreen(onBack: () -> Unit) {
         EcoSheet(
             onDismiss = { showLicenses = false },
             title = "开源许可",
-            subtitle = "本应用只使用以下开源组件，未包含广告或统计 SDK",
         ) {
             Column(Modifier.fillMaxWidth()) {
                 LICENSES.forEachIndexed { index, entry ->
@@ -224,7 +221,6 @@ fun SettingsAboutScreen(onBack: () -> Unit) {
                     }
                 }
                 Spacer(Modifier.height(6.dp))
-                SettingsNote("Apache-2.0 全文：www.apache.org/licenses/LICENSE-2.0；JUnit 4 为 EPL-1.0。")
                 Spacer(Modifier.height(6.dp))
                 EcoGhostButton(text = "关闭", onClick = { showLicenses = false }, height = 40.dp)
             }

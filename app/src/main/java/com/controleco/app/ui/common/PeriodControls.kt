@@ -323,7 +323,6 @@ fun PeriodPickerSheet(
     EcoSheet(
         onDismiss = onDismiss,
         title = if (monthMode) "选择月份" else "选择年份",
-        subtitle = if (monthMode) "按会计月查看；月份标题可随时再切" else "按会计年查看，12 个月连续统计",
         scrollable = false,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {

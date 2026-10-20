@@ -59,6 +59,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
@@ -374,7 +375,6 @@ fun HomeScreen(
     if (showBudgetSheet) {
         EcoBudgetSheet(
             dailyMode = dailyBudgetMode,
-            daysInPeriod = period.days,
             currentCents = if (dailyBudgetMode) dailyBudgetCents else budgetCents,
             onSave = {
                 if (dailyBudgetMode) vm.setDailyBudget(it) else vm.setMonthlyBudget(it)
@@ -395,11 +395,12 @@ private fun ModeRemaining(s: Budget.Snapshot, period: MonthPeriod, today: LocalD
             Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Spacer(Modifier.weight(1f))
+            // 视觉重心：环略微上移，底部留白比顶部多，和原型的"环偏上"一致
+            Spacer(Modifier.weight(0.76f))
             BudgetRing(s = s, period = period, today = today, size = ringSize)
             Spacer(Modifier.height(10.dp))
             TodayCard(s = s)
-            Spacer(Modifier.weight(0.45f))
+            Spacer(Modifier.weight(0.58f))
         }
     }
 }
@@ -850,7 +851,7 @@ private fun ModeSpentAndDeposit(
             amountCents = spentCents,
             color = c.ink,
             dotColor = c.amber,
-            values = trend.spent,
+            save = false,
             stageColor = c.amber,
             modifier = Modifier.weight(1f),
         )
@@ -872,7 +873,7 @@ private fun ModeSpentAndDeposit(
             amountCents = depositCents,
             color = if (depositCents < 0) c.clay else c.blue,
             dotColor = if (depositCents < 0) c.clay else c.jade,
-            values = trend.deposit,
+            save = true,
             stageColor = c.jade,
             modifier = Modifier.weight(1f),
         )
@@ -885,13 +886,13 @@ private fun AssetStage(
     amountCents: Long,
     color: Color,
     dotColor: Color,
-    values: List<Float>,
+    save: Boolean,
     stageColor: Color,
     modifier: Modifier = Modifier,
 ) {
     val c = MaterialTheme.eco
     Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        AssetChart(values = values, color = stageColor, modifier = Modifier.fillMaxSize())
+        AssetChart(save = save, color = stageColor, modifier = Modifier.fillMaxSize())
         // 原型 .asset-stage::before：金额后面垫一层纸色径向渐变，让曲线退到字后面
         Box(
             Modifier
@@ -929,52 +930,58 @@ private fun AssetStage(
 }
 
 @Composable
-private fun AssetChart(values: List<Float>, color: Color, modifier: Modifier = Modifier) {
-    // 原型：面积 1s、墨线 2.25s 依次淡入；这里用整体 reveal 近似，避免首帧就压住金额
+private fun AssetChart(save: Boolean, color: Color, modifier: Modifier = Modifier) {
+    // 原型 homeAssets() 里的两条固定折线（viewBox 390x330），不是按真实数据拟合的曲线
+    val points = if (save) {
+        listOf(
+            0f to 297f, 38f to 284f, 91f to 293f, 148f to 249f, 200f to 256f,
+            258f to 214f, 308f to 190f, 361f to 154f, 410f to 150f,
+        )
+    } else {
+        listOf(
+            0f to 282f, 22f to 277f, 82f to 251f, 134f to 265f, 185f to 225f,
+            251f to 234f, 320f to 177f, 367f to 164f, 410f to 130f,
+        )
+    }
     val reveal = remember { Animatable(0f) }
-    LaunchedEffect(values) {
+    LaunchedEffect(save) {
         reveal.snapTo(0f)
-        reveal.animateTo(1f, tween(1500, delayMillis = 260, easing = FastOutSlowInEasing))
+        reveal.animateTo(1f, tween(1100, delayMillis = 220, easing = FastOutSlowInEasing))
     }
     Canvas(modifier) {
-        if (values.size < 2) return@Canvas
         val w = size.width
         val h = size.height
-        val top = h * 0.22f
-        val bottom = h * 0.86f
-        fun point(i: Int): Offset {
-            val x = w * i / (values.size - 1).coerceAtLeast(1)
-            val y = bottom - (bottom - top) * values[i].coerceIn(0f, 1f)
-            return Offset(x, y)
-        }
+        fun x(v: Float) = w * v / 390f
+        fun y(v: Float) = h * v / 330f
         val line = Path().apply {
-            moveTo(point(0).x, point(0).y)
-            for (i in 1 until values.size) {
-                val prev = point(i - 1)
-                val cur = point(i)
-                val midX = (prev.x + cur.x) / 2f
-                cubicTo(midX, prev.y, midX, cur.y, cur.x, cur.y)
+            points.forEachIndexed { i, (px, py) ->
+                if (i == 0) moveTo(x(px), y(py)) else lineTo(x(px), y(py))
             }
         }
         val area = Path().apply {
             addPath(line)
-            lineTo(w, h)
-            lineTo(0f, h)
+            lineTo(x(410f), y(340f))
+            lineTo(x(0f), y(340f))
             close()
         }
+        // 原型面积 .18/.035/0 在浅纸上太淡；这里加深到 .44/.16/0，墨线也提到 .85
         drawPath(
             path = area,
             brush = Brush.verticalGradient(
-                listOf(color.copy(alpha = 0.075f), color.copy(alpha = 0.018f), Color.Transparent),
-                startY = top,
-                endY = h,
+                listOf(color.copy(alpha = 0.44f), color.copy(alpha = 0.16f), color.copy(alpha = 0.01f)),
+                startY = y(100f),
+                endY = y(340f),
             ),
             alpha = reveal.value,
         )
         drawPath(
             path = line,
-            color = color.copy(alpha = 0.30f),
-            style = Stroke(width = 2.0.dp.toPx(), cap = StrokeCap.Round),
+            color = color.copy(alpha = if (save) 0.80f else 0.88f),
+            style = Stroke(
+                width = (if (save) 3.1.dp else 2.9.dp).toPx(),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            ),
             alpha = reveal.value,
         )
     }

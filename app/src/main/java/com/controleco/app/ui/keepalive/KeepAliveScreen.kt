@@ -221,7 +221,6 @@ fun KeepAliveScreen(
             EcoPane(modifier = Modifier.fillMaxWidth()) {
                 EcoRow(
                     title = if (batteryIgnoring) "已忽略电池优化" else "未忽略电池优化",
-                    subtitle = "申请系统忽略电池优化（Doze 白名单）；品牌的省电策略仍需按下方步骤手动设置。",
                     minHeight = 58.dp,
                     trailing = {
                         if (batteryIgnoring) {
@@ -251,37 +250,7 @@ fun KeepAliveScreen(
                 }
             }
 
-            // ---------- 03 更多说明 ----------
-            EcoSectionHead(number = "03", title = "更多说明", aside = "NOTES")
-            EcoPane(modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.fillMaxWidth()) {
-                    EcoRow(
-                        title = "其他机型",
-                        subtitle = "上方步骤按当前品牌自动匹配；换机后重新进入本页会重新检测型号与系统版本。",
-                        minHeight = 56.dp,
-                    )
-                    EcoRowDivider()
-                    EcoRow(
-                        title = "状态口径",
-                        subtitle = "「已连接」表示服务在线；「已授权（连接未知）」表示系统已授权但服务暂未连上，" +
-                            "通常稍等或重新开关一次服务即可。",
-                        minHeight = 56.dp,
-                    )
-                    EcoRowDivider()
-                    EcoRow(
-                        title = "开关无法被读取",
-                        subtitle = "自启动、省电策略等开关系统不开放查询，页面只能给出步骤与直达入口；" +
-                            "以系统设置里的实际开关为准。",
-                        minHeight = 56.dp,
-                    )
-                }
-            }
 
-            EcoPageNote(
-                "自启动、省电策略等开关大多无法被程序读取，请按步骤手动确认。" +
-                    "若开关都正常仍长时间收不到通知：重启手机 → 打开应用 → 到「通知捕获日志」查看是否有事件；" +
-                    "仍无事件则把通知使用权重新开关一次。",
-            )
         }
     }
 }

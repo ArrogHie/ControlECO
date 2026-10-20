@@ -83,10 +83,6 @@ fun SettingsWatchedAppsScreen(onBack: () -> Unit) {
     }
 
     SettingsPage(micro = "WATCHED APPS", title = "监听的 App", onBack = onBack) {
-        SettingsLead(
-            "只记录勾选应用的通知 / 页面。银行短信与目录外银行 App 的动账推送由签名识别决定，不受本页影响。",
-        )
-
         SearchBox(value = query, onValueChange = { query = it })
         Spacer(Modifier.height(8.dp))
 

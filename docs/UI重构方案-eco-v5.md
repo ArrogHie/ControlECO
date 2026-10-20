@@ -47,12 +47,13 @@
   （78 + 手势条）、`EcoFab`（54，呼吸圈）、`EcoSquareFab`、`EcoSheet`（27 顶圆角）、`EcoDialog`、
   `EcoConfirm`、`EcoToast` / `EcoToastHost`。
 - `ui/eco/EcoBudgetSheet.kt`：月/日预算底部卡，保存 0 = 清除，保持旧语义。
-- `ui/common/EcoIcons.kt`：按原型 ICONS 生成的 60 个 `ImageVector`。
+- `ui/common/EcoIcons.kt`：按原型 ICONS 生成的 60 个 `ImageVector`；pencil / settings / brush
+  已替换为 Tabler Icons 原始 24×24 path（`icons/outline`）。
 
 ### 2.3 主题壳
 
 - `MainActivity`：`enableEdgeToEdge`（透明状态栏/导航栏），`AccBookTheme(accent = AccentThemeStore.current)`，
-  根 `Box` 承载内容。
+  根 `Box` 承载内容；`fontScale` 跟随系统但封顶 **1.25**（不再锁 1.0）。
 - `AppNav`：根 `Box` 先铺 `EcoBackdrop`，`NavHost` 透明；底部导航与 FAB 以 overlay 方式压在最上层
   （纸面一直铺到屏幕底），`EcoToastHost` 固定在底部导航上方。
 - Tab 状态用 `SaveableStateHolder` 保留；再次点击当前 Tab 仍触发 `reenterTick` 回顶。
@@ -61,10 +62,10 @@
 
 | 路由 | 新实现 | 关键点 |
 |---|---|---|
-| main / 首页 | `ui/home/HomeScreen.kt` | 三视图翻转（预算环 / 分类剩余 / 资产）；150ms 两段式 rotationY；45° 阈值 + 甩动；三圆点；真实 VM 数据；资产趋势由 `homePeriodRows` 按日聚合 |
-| 账单 | `ui/transactions/TransactionListScreen.kt` | 结余封面 150（夜色/薄雾/陶土/相册图 + 裁剪）、月/年、筛选、日期分组、跳日期、分页、多选批删、范围删除 |
-| 统计 | `ui/stats/StatsScreen.kt` + `StatsCharts.kt` | 结论卡、可交互柱状图、双环分类、预算对比、期间切换/选择 |
-| 个人 | `ui/profile/ProfileScreen.kt` | 预算 hero、月/日预算、待确认胶囊、分类卡、常驻「每月首日」滚轮、主题色、打赏二维码、导入/设置/关于 |
+| main / 首页 | `ui/home/HomeScreen.kt` | 三视图翻转（预算环 / 分类剩余 / 资产）；150ms 两段式 rotationY；45° 阈值 + 甩动；三圆点；真实 VM 数据；资产视图按原型 `homeAssets()` 固定折线（viewBox 390×330）绘制，不按真实数据拟合 |
+| 账单 | `ui/transactions/TransactionListScreen.kt` | 结余封面 150（夜色/薄雾/陶土/相册图 + 裁剪）、月/年、筛选、日期分组、跳日期、分页、多选批删、范围删除；分类 logo 用 `EcoCategoryTile(bare = true)`，无底色无描边 |
+| 统计 | `ui/stats/StatsScreen.kt` + `StatsCharts.kt` | 顶部复用账单 `BalanceCard`（同一背景图，随列表滚动）、删除汇总行、可交互柱状图、**单环无中心数字**分类、分类清单、期间切换/选择；圆环 `stickyHeader` 吸顶 |
+| 个人 | `ui/profile/ProfileScreen.kt` | 197/161/150/66 版式；日预算瓦片常显日预算、整卡进入日预算管理；主题按钮无白底、只开主题层；待确认胶囊、分类卡、常驻「每月首日」滚轮、打赏二维码、导入/设置/关于 |
 | 快速记账 / 编辑 | `ui/transactions/QuickAddScreen.kt` / `EditTransactionScreen.kt` | 自定义键盘、分类/账户/日期/商户/备注、编辑删除 |
 | 待确认 / 导入 / 退款 | `ui/pending` / `ui/imports` / `ui/refund` | 全部流程与状态保留 |
 | 设置体系 | `ui/settings/*` + `ui/common/SettingsKit.kt` | 设置、权限、监听 App、商户规则、开发者、关于、保活、账户/分类入口、导入设置 |
@@ -108,6 +109,21 @@
 - 金额：940ms easeOutQuart 数字滚动；进度条 900ms；统计柱 820ms 依次生长。
 - Hero 柔光 7s、今日星 3.5s、待确认摇摆 4.5s、Dialog 280ms modalIn。
 - 每月首日：拖拽滚轮不得被 sheet/外层滚动抢手势，松手吸附后落库。
+
+### 5.2 2026-10-20 真机修订
+
+- **字体**：`fontScale` 封顶 1.25（系统 1.25 下主要页面无裁切/溢出）；个人页按最终 CSS
+  `hero 197 / duo 161 / mid 150 / bottom 66` 重排。
+- **首页**：预算环上移（0.76 / 0.58）；资产折线改为 html 固定折线，面积 `.44/.16/0`、
+  墨线 `.88/.80`、2.9/3.1dp。
+- **账单**：列表分类 logo 去掉所有底色/边框（`bare`），分类选择器仍保留可点底色。
+- **统计**：账单封面复用、汇总删除、单环吸顶、双环与图例删除；`CategoryDonut(singleRing = true)`。
+- **个人**：日预算常显、整卡点击；分类卡按原型 `space-evenly`，图标 42×43、图形 24dp；
+  主题按钮彩虹画笔无白底、只开主题；主题弹层色板 44dp。
+- **图标**：pencil / settings / brush 使用 Tabler 原始 path。
+- **文案**：设置及子页、统计、个人弹层删除非必要说明小字；保留动态状态、危险提示与操作教程。
+- **验证**：`:app:testDebugUnitTest` 577 项通过；`:app:assembleDebug` 通过；真机截图
+  `tmp/device/h16.png`、`b9.png`、`s9.png`、`s13.png`、`p13.png`、`p20.png`、`p21.png`、`set2.png`。
 
 ## 六、提交记录
 

@@ -102,15 +102,16 @@ import kotlin.math.roundToInt
 private const val GITHUB_REPO_PATH = "ArrogHie/ControlECO"
 private const val GITHUB_REPO_URL = "https://github.com/$GITHUB_REPO_PATH"
 
-// ---- 版式常量（与原型 5.6 profile 对齐；高度固定，保证四块视觉节奏一致） ----
-private val HERO_HEIGHT = 191.dp
-private val DUO_HEIGHT = 156.dp
-private val PENDING_WIDTH = 104.dp
-private val UTILITY_WIDTH = 130.dp
-private val START_CARD_HEIGHT = 102.dp
-private val SETTINGS_CARD_HEIGHT = 46.dp
+// ---- 版式常量：按原型最终级联值（hero 197 / duo 161 / mid 150 / bottom 66）----
+private val HERO_HEIGHT = 197.dp
+private val DUO_HEIGHT = 161.dp
+private val PENDING_WIDTH = 111.dp
+private val UTILITY_WIDTH = 127.dp
+private val MID_HEIGHT = 150.dp
+private val START_CARD_HEIGHT = 80.dp
+private val SETTINGS_CARD_HEIGHT = 62.dp
 private val MID_GAP = 8.dp
-private val BOTTOM_HEIGHT = 43.dp
+private val BOTTOM_HEIGHT = 66.dp
 
 // 深色 hero 上的前景色（hero 渐变永远是深色，这组色不随深浅主题变）
 private val HERO_MINT = Color(0xFFBDE9DA)
@@ -155,7 +156,8 @@ fun ProfileScreen(
     var showCurrencySheet by remember { mutableStateOf(false) }
     var showReward by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
-    var showMore by remember { mutableStateOf(false) }
+    var showTheme by remember { mutableStateOf(false) }
+    var showDayBudget by remember { mutableStateOf(false) }
     var showMonthStart by remember { mutableStateOf(false) }
 
     // 开源仓库链接：用系统浏览器打开（没有浏览器时静默失败，不影响其它功能）
@@ -189,10 +191,9 @@ fun ProfileScreen(
             BudgetDuo(
                 dailyMode = dailyBudgetMode,
                 dailyBudgetCents = dailyBudgetCents,
-                monthlyBudgetCents = budget,
                 pendingCount = pendingCount,
                 onModeChange = { vm.setDailyBudgetMode(it) },
-                onManageBudget = { showBudgetSheet = true },
+                onManageBudget = { showDayBudget = true },
                 onOpenPending = onOpenPending,
             )
 
@@ -208,7 +209,7 @@ fun ProfileScreen(
                 onOpenImport = onOpenImport,
                 onReward = { showReward = true },
                 onOpenRepo = openRepo,
-                onMore = { showMore = true },
+                onTheme = { showTheme = true },
             )
         }
     }
@@ -216,13 +217,24 @@ fun ProfileScreen(
     if (showBudgetSheet) {
         EcoBudgetSheet(
             dailyMode = dailyBudgetMode,
-            daysInPeriod = period.days,
             currentCents = if (dailyBudgetMode) dailyBudgetCents else budget,
             onSave = {
                 if (dailyBudgetMode) vm.setDailyBudget(it) else vm.setMonthlyBudget(it)
                 showBudgetSheet = false
             },
             onDismiss = { showBudgetSheet = false },
+        )
+    }
+
+    if (showDayBudget) {
+        EcoBudgetSheet(
+            dailyMode = true,
+            currentCents = dailyBudgetCents,
+            onSave = {
+                vm.setDailyBudget(it)
+                showDayBudget = false
+            },
+            onDismiss = { showDayBudget = false },
         )
     }
 
@@ -242,15 +254,11 @@ fun ProfileScreen(
         AboutDialog(onOpenRepo = openRepo, onDismiss = { showAbout = false })
     }
 
-    if (showMore) {
-        MoreSheet(
-            currency = currency,
+    if (showTheme) {
+        ThemeSheet(
             accent = AccentThemeStore.current,
             onPickAccent = { AccentThemeStore.set(context, it) },
-            onCurrency = { showMore = false; showCurrencySheet = true },
-            onOpenRepo = openRepo,
-            onAbout = { showMore = false; showAbout = true },
-            onDismiss = { showMore = false },
+            onDismiss = { showTheme = false },
         )
     }
 
@@ -441,7 +449,6 @@ private fun BudgetHero(
 private fun BudgetDuo(
     dailyMode: Boolean,
     dailyBudgetCents: Long,
-    monthlyBudgetCents: Long,
     pendingCount: Int,
     onModeChange: (Boolean) -> Unit,
     onManageBudget: () -> Unit,
@@ -462,15 +469,15 @@ private fun BudgetDuo(
                     selectedIndex = if (dailyMode) 1 else 0,
                     onSelect = { onModeChange(it == 1) },
                     modifier = Modifier.fillMaxWidth(),
-                    height = 39.dp,
+                    height = 42.dp,
                     selectedContainerColor = c.ink,
                     selectedContentColor = c.paper,
                 )
             }
             EcoArrival(delayMillis = 210, turn = 2.2f, modifier = Modifier.weight(1f)) {
                 DailyTile(
-                    amountCents = if (dailyMode) dailyBudgetCents else monthlyBudgetCents,
-                    monthMode = !dailyMode,
+                    // 用户明确要求：这块永远显示日预算，不随「月预算 / 日预算」切换
+                    amountCents = dailyBudgetCents,
                     onManage = onManageBudget,
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -486,11 +493,15 @@ private fun BudgetDuo(
     }
 }
 
-/** 日预算瓦片：非对称圆角 10/27/10/27，右侧竖排「预算管理」开口打开预算卡。 */
+/**
+ * 日预算瓦片：非对称圆角 10/27/10/27。
+ *
+ * 用户明确要求：无论上面选「月预算」还是「日预算」，这里**永远显示日预算**；
+ * 整张卡都可点开日预算管理，右侧铅笔只是装饰，不再单独接点击。
+ */
 @Composable
 private fun DailyTile(
     amountCents: Long,
-    monthMode: Boolean,
     onManage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -507,23 +518,20 @@ private fun DailyTile(
             )
             .clip(shape)
             .background(softGradient(c, c.blueSoft, 0.62f, 0.5f))
-            .border(1.dp, c.rule, shape),
+            .border(1.dp, c.rule, shape)
+            .clickable(onClick = onManage),
     ) {
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(start = 15.dp, top = 10.dp, end = 68.dp, bottom = 10.dp),
+                .padding(start = 15.dp, top = 16.dp, end = 62.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.Center,
         ) {
             Row(verticalAlignment = Alignment.Bottom) {
                 if (amountCents > 0) {
                     EcoCountUpMoney(
                         cents = amountCents,
-                        style = if (monthMode) {
-                            EcoType.DailyValue.copy(fontSize = 24.sp, lineHeight = 28.sp)
-                        } else {
-                            EcoType.DailyValue
-                        },
+                        style = EcoType.DailyValue,
                         color = c.ink,
                         modifier = Modifier.weight(1f),
                         textAlign = TextAlign.Start,
@@ -548,31 +556,26 @@ private fun DailyTile(
             }
         }
 
-        // 右侧竖排管理钮（铅笔 + 预算管理）
-        Column(
-            Modifier
+        // 原型右侧的大铅笔只是水印，透明度 .2；文字「预算管理」在右下
+        Icon(
+            EcoIcons.Edit,
+            contentDescription = null,
+            tint = c.blue.copy(alpha = 0.20f),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .padding(end = 16.dp)
+                .size(43.dp)
+                .graphicsLayer { rotationZ = -8f },
+        )
+        Text(
+            "预算管理",
+            style = EcoType.Chip.copy(fontSize = 10.sp, fontWeight = FontWeight(800), letterSpacing = 0.sp),
+            color = c.blue,
+            maxLines = 1,
+            modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 10.dp, bottom = 11.dp)
-                .width(55.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .clickable(onClick = onManage)
-                .padding(vertical = 2.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Icon(
-                EcoIcons.Edit,
-                contentDescription = "预算管理",
-                tint = c.blue.copy(alpha = 0.6f),
-                modifier = Modifier.size(21.dp),
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                "预算管理",
-                style = EcoType.Chip.copy(fontSize = 10.sp, fontWeight = FontWeight(800), letterSpacing = 0.sp),
-                color = c.blue,
-                maxLines = 1,
-            )
-        }
+                .padding(end = 15.dp, bottom = 12.dp),
+        )
     }
 }
 
@@ -725,7 +728,7 @@ private fun MidRow(
             turn = 2.4f,
             modifier = Modifier
                 .weight(1f)
-                .height(START_CARD_HEIGHT + MID_GAP + SETTINGS_CARD_HEIGHT),
+                .height(MID_HEIGHT),
         ) {
             CategoryCard(
                 tiles = tiles,
@@ -787,8 +790,9 @@ private fun CategoryCard(
             )
         }
         Column(
-            Modifier.fillMaxSize().padding(start = 15.dp, end = 9.dp, top = 15.dp, bottom = 14.dp),
-            verticalArrangement = Arrangement.SpaceBetween,
+            // 原型 justify-content:space-evenly：标题/图标上下留白相等，不再是"标题贴顶、图标贴底"
+            Modifier.fillMaxSize().padding(start = 9.dp, end = 9.dp, top = 15.dp, bottom = 14.dp),
+            verticalArrangement = Arrangement.SpaceEvenly,
         ) {
             Text(
                 "分类设置",
@@ -813,7 +817,9 @@ private fun CategoryCard(
                             categoryName = category.name,
                             icon = category.icon,
                             size = tile,
+                            height = 43.dp,
                             radius = 12.dp,
+                            glyphScale = 0.57f,
                         )
                     }
                 }
@@ -943,22 +949,23 @@ private fun BottomRow(
     onOpenImport: () -> Unit,
     onReward: () -> Unit,
     onOpenRepo: () -> Unit,
-    onMore: () -> Unit,
+    onTheme: () -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().height(BOTTOM_HEIGHT),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         EcoArrival(delayMillis = 560, turn = -2.4f) {
-            GitHubOrb(onClick = onOpenRepo, modifier = Modifier.size(BOTTOM_HEIGHT))
+            GitHubOrb(onClick = onOpenRepo, modifier = Modifier.size(63.dp))
         }
-        EcoArrival(delayMillis = 610, turn = 2.4f) {
-            RewardTile(onClick = onReward, modifier = Modifier.size(BOTTOM_HEIGHT))
+        // 中间列：打赏 + 主题各占一半（原型 support-actions）
+        EcoArrival(delayMillis = 610, turn = 2.4f, modifier = Modifier.weight(1.03f).fillMaxHeight()) {
+            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                RewardTile(onClick = onReward, modifier = Modifier.weight(1f).fillMaxHeight())
+                AccentTile(onClick = onTheme, modifier = Modifier.weight(1f).fillMaxHeight())
+            }
         }
-        EcoArrival(delayMillis = 660, turn = -2.2f) {
-            MoreOrb(onClick = onMore, modifier = Modifier.size(BOTTOM_HEIGHT))
-        }
-        EcoArrival(delayMillis = 710, turn = 2.2f, modifier = Modifier.weight(1f).fillMaxHeight()) {
+        EcoArrival(delayMillis = 680, turn = 2.2f, modifier = Modifier.weight(1.27f).fillMaxHeight()) {
             ImportTile(onClick = onOpenImport, modifier = Modifier.fillMaxSize())
         }
     }
@@ -980,31 +987,36 @@ private fun GitHubOrb(onClick: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-/** 更多：彩虹环 + 毛笔，打开主题色/货币/仓库/版本/关于。 */
+/**
+ * 主题按钮：彩虹渐变底 + 白色画笔，**不叠任何白色圆底**。
+ * 按用户要求只负责主题色，不再充当「更多」入口。
+ */
 @Composable
-private fun MoreOrb(onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun AccentTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
-            .shadow(10.dp, CircleShape, ambientColor = Color(0x334C6F6B), spotColor = Color(0x444C6F6B))
-            .clip(CircleShape)
+            .shadow(10.dp, RoundedCornerShape(50), ambientColor = Color(0x334C6F6B), spotColor = Color(0x444C6F6B))
+            .clip(RoundedCornerShape(50))
             .background(
-                Brush.sweepGradient(
+                Brush.linearGradient(
                     listOf(
-                        Color(0xFF6FC7B4), Color(0xFF7E9ED8), Color(0xFFB58AD6),
-                        Color(0xFFE7A27E), Color(0xFFE7CE73), Color(0xFF6FC7B4),
+                        Color(0xFFD977AB), Color(0xFFEC9C77), Color(0xFFEFCE76),
+                        Color(0xFF7BC8AA), Color(0xFF6A9DD2), Color(0xFFA582C9),
                     ),
+                    start = Offset.Zero,
+                    end = Offset.Infinite,
                 ),
             )
-            .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+            .border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(50))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            Modifier.size(22.dp).clip(CircleShape).background(Color(0xF2FBFDF7)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(EcoIcons.Brush, contentDescription = "更多", tint = Color(0xFF2C4A52), modifier = Modifier.size(12.dp))
-        }
+        Icon(
+            EcoIcons.Brush,
+            contentDescription = "主题色",
+            tint = Color.White,
+            modifier = Modifier.size(28.dp),
+        )
     }
 }
 
@@ -1270,7 +1282,6 @@ private fun MonthStartSheet(
     EcoSheet(
         onDismiss = onDismiss,
         title = "每月首日",
-        subtitle = "上下拖动滚轮，松手自动吸附；用于确定每月账单周期",
         // 滚轮自己处理竖向拖拽；不能让外层 verticalScroll 抢走手势
         scrollable = false,
     ) {
@@ -1297,17 +1308,23 @@ private fun MonthStartSheet(
     }
 }
 
+/** 主题按钮专用弹层：只包含主题色，不再混入「更多」。 */
+@Composable
+private fun ThemeSheet(
+    accent: EcoAccent,
+    onPickAccent: (EcoAccent) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    EcoSheet(onDismiss = onDismiss, title = "主题色") {
+        ThemeRow(selected = accent, onPick = onPickAccent)
+    }
+}
+
 /** 主题色：6 个圆形色板（EcoAccent 六套），选中项描环，点一下即时生效。 */
 @Composable
 private fun ThemeRow(selected: EcoAccent, onPick: (EcoAccent) -> Unit) {
     val c = MaterialTheme.eco
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("主题色", style = EcoType.RowTitle, color = c.ink)
-            Spacer(Modifier.weight(1f))
-            Text(selected.label, style = EcoType.RowTrail, color = c.muted)
-        }
-        Spacer(Modifier.height(11.dp))
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             EcoAccent.entries.forEach { entry ->
                 val dot = Color(if (c.isDark) entry.dark.blue else entry.light.blue)
@@ -1321,7 +1338,7 @@ private fun ThemeRow(selected: EcoAccent, onPick: (EcoAccent) -> Unit) {
                 ) {
                     Box(
                         Modifier
-                            .size(if (on) 32.dp else 30.dp)
+                            .size(if (on) 46.dp else 44.dp)
                             .clip(CircleShape)
                             .background(dot)
                             .then(
@@ -1338,14 +1355,14 @@ private fun ThemeRow(selected: EcoAccent, onPick: (EcoAccent) -> Unit) {
                                 EcoIcons.Check,
                                 contentDescription = null,
                                 tint = Color.White,
-                                modifier = Modifier.size(14.dp),
+                                modifier = Modifier.size(18.dp),
                             )
                         }
                     }
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(6.dp))
                     Text(
                         entry.label,
-                        style = EcoType.Pill,
+                        style = EcoType.Pill.copy(fontSize = 10.5.sp),
                         color = if (on) c.ink else c.muted,
                         maxLines = 1,
                     )
@@ -1364,7 +1381,6 @@ private fun CurrencySheet(current: String, onPick: (String) -> Unit, onDismiss: 
     EcoSheet(
         onDismiss = onDismiss,
         title = "货币符号",
-        subtitle = "只改显示符号，不做汇率换算、也不改金额",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Money.CURRENCIES.forEach { (symbol, name) ->

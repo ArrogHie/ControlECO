@@ -444,21 +444,37 @@ fun EcoCategoryTile(
     icon: String = "",
     modifier: Modifier = Modifier,
     size: Dp = 38.dp,
+    height: Dp = size,
     radius: Dp = 12.dp,
     overrideTint: Color? = null,
+    /** 图形相对瓦片的比例；个人页分类卡按原型 24/42 取 0.57 */
+    glyphScale: Float = 0.72f,
+    /** 账单列表里的分类 logo 按用户要求去掉所有底色与描边，只留图形本身 */
+    bare: Boolean = false,
 ) {
     val c = MaterialTheme.eco
     val explicit = CategoryIcon.glyphColorOf(icon)?.let { Color(it or 0xFF000000.toInt()) }
     val tint = overrideTint ?: explicit ?: categoryColor(MaterialTheme.accBook.categoryPalette, categoryName)
     Box(
         modifier
-            .size(size)
-            .clip(RoundedCornerShape(radius))
-            .background(tint.copy(alpha = if (c.isDark) 0.22f else 0.12f))
-            .border(1.dp, tint.copy(alpha = 0.18f), RoundedCornerShape(radius)),
+            .size(width = size, height = height)
+            .then(
+                if (bare) {
+                    Modifier
+                } else {
+                    Modifier
+                        .clip(RoundedCornerShape(radius))
+                        .background(tint.copy(alpha = if (c.isDark) 0.22f else 0.12f))
+                        .border(1.dp, tint.copy(alpha = 0.18f), RoundedCornerShape(radius))
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        CategoryLogo(categoryName = categoryName, icon = icon, size = size * 0.72f)
+        CategoryLogo(
+            categoryName = categoryName,
+            icon = icon,
+            size = if (bare) size else minOf(size, height) * glyphScale,
+        )
     }
 }
 

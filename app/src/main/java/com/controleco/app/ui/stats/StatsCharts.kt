@@ -284,6 +284,8 @@ fun CategoryDonut(
     modifier: Modifier = Modifier,
     ringSize: Dp = 171.dp,
     showCenterLabels: Boolean = true,
+    /** 统计页只要一个环：外环按预算构成，不再叠内环 */
+    singleRing: Boolean = false,
 ) {
     val c = MaterialTheme.eco
     val selectedSlice = slices.firstOrNull { it.name == selected }
@@ -314,9 +316,11 @@ fun CategoryDonut(
             val geo = donutGeometry(size.width, this)
             val center = Offset(size.width / 2f, size.height / 2f)
 
-            // 底轨（两环都画，缺口处也有节奏）
+            // 底轨：单环只画外环，双环模式两环都画
             drawCircle(c.track.copy(alpha = 0.55f), radius = geo.rOuter, center = center, style = Stroke(geo.strokeOuter))
-            drawCircle(c.track.copy(alpha = 0.55f), radius = geo.rInner, center = center, style = Stroke(geo.strokeInner))
+            if (!singleRing) {
+                drawCircle(c.track.copy(alpha = 0.55f), radius = geo.rInner, center = center, style = Stroke(geo.strokeInner))
+            }
 
             fun ring(radius: Float, stroke: Float, alpha: Float, value: (CategorySlice) -> Long, total: Long) {
                 if (total <= 0L) return
@@ -348,7 +352,9 @@ fun CategoryDonut(
                 }
             }
             ring(geo.rOuter, geo.strokeOuter, alpha = 0.62f, value = { it.budgetCents }, total = slices.sumOf { it.budgetCents })
-            ring(geo.rInner, geo.strokeInner, alpha = 1f, value = { it.actualCents }, total = slices.sumOf { it.actualCents })
+            if (!singleRing) {
+                ring(geo.rInner, geo.strokeInner, alpha = 1f, value = { it.actualCents }, total = slices.sumOf { it.actualCents })
+            }
         }
 
         // 圆心读数：分类名（未选中 = 总支出）/ 金额 / 占比。

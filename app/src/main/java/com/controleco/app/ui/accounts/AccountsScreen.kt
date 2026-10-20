@@ -338,7 +338,6 @@ private fun AccountEditorSheet(
     EcoSheet(
         onDismiss = onClose,
         title = if (initial == null) "新增账户" else "编辑账户",
-        subtitle = "账户余额 = 期初余额 + 全部流水",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

@@ -27,22 +27,18 @@ import com.controleco.app.util.Money
 @Composable
 fun EcoBudgetSheet(
     dailyMode: Boolean,
-    daysInPeriod: Int,
     currentCents: Long,
     onSave: (Long) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val c = MaterialTheme.eco
     var text by remember(currentCents) {
         mutableStateOf(if (currentCents > 0) Money.formatCents(currentCents) else "")
     }
     var error by remember { mutableStateOf<String?>(null) }
-    val typed = Money.parseCents(text.trim())
 
     EcoSheet(
         onDismiss = onDismiss,
-        title = if (dailyMode) "设置日预算" else "设置月预算",
-        subtitle = if (dailyMode) "每天可花的额度，跨月自动沿用" else "本月可花的总额度，按会计月计算",
+        title = if (dailyMode) "日预算" else "月预算",
     ) {
         EcoMoneyField(
             label = if (dailyMode) "每日预算" else "每月预算",
@@ -52,14 +48,6 @@ fun EcoBudgetSheet(
             supporting = error,
             isError = error != null,
         )
-        if (dailyMode && typed != null && typed > 0) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "≈ ${Money.formatYuanGrouped(typed * daysInPeriod.coerceAtLeast(1))} / 月（按本期 $daysInPeriod 天）",
-                style = EcoType.PageNote,
-                color = c.muted,
-            )
-        }
         Spacer(Modifier.height(20.dp))
         EcoPrimaryButton(
             text = "保存",
@@ -83,12 +71,5 @@ fun EcoBudgetSheet(
                 )
             }
         }
-        Spacer(Modifier.height(2.dp))
-        Text(
-            "预算只保存在本机；清除后首页回到未设置引导。",
-            style = EcoType.PageNote,
-            color = c.quiet,
-            modifier = Modifier.padding(top = 8.dp),
-        )
     }
 }

@@ -24,13 +24,10 @@ fun SettingsAccountScreen(
     onOpenCategories: () -> Unit,
 ) {
     SettingsPage(micro = "ACCOUNTS", title = "账户", onBack = onBack) {
-        SettingsLead("账户与分类是账本的骨架：账户决定钱在哪里，分类决定钱花去了哪。")
-
         SettingsSection(number = "01", title = "账户与分类", aside = "LEDGER")
         SettingsPane {
             SettingsRow(
                 title = "账户管理",
-                subtitle = "新增、编辑、期初余额",
                 icon = EcoIcons.Wallet,
                 iconTint = MaterialTheme.eco.blue,
                 showChevron = true,
@@ -39,14 +36,11 @@ fun SettingsAccountScreen(
             SettingsDivider()
             SettingsRow(
                 title = "分类管理",
-                subtitle = "图标、类型、分类预算",
                 icon = EcoIcons.App,
                 iconTint = MaterialTheme.eco.jade,
                 showChevron = true,
                 onClick = onOpenCategories,
             )
         }
-
-        SettingsNote("账户余额 = 期初余额 + 全部收入 − 全部支出。修改期初余额会影响当前余额，不会改动流水。")
     }
 }

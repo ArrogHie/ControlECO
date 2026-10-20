@@ -56,7 +56,6 @@ fun SettingsDeveloperScreen(
             DevActionRow(
                 icon = EcoIcons.Bell,
                 title = "动账通知（延迟 20 秒）",
-                subtitle = "发一条测试捕获，检查通知监听链路",
                 onStart = { vm.scheduleNotifyTest(toast()) },
             )
             SettingsDivider()
@@ -65,14 +64,12 @@ fun SettingsDeveloperScreen(
             DevActionRow(
                 icon = EcoIcons.Overlay,
                 title = "悬浮确认卡（立即）",
-                subtitle = "检查悬浮窗权限与系统拦截",
                 onStart = { vm.showOverlayTest(0L, toast()) },
             )
             SettingsDivider()
             DevActionRow(
                 icon = EcoIcons.Clock,
                 title = "悬浮确认卡（延迟 20 秒）",
-                subtitle = "先切到支付页，再等待卡片出现",
                 onStart = { vm.showOverlayTest(20_000L, toast()) },
             )
         }
@@ -92,7 +89,6 @@ fun SettingsDeveloperScreen(
             SettingsDivider()
             SettingsRow(
                 title = "捕获日志",
-                subtitle = "通知 / 页面 / 短信原始快照",
                 icon = EcoIcons.File,
                 iconTint = MaterialTheme.eco.violet,
                 trail = "查看",
@@ -103,7 +99,6 @@ fun SettingsDeveloperScreen(
             SettingsDivider()
             SettingsRow(
                 title = "保活与自启动",
-                subtitle = "服务状态 · 电池白名单 · 品牌步骤",
                 icon = EcoIcons.Battery,
                 iconTint = MaterialTheme.eco.jade,
                 trail = "查看",
@@ -120,14 +115,12 @@ fun SettingsDeveloperScreen(
             // release 也保留（开发者功能整体保留）：开关与捕获路径都不依赖 BuildConfig.DEBUG
             SettingsSwitchRow(
                 title = "记录所有应用的通知（调试）",
-                subtitle = "只影响采集范围，不改变解析规则",
                 checked = debugCaptureAll,
                 onCheckedChange = { vm.setDebugCaptureAll(it) },
             )
             SettingsDivider()
             SettingsSwitchRow(
                 title = "捕获所有页面（调试）",
-                subtitle = "记录页面快照，便于补充解析器",
                 checked = debugCaptureAllPages,
                 onCheckedChange = { vm.setDebugCaptureAllPages(it) },
             )
@@ -139,7 +132,6 @@ fun SettingsDeveloperScreen(
             // 供回查"这笔账从哪来"；关闭时零写入
             SettingsSwitchRow(
                 title = "记录记账来源（溯源）",
-                subtitle = "保存每笔自动入账 / 待确认的原始来源，关闭时零写入",
                 checked = traceEnabled,
                 onCheckedChange = { vm.setTraceEnabled(it) },
             )
@@ -155,7 +147,6 @@ fun SettingsDeveloperScreen(
             )
         }
 
-        SettingsNote("release 构建也保留开发者功能；所有测试只在本机运行。")
     }
 }
 
@@ -164,12 +155,10 @@ fun SettingsDeveloperScreen(
 private fun DevActionRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
-    subtitle: String,
     onStart: () -> Unit,
 ) {
     SettingsRow(
         title = title,
-        subtitle = subtitle,
         icon = icon,
         iconTint = MaterialTheme.eco.blue,
         onClick = onStart,

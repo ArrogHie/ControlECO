@@ -122,28 +122,24 @@ fun SettingsScreen(
         SettingsPane {
             SettingsSwitchRow(
                 title = "入账提醒",
-                subtitle = "先记账，通知里可撤销",
                 checked = captureNotify,
                 onCheckedChange = { vm.setCaptureNotifyEnabled(it) },
             )
             SettingsDivider()
             SettingsSwitchRow(
                 title = "悬浮窗入账",
-                subtitle = "确认卡改完即同步",
                 checked = overlayConfirm,
                 onCheckedChange = { vm.setOverlayConfirmEnabled(it) },
             )
             SettingsDivider()
             SettingsSwitchRow(
                 title = "自动入账",
-                subtitle = "直接记账，不打扰",
                 checked = autoEntry,
                 onCheckedChange = { vm.setAutoEntryEnabled(it) },
             )
             SettingsDivider()
             SettingsRow(
                 title = "监听的 App",
-                subtitle = "按应用开启或关闭",
                 icon = EcoIcons.App,
                 iconTint = MaterialTheme.eco.blue,
                 trail = "$watchedCount 个",
@@ -153,7 +149,6 @@ fun SettingsScreen(
             SettingsDivider()
             SettingsRow(
                 title = "商户归类",
-                subtitle = "确认捕获账单时自动学习",
                 icon = EcoIcons.Tag,
                 iconTint = MaterialTheme.eco.amber,
                 trail = "${rules.size} 条",
@@ -163,7 +158,6 @@ fun SettingsScreen(
             SettingsDivider()
             SettingsRow(
                 title = "权限",
-                subtitle = "通知监听 · 无障碍 · 悬浮窗 · 短信",
                 icon = EcoIcons.Shield,
                 iconTint = MaterialTheme.eco.jade,
                 pillText = if (permissionsReady) "已就绪" else "待设置",
@@ -178,14 +172,12 @@ fun SettingsScreen(
         SettingsPane {
             SettingsSwitchRow(
                 title = "自动更新",
-                subtitle = "启动时检查 GitHub Release",
                 checked = autoUpdate,
                 onCheckedChange = { vm.setAutoUpdateEnabled(it) },
             )
             SettingsDivider()
             SettingsRow(
                 title = "检查更新",
-                subtitle = "手动检查一次（发现新版本会弹更新卡）",
                 icon = EcoIcons.Download,
                 trail = "v${BuildConfig.VERSION_NAME}",
                 showChevron = true,
@@ -206,7 +198,6 @@ fun SettingsScreen(
             SettingsDivider()
             SettingsRow(
                 title = "开发者功能",
-                subtitle = "手动启动 · 待确认 · 捕获日志 · 溯源 · 保活",
                 icon = EcoIcons.Gear,
                 iconTint = MaterialTheme.eco.blue,
                 showChevron = true,
@@ -218,7 +209,6 @@ fun SettingsScreen(
         SettingsPane {
             SettingsRow(
                 title = "关于 我ECO",
-                subtitle = "隐私承诺 · 开源仓库 · 第三方许可",
                 icon = EcoIcons.Info,
                 iconTint = MaterialTheme.eco.jade,
                 trail = "v${BuildConfig.VERSION_NAME}",

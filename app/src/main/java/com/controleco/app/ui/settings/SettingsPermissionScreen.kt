@@ -89,7 +89,6 @@ fun SettingsPermissionScreen(
         ScreenReaderSection(vm, resumeTick, onOpenAccessibilitySettings)
         OverlaySection(vm, resumeTick, onOpenOverlayPermission)
         BankSection(vm, resumeTick)
-        SettingsNote("权限随时可以撤销：撤销后对应通道立即停止采集，已入账的账单不受影响。")
     }
 }
 
@@ -109,12 +108,6 @@ private fun PermissionSummary(vm: LedgerViewModel, resumeTick: Int) {
         coreMissing <= 2 -> "还需开启 $coreMissing 项核心权限"
         else -> "自动记账尚未就绪"
     }
-    val subtitle = if (!screenReader) {
-        "微信 8.0.52+ 页面读取还需要「随选朗读」"
-    } else {
-        "通知与页面通道均已连接，捕获后自动入账"
-    }
-
     EcoPane(
         modifier = Modifier
             .fillMaxWidth()
@@ -146,13 +139,6 @@ private fun PermissionSummary(vm: LedgerViewModel, resumeTick: Int) {
                         ),
                         color = c.ink,
                         maxLines = 1,
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        subtitle,
-                        style = EcoType.RowSub.copy(fontSize = 8.5.sp, lineHeight = 13.sp),
-                        color = c.muted,
-                        maxLines = 2,
                     )
                 }
             }
@@ -211,21 +197,18 @@ private fun NotificationSection(vm: LedgerViewModel, resumeTick: Int, onOpenNoti
         SettingsDivider()
         SettingsSwitchRow(
             title = "自动记录收款 / 动账通知",
-            subtitle = "从通知里识别金额、商户与方向",
             checked = captureEnabled,
             onCheckedChange = { vm.setCaptureEnabled(it) },
         )
         SettingsDivider()
         SettingsSwitchRow(
             title = "银行 App 动账推送",
-            subtitle = "银行 App 的动账通知，靠【银行名】签名识别",
             checked = bankPush,
             onCheckedChange = { vm.setBankPushEnabled(it) },
         )
         SettingsDivider()
         SettingsSwitchRow(
             title = "金额待补录",
-            subtitle = "方向可辨、金额缺失的通知入待确认，可下拉通知栏补录",
             checked = amountReply,
             onCheckedChange = { vm.setAmountReplyEnabled(it) },
         )
@@ -234,7 +217,6 @@ private fun NotificationSection(vm: LedgerViewModel, resumeTick: Int, onOpenNoti
         SettingsDivider()
         SettingsSwitchRow(
             title = "退款到账关联提醒",
-            subtitle = "退款通知不带金额，提醒你选择原支出",
             checked = refundLinkEnabled,
             onCheckedChange = { vm.setRefundLinkEnabled(it) },
         )
@@ -268,7 +250,6 @@ private fun CaptureNotifySetting(vm: LedgerViewModel, resumeTick: Int) {
 
     SettingsSwitchRow(
         title = "入账提醒",
-        subtitle = "捕获后发「已记入一笔」通知，可直接撤销",
         checked = enabled,
         onCheckedChange = { vm.setCaptureNotifyEnabled(it) },
         trailing = {
@@ -307,7 +288,6 @@ private fun A11ySection(vm: LedgerViewModel, resumeTick: Int, onOpenAccessibilit
         SettingsDivider()
         SettingsSwitchRow(
             title = "自动记录支付页面",
-            subtitle = "开启后页面识别出的已支付交易会自动入账/进入待确认；关闭只保留捕获日志，不入账",
             checked = captureOn,
             onCheckedChange = { vm.setA11yCaptureEnabled(it) },
         )
@@ -343,11 +323,6 @@ private fun ScreenReaderSection(vm: LedgerViewModel, resumeTick: Int, onOpenAcce
             missingText = "未开启",
             actionText = "去开启",
             onAction = onOpenAccessibilitySettings,
-        )
-        SettingsDivider()
-        PaneNote(
-            "微信 8.0.52+ 只向系统读屏服务暴露页面节点。只开「无障碍页面采集」时，" +
-                "微信页面可能读到空树；请同时开启随选朗读（或 TalkBack）。",
         )
         SettingsDivider()
         SettingsTutorial(
@@ -388,7 +363,6 @@ private fun OverlaySection(vm: LedgerViewModel, resumeTick: Int, onOpenOverlayPe
         SettingsDivider()
         SettingsSwitchRow(
             title = "悬浮窗入账",
-            subtitle = "捕获后在支付页上方弹出确认卡，改完关掉即同步",
             checked = overlayOn,
             onCheckedChange = { vm.setOverlayConfirmEnabled(it) },
         )
@@ -459,7 +433,6 @@ private fun BankSection(vm: LedgerViewModel, resumeTick: Int) {
         SettingsDivider()
         SettingsSwitchRow(
             title = "记录银行动账短信",
-            subtitle = "开启时如未授权会先申请短信权限",
             checked = enabled,
             onCheckedChange = { on ->
                 vm.setSmsCaptureEnabled(on)

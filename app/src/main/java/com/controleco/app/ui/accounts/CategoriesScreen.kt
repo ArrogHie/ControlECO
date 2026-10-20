@@ -502,7 +502,6 @@ private fun CategoryEditorSheet(
     EcoSheet(
         onDismiss = onClose,
         title = if (initial == null) "新增分类" else "编辑分类",
-        subtitle = "图标、颜色与预算都在这一张卡里改完",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             // ---------- 顶部预览 ----------
