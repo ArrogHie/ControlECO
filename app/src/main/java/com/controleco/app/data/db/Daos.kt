@@ -152,6 +152,10 @@ interface TransactionDao {
     @Query("SELECT COUNT(*) FROM transactions WHERE categoryId = :categoryId")
     suspend fun countByCategory(categoryId: Long): Int
 
+    /** 删除分类时把其下流水改挂到兜底分类 */
+    @Query("UPDATE transactions SET categoryId = :toCategoryId WHERE categoryId = :fromCategoryId")
+    suspend fun reassignCategory(fromCategoryId: Long, toCategoryId: Long)
+
     @Query("SELECT COUNT(*) FROM transactions WHERE accountId = :accountId")
     suspend fun countByAccount(accountId: Long): Int
 

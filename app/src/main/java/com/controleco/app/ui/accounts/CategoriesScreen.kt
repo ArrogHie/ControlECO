@@ -71,8 +71,6 @@ import com.controleco.app.ui.eco.EcoField
 import com.controleco.app.ui.eco.EcoGhostButton
 import com.controleco.app.ui.eco.EcoIconButton
 import com.controleco.app.ui.eco.EcoMoneyField
-import com.controleco.app.ui.eco.EcoPageLead
-import com.controleco.app.ui.eco.EcoPageNote
 import com.controleco.app.ui.eco.EcoPane
 import com.controleco.app.ui.eco.EcoPrimaryButton
 import com.controleco.app.ui.eco.EcoRowDivider
@@ -172,48 +170,42 @@ fun CategoriesScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                 contentPadding = PaddingValues(start = 22.dp, end = 22.dp, bottom = 112.dp),
             ) {
                 item(key = "head") {
-                    Column {
-                        EcoPageLead(
-                            "分类预算只作用于支出分类；在「金额 / 比例」之间切换不会改变已有数值，只改变显示与输入方式。",
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            buildString {
+                                append("支出分类 · 已分配 ")
+                                append(Money.formatYuanGroupedFixed(allocatedCents))
+                                if (monthlyBudget > 0L) {
+                                    append(" / ").append(Money.formatYuanGroupedFixed(monthlyBudget))
+                                } else {
+                                    append(" · 未设月预算")
+                                }
+                            },
+                            style = EcoType.RowSub.copy(
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.4.sp,
+                            ),
+                            color = MaterialTheme.eco.muted,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 2,
                         )
-                        Spacer(Modifier.height(4.dp))
-                        Row(
-                            Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                buildString {
-                                    append("支出分类 · 已分配 ")
-                                    append(Money.formatYuanGroupedFixed(allocatedCents))
-                                    if (monthlyBudget > 0L) {
-                                        append(" / ").append(Money.formatYuanGroupedFixed(monthlyBudget))
-                                    } else {
-                                        append(" · 未设月预算")
-                                    }
-                                },
-                                style = EcoType.RowSub.copy(
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 0.4.sp,
-                                ),
-                                color = MaterialTheme.eco.muted,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 2,
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            EcoSegmented(
-                                options = listOf("金额", "比例"),
-                                selectedIndex = if (budgetMode == CategoryBudgetMode.PERCENT) 1 else 0,
-                                onSelect = {
-                                    vm.setCategoryBudgetMode(
-                                        if (it == 1) CategoryBudgetMode.PERCENT else CategoryBudgetMode.AMOUNT,
-                                    )
-                                },
-                                modifier = Modifier.width(108.dp),
-                                height = 30.dp,
-                                small = true,
-                            )
-                        }
+                        Spacer(Modifier.width(8.dp))
+                        EcoSegmented(
+                            options = listOf("金额", "比例"),
+                            selectedIndex = if (budgetMode == CategoryBudgetMode.PERCENT) 1 else 0,
+                            onSelect = {
+                                vm.setCategoryBudgetMode(
+                                    if (it == 1) CategoryBudgetMode.PERCENT else CategoryBudgetMode.AMOUNT,
+                                )
+                            },
+                            modifier = Modifier.width(108.dp),
+                            height = 30.dp,
+                            small = true,
+                        )
                     }
                 }
 
@@ -243,7 +235,7 @@ fun CategoriesScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                 }
 
                 item(key = "incomeHead") {
-                    EcoSectionHead(number = "02", title = "收入分类", aside = "${incomeList.size} ITEMS")
+                    EcoSectionHead(title = "收入分类", aside = "${incomeList.size} ITEMS")
                 }
 
                 item(key = "income") {
@@ -269,12 +261,6 @@ fun CategoriesScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                             }
                         }
                     }
-                }
-
-                item(key = "note") {
-                    EcoPageNote(
-                        "删除分类不会删除已入账流水；分类下已有流水时无法删除。分类预算只影响首页与统计的预算读数。",
-                    )
                 }
             }
         }
@@ -499,6 +485,8 @@ private fun CategoryEditorSheet(
     val allGlyphs = Glyph.entries.toList()
     val visibleGlyphs = if (showAllGlyphs) allGlyphs else allGlyphs.take(QUICK_GLYPH_COUNT)
     val glyphTintColor = currentColor?.let { Color(it or 0xFF000000.toInt()) }
+    // 「其他」是删除分类的兜底：不提供改名入口、类型锁死、删除置灰，靠界面本身表达约束
+    val isFallback = initial?.name == "其他"
 
     EcoSheet(
         onDismiss = onClose,
@@ -534,15 +522,17 @@ private fun CategoryEditorSheet(
                 }
             }
 
-            EcoField(
-                label = "名称",
-                value = name,
-                onValueChange = {
-                    name = it
-                    localError = null
-                },
-                placeholder = "例如：餐饮",
-            )
+            if (!isFallback) {
+                EcoField(
+                    label = "名称",
+                    value = name,
+                    onValueChange = {
+                        name = it
+                        localError = null
+                    },
+                    placeholder = "例如：餐饮",
+                )
+            }
 
             // ---------- 类型 ----------
             Column {
@@ -556,6 +546,7 @@ private fun CategoryEditorSheet(
                         localError = null
                     },
                     modifier = Modifier.fillMaxWidth(),
+                    enabled = !isFallback,
                 )
             }
 
@@ -709,7 +700,7 @@ private fun CategoryEditorSheet(
                 supporting = if (emojiInvalid) {
                     "请输入 emoji（不接受文字）"
                 } else {
-                    "输入任意 emoji 即替换当前图标；清空后回到图形 / 图片"
+                    null
                 },
             )
 
@@ -789,7 +780,7 @@ private fun CategoryEditorSheet(
                             supporting = if (hasTotalBudget) {
                                 "还可分配 ${Money.formatYuanGroupedFixed(allocatableCents)}"
                             } else {
-                                "未设置月总预算时不限制分类预算"
+                                null
                             },
                         )
                     }
@@ -838,24 +829,18 @@ private fun CategoryEditorSheet(
                     EcoDangerButton(
                         text = "删除分类",
                         onClick = { confirmDelete = true },
+                        enabled = !isFallback,
                         modifier = Modifier.weight(1f),
                     )
                 }
             }
-
-            Text(
-                "预算只作用于支出分类；分类预算只影响读数，不会产生账目。",
-                style = EcoType.PageNote,
-                color = c.quiet,
-                modifier = Modifier.padding(bottom = 4.dp),
-            )
         }
     }
 
     if (confirmDelete && onDelete != null) {
         EcoConfirm(
             title = "删除分类",
-            body = "删除后不可恢复。分类下若已有流水，需要先处理这些账单才能删除。",
+            body = "删除后，该分类下的流水会归入「其他」。",
             confirmText = "删除",
             danger = true,
             onConfirm = {

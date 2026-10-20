@@ -143,7 +143,6 @@ fun SettingsLazyPage(
 fun SettingsSection(
     title: String,
     modifier: Modifier = Modifier,
-    number: String? = null,
     aside: String? = null,
     trailing: (@Composable RowScope.() -> Unit)? = null,
 ) {
@@ -154,18 +153,6 @@ fun SettingsSection(
             .padding(top = 22.dp, bottom = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (number != null) {
-            Box(
-                Modifier
-                    .size(19.dp)
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(c.blue),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(number, style = EcoType.SectionNo, color = Color.White)
-            }
-            Spacer(Modifier.width(9.dp))
-        }
         Text(
             title,
             style = EcoType.SectionTitle,

@@ -683,7 +683,7 @@ private fun MonthProgress(period: MonthPeriod, today: LocalDate) {
     val elapsed = period.daysElapsed(today)
     Column(Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            EcoIconTile(icon = EcoIcons.Calendar, tint = c.blue, size = 30.dp, radius = 10.dp, iconSize = 16.dp)
+            EcoIconTile(icon = EcoIcons.Calendar, tint = c.blue, size = 30.dp, radius = 10.dp, iconSize = 16.dp, bare = true)
             Spacer(Modifier.width(10.dp))
             Text("本月进度", style = EcoType.RowTitle.copy(fontSize = 14.sp), color = c.muted)
             Spacer(Modifier.weight(1f))

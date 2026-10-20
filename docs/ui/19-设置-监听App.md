@@ -10,7 +10,7 @@
 ## 1. 路由与入口
 
 - 路由：`settings/watchedApps`。
-- 进入：设置首页 → `01 自动记账` →「监听的 App」。
+- 进入：设置首页 → `自动记账` →「监听的 App」。
 - 离开：返回。
 - 本页不申请系统权限；只写监听范围（SharedPreferences），即时生效。
 
@@ -58,7 +58,7 @@ SettingsPage(micro="WATCHED APPS", title="监听的 App", onBack)
 | 搜索框 | 高 **40dp**，圆角 11dp，`surface2` + `rule` 描边，左右 12dp |
 | 搜索文字 | `EcoType.Input`，光标 `blue`；清除 14dp |
 | 计数/动作行 | `SectionAside`；InlineAction 10/800 `blueDeep`（全部关闭用 `muted`） |
-| 分组章节 | `SettingsSection("%02d", group.title, "on/size")`，编号按**非空组**重新编 |
+| 分组章节 | `SettingsSection(group.title, "on/size")`，不显示编号 |
 | 整组行 | 左右 16/10，上下 10；标题 11.5sp；说明 8.5sp |
 | 应用行 | `heightIn(min=48dp)`，左右 16、上下 10 |
 | 首字色块 | 32dp，圆角 10dp，底色 `tint` 12%/22%，首字 12sp/700 |
@@ -88,7 +88,7 @@ SettingsPage(micro="WATCHED APPS", title="监听的 App", onBack)
 
 ### 分组
 
-- 只渲染 `filtered` 中非空的组；章节编号按渲染顺序 `%02d` 重新生成。
+- 只渲染 `filtered` 中非空的组。
 - `allOn = onCount == groupApps.size`；整组动作文案随之为 `全部关闭` / `全部开启`。
 
 ---
@@ -138,8 +138,7 @@ SettingsPage(micro="WATCHED APPS", title="监听的 App", onBack)
 
 1. 顶部「全部开启/关闭」作用于**整个目录**，不是当前搜索结果；文案没有“筛选内”的歧义，但实现要清楚。
 2. 整组开关只作用于 `groupApps`（当前过滤结果），搜索时会只改可见应用。
-3. 章节编号按**非空组**重新数，搜索后可能从 `01` 变 `02`；不要写死组编号。
-4. `tick` 只刷新快照；不要用它触发数据层重载。
+3. `tick` 只刷新快照；不要用它触发数据层重载。
 5. 本页只管“包名可枚举”的通知/页面通道；银行短信、未知银行 App 的推送由各自签名闸门决定，不受本页影响。
 6. 目录外来源不在此页；不要把它描述成“所有捕获开关”。
 7. `rememberSaveable` 的搜索词在进程重建后保留；不要改成普通 `remember`。
@@ -148,7 +147,7 @@ SettingsPage(micro="WATCHED APPS", title="监听的 App", onBack)
 **验收**
 
 - [ ] 搜索按名称/包名过滤，清除恢复。
-- [ ] 分组只显示有结果的组，编号连续。
+- [ ] 分组只显示有结果的组，标题与 aside 正确。
 - [ ] 单应用/整组/全局开关都即时写回，重进页面保持。
 - [ ] 全开/全关后计数与每行开关一致。
 - [ ] 两种空态文案正确。

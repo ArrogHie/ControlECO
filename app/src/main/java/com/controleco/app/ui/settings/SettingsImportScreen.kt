@@ -27,7 +27,7 @@ fun SettingsImportScreen(
     onImport: () -> Unit,
 ) {
     SettingsPage(micro = "IMPORT", title = "账单导入", onBack = onBack) {
-        SettingsSection(number = "01", title = "导入", aside = "IMPORT")
+        SettingsSection(title = "导入", aside = "IMPORT")
         SettingsPane {
             SettingsRow(
                 title = "选择账单文件",
@@ -39,7 +39,7 @@ fun SettingsImportScreen(
             )
         }
 
-        SettingsSection(number = "02", title = "导出账单", aside = "HOW TO")
+        SettingsSection(title = "导出账单", aside = "HOW TO")
         SettingsPane {
             SettingsRow(
                 title = "微信",
@@ -60,7 +60,7 @@ fun SettingsImportScreen(
             )
         }
 
-        SettingsSection(number = "03", title = "显示", aside = "DISPLAY")
+        SettingsSection(title = "显示", aside = "DISPLAY")
         SettingsPane {
             RefundDisplaySetting(vm)
         }

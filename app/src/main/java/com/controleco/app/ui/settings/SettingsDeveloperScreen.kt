@@ -51,7 +51,7 @@ fun SettingsDeveloperScreen(
     fun toast(): (String) -> Unit = { message -> EcoToast.show(message, EcoPillTone.Blue) }
 
     SettingsPage(micro = "DEVELOPER", title = "开发者功能", onBack = onBack) {
-        SettingsSection(number = "01", title = "手动启动", aside = "TEST")
+        SettingsSection(title = "手动启动", aside = "TEST")
         SettingsPane {
             DevActionRow(
                 icon = EcoIcons.Bell,
@@ -74,7 +74,7 @@ fun SettingsDeveloperScreen(
             )
         }
 
-        SettingsSection(number = "02", title = "日志与诊断", aside = "DIAGNOSTICS")
+        SettingsSection(title = "日志与诊断", aside = "DIAGNOSTICS")
         SettingsPane {
             SettingsRow(
                 title = "待确认账单",
@@ -126,7 +126,7 @@ fun SettingsDeveloperScreen(
             )
         }
 
-        SettingsSection(number = "03", title = "自动记账溯源", aside = "TRACE")
+        SettingsSection(title = "自动记账溯源", aside = "TRACE")
         SettingsPane {
             // 默认关：开启后每次与入账有关的捕获都留原始来源（通知原文/页面快照），
             // 供回查"这笔账从哪来"；关闭时零写入

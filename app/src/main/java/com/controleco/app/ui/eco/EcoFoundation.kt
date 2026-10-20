@@ -420,10 +420,9 @@ fun EcoArrival(
     }
 }
 
-/** 章节头：01 / 标题 / 右侧说明（可选） */
+/** 章节头：标题 / 右侧说明（可选） */
 @Composable
 fun EcoSectionHead(
-    number: String? = null,
     title: String,
     aside: String? = null,
     modifier: Modifier = Modifier,
@@ -436,18 +435,6 @@ fun EcoSectionHead(
             .padding(top = 22.dp, bottom = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (number != null) {
-            Box(
-                Modifier
-                    .size(19.dp)
-                    .clip(RoundedCornerShape(7.dp))
-                    .background(if (c.isDark) c.blue.copy(alpha = 0.22f) else c.blueSoft),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(number, style = EcoType.SectionNo, color = c.blue)
-            }
-            Spacer(Modifier.width(9.dp))
-        }
         Text(title, style = EcoType.SectionTitle, color = c.ink)
         // 原型：标题和右侧 aside 之间有一条极细的延长线
         Spacer(Modifier.width(12.dp))

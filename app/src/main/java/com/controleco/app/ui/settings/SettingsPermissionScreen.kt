@@ -177,7 +177,7 @@ private fun NotificationSection(vm: LedgerViewModel, resumeTick: Int, onOpenNoti
     val refundLinkEnabled by vm.refundLinkEnabled.collectAsStateWithLifecycle()
     val reeauthNeeded = remember(resumeTick) { vm.isReauthNeeded() }
 
-    SettingsSection(number = "01", title = "通知监听", aside = "NOTIFICATION ACCESS")
+    SettingsSection(title = "通知监听", aside = "NOTIFICATION ACCESS")
     SettingsPane {
         SettingsStatusRow(
             title = "通知监听",
@@ -275,7 +275,7 @@ private fun A11ySection(vm: LedgerViewModel, resumeTick: Int, onOpenAccessibilit
     val enabled = remember(resumeTick) { vm.isA11yEnabled() }
     val captureOn by vm.a11yCaptureEnabled.collectAsStateWithLifecycle()
 
-    SettingsSection(number = "02", title = "无障碍（页面采集）", aside = "ACCESSIBILITY")
+    SettingsSection(title = "无障碍（页面采集）", aside = "ACCESSIBILITY")
     SettingsPane {
         SettingsStatusRow(
             title = "无障碍页面采集",
@@ -314,7 +314,7 @@ private fun A11ySection(vm: LedgerViewModel, resumeTick: Int, onOpenAccessibilit
 private fun ScreenReaderSection(vm: LedgerViewModel, resumeTick: Int, onOpenAccessibilitySettings: () -> Unit) {
     val enabled = remember(resumeTick) { vm.isScreenReaderEnabled() }
 
-    SettingsSection(number = "03", title = "微信页面读取（随选朗读）", aside = "SCREEN READER")
+    SettingsSection(title = "微信页面读取（随选朗读）", aside = "SCREEN READER")
     SettingsPane {
         SettingsStatusRow(
             title = "随选朗读",
@@ -350,7 +350,7 @@ private fun OverlaySection(vm: LedgerViewModel, resumeTick: Int, onOpenOverlayPe
     val granted = remember(resumeTick) { vm.isOverlayGranted() }
     val overlayOn by vm.overlayConfirmEnabled.collectAsStateWithLifecycle()
 
-    SettingsSection(number = "04", title = "悬浮窗入账", aside = "OVERLAY")
+    SettingsSection(title = "悬浮窗入账", aside = "OVERLAY")
     SettingsPane {
         SettingsStatusRow(
             title = "悬浮窗权限",
@@ -420,7 +420,7 @@ private fun BankSection(vm: LedgerViewModel, resumeTick: Int) {
         )
     }
 
-    SettingsSection(number = "05", title = "银行动账短信", aside = "SMS")
+    SettingsSection(title = "银行动账短信", aside = "SMS")
     SettingsPane {
         SettingsStatusRow(
             title = "收短信权限",

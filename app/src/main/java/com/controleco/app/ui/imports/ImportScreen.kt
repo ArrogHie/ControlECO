@@ -236,7 +236,7 @@ private fun ImportIdleStage(
         "文件只在本机解析；导入会跳过已存在的记录（按来源 + 时间 + 金额 + 方向去重）。",
     )
 
-    EcoSectionHead(number = "01", title = "导出方法", aside = "HOW TO")
+    EcoSectionHead(title = "导出方法", aside = "HOW TO")
     EcoPane {
         Column {
             ExportGuideRow(

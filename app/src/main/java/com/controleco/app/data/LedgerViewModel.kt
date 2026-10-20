@@ -617,18 +617,37 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         onResult: (savedId: Long, error: String?) -> Unit,
     ) {
         viewModelScope.launch(Dispatchers.IO) {
+            val trimmed = name.trim()
+            if (trimmed.isEmpty()) {
+                withContext(Dispatchers.Main) { onResult(0L, "请输入名称") }
+                return@launch
+            }
             try {
+                val all = categoryDao.getAll()
+                val current = all.firstOrNull { it.id == id }
+                // 「其他」是删除分类时的兜底，改名/改类型会让兜底失效
+                if (current != null && current.name == "其他" &&
+                    (trimmed != "其他" || type != current.type)
+                ) {
+                    withContext(Dispatchers.Main) { onResult(0L, "「其他」不能改名或修改类型") }
+                    return@launch
+                }
+                // 同类型下不允许同名（支出与收入各自可以有一个「其他」）
+                if (all.any { it.id != id && it.type == type && it.name.trim() == trimmed }) {
+                    withContext(Dispatchers.Main) { onResult(0L, "已存在同名分类") }
+                    return@launch
+                }
                 val savedId = if (id > 0) {
-                    categoryDao.getAll().firstOrNull { it.id == id }?.let { old ->
+                    current?.let { old ->
                         // 换图标时清掉旧的图片文件，避免内部存储越攒越多
                         if (old.icon != icon) {
                             CategoryIcon.deleteImage(getApplication(), CategoryIcon.imageOf(old.icon))
                         }
-                        categoryDao.update(old.copy(name = name, type = type, icon = icon))
+                        categoryDao.update(old.copy(name = trimmed, type = type, icon = icon))
                     }
                     id
                 } else {
-                    categoryDao.insert(CategoryEntity(name = name, type = type, icon = icon))
+                    categoryDao.insert(CategoryEntity(name = trimmed, type = type, icon = icon))
                 }
                 withContext(Dispatchers.Main) { onResult(savedId, null) }
             } catch (e: Exception) {
@@ -638,18 +657,38 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** 删除分类：其下流水改挂到同类型的「其他」；「其他」本身不可删 */
     fun deleteCategory(id: Long, onResult: (String?) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
-            val used = txDao.countByCategory(id)
-            if (used > 0) {
-                withContext(Dispatchers.Main) { onResult("该分类下有 $used 笔交易，无法删除") }
-            } else {
-                val icon = categoryDao.getAll().firstOrNull { it.id == id }?.icon
+            try {
+                val all = categoryDao.getAll()
+                val target = all.firstOrNull { it.id == id }
+                if (target == null) {
+                    withContext(Dispatchers.Main) { onResult("分类不存在") }
+                    return@launch
+                }
+                if (target.name == "其他") {
+                    withContext(Dispatchers.Main) { onResult("「其他」不能删除") }
+                    return@launch
+                }
+                var fallback = all.firstOrNull { it.type == target.type && it.name == "其他" }
+                if (fallback == null) {
+                    val newId = categoryDao.insert(CategoryEntity(name = "其他", type = target.type))
+                    fallback = categoryDao.getAll().firstOrNull { it.id == newId }
+                }
+                if (fallback == null) {
+                    withContext(Dispatchers.Main) { onResult("删除失败") }
+                    return@launch
+                }
+                txDao.reassignCategory(id, fallback.id)
                 categoryDao.deleteById(id)
-                CategoryIcon.deleteImage(getApplication(), CategoryIcon.imageOf(icon ?: ""))
+                CategoryIcon.deleteImage(getApplication(), CategoryIcon.imageOf(target.icon))
                 setCategoryBudget(id, 0L) // 分类删除时同步清理其分类预算
                 setCategoryBudgetPercent(id, 0)
                 withContext(Dispatchers.Main) { onResult(null) }
+            } catch (e: Exception) {
+                AppLog.e("category", "delete failed", e)
+                withContext(Dispatchers.Main) { onResult("删除失败") }
             }
         }
     }

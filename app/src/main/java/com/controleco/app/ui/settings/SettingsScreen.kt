@@ -118,7 +118,7 @@ fun SettingsScreen(
     SettingsPage(micro = "PREFERENCES", title = "设置", onBack = onBack) {
         AutomationStatusCard(running = running, lastCaptureAt = lastCaptureAt)
 
-        SettingsSection(number = "01", title = "自动记账", aside = "CAPTURE / 监听")
+        SettingsSection(title = "自动记账", aside = "CAPTURE / 监听")
         SettingsPane {
             SettingsSwitchRow(
                 title = "入账提醒",
@@ -168,7 +168,7 @@ fun SettingsScreen(
             )
         }
 
-        SettingsSection(number = "02", title = "系统", aside = "SYSTEM / 系统")
+        SettingsSection(title = "系统", aside = "SYSTEM / 系统")
         SettingsPane {
             SettingsSwitchRow(
                 title = "自动更新",
@@ -205,7 +205,7 @@ fun SettingsScreen(
             )
         }
 
-        SettingsSection(number = "03", title = "关于", aside = "ABOUT / 关于")
+        SettingsSection(title = "关于", aside = "ABOUT / 关于")
         SettingsPane {
             SettingsRow(
                 title = "关于 我ECO",

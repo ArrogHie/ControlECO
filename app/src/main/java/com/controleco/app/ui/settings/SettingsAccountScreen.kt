@@ -24,7 +24,7 @@ fun SettingsAccountScreen(
     onOpenCategories: () -> Unit,
 ) {
     SettingsPage(micro = "ACCOUNTS", title = "账户", onBack = onBack) {
-        SettingsSection(number = "01", title = "账户与分类", aside = "LEDGER")
+        SettingsSection(title = "账户与分类", aside = "LEDGER")
         SettingsPane {
             SettingsRow(
                 title = "账户管理",

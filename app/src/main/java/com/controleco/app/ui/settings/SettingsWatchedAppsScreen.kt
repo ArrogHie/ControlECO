@@ -112,16 +112,13 @@ fun SettingsWatchedAppsScreen(onBack: () -> Unit) {
                 )
             }
         } else {
-            var sectionIndex = 0
             AppGroup.entries.forEach { group ->
                 val groupApps = filtered.filter { it.group == group }
                 if (groupApps.isEmpty()) return@forEach
-                sectionIndex += 1
                 val onCount = groupApps.count { it.packageName in watched }
                 val allOn = onCount == groupApps.size
 
                 SettingsSection(
-                    number = "%02d".format(sectionIndex),
                     title = group.title,
                     aside = "$onCount / ${groupApps.size}",
                 )

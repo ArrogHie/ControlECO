@@ -182,17 +182,20 @@ fun EcoDangerButton(
     height: Dp = 44.dp,
 ) {
     val c = MaterialTheme.eco
+    val bg = if (enabled) c.claySoft else c.surface3
+    val line = if (enabled) c.clay.copy(alpha = 0.3f) else c.rule
+    val fg = if (enabled) c.clay else c.quiet.copy(alpha = 0.55f)
     Box(
         modifier
             .fillMaxWidth()
             .height(height)
             .clip(RoundedCornerShape(13.dp))
-            .background(c.claySoft)
-            .border(1.dp, c.clay.copy(alpha = 0.3f), RoundedCornerShape(13.dp))
+            .background(bg)
+            .border(1.dp, line, RoundedCornerShape(13.dp))
             .ecoPressable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, style = EcoType.Btn, color = c.clay, maxLines = 1)
+        Text(text, style = EcoType.Btn, color = fg, maxLines = 1)
     }
 }
 
@@ -282,6 +285,8 @@ fun EcoSegmented(
     small: Boolean = false,
     selectedContainerColor: Color? = null,
     selectedContentColor: Color? = null,
+    /** 不可选时整体变灰且点击无效（分类「其他」的类型固定） */
+    enabled: Boolean = true,
 ) {
     val c = MaterialTheme.eco
     BoxWithConstraints(
@@ -317,16 +322,17 @@ fun EcoSegmented(
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
+                            enabled = enabled,
                         ) { onSelect(index) },
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text,
                         style = if (small) EcoType.SegSmall else EcoType.Seg,
-                        color = if (index == selectedIndex) {
-                            selectedContentColor ?: c.blueDeep
-                        } else {
-                            c.muted
+                        color = when {
+                            !enabled -> c.quiet.copy(alpha = 0.55f)
+                            index == selectedIndex -> selectedContentColor ?: c.blueDeep
+                            else -> c.muted
                         },
                         maxLines = 1,
                     )

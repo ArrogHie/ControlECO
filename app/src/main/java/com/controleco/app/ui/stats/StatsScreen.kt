@@ -245,7 +245,6 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
             // ---- 趋势卡：柱状图（可点按/滑动读数） ----
             item(key = "trendHead") {
                 EcoSectionHead(
-                    number = "01",
                     title = if (mode == PeriodMode.MONTH) "每日支出" else "月度支出",
                     aside = if (mode == PeriodMode.MONTH) "DAILY" else "MONTHLY",
                     modifier = Modifier.padding(horizontal = 22.dp),
@@ -265,7 +264,6 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
             stickyHeader(key = "donutSticky") {
                 Column(Modifier.fillMaxWidth().background(c.paper)) {
                     EcoSectionHead(
-                        number = "02",
                         title = "分类预算与占比",
                         aside = "BUDGET / ACTUAL",
                         modifier = Modifier.padding(horizontal = 22.dp),

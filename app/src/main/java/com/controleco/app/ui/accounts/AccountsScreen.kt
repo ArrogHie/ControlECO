@@ -114,7 +114,7 @@ fun AccountsScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                     AssetsTotalCard(totalCents = totalCents, accountCount = accounts.size)
                 }
                 item(key = "head") {
-                    EcoSectionHead(number = "01", title = "账户", aside = "ACCOUNTS")
+                    EcoSectionHead(title = "账户", aside = "ACCOUNTS")
                 }
                 item(key = "list") {
                     EcoPane(Modifier.fillMaxWidth(), shape = RoundedCornerShape(19.dp)) {

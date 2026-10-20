@@ -217,7 +217,7 @@ fun KeepAliveScreen(
             )
 
             // ---------- 01 电池优化白名单 ----------
-            EcoSectionHead(number = "01", title = "电池优化白名单", aside = "BATTERY")
+            EcoSectionHead(title = "电池优化白名单", aside = "BATTERY")
             EcoPane(modifier = Modifier.fillMaxWidth()) {
                 EcoRow(
                     title = if (batteryIgnoring) "已忽略电池优化" else "未忽略电池优化",
@@ -237,7 +237,6 @@ fun KeepAliveScreen(
 
             // ---------- 02 品牌设置步骤 ----------
             EcoSectionHead(
-                number = "02",
                 title = "${brand.displayName} 设置步骤",
                 aside = brand.name,
             )

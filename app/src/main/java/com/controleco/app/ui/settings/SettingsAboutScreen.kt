@@ -102,7 +102,7 @@ fun SettingsAboutScreen(onBack: () -> Unit) {
     SettingsPage(micro = "ABOUT", title = "关于 我ECO", onBack = onBack) {
         AboutHero()
 
-        SettingsSection(number = "01", title = "隐私与安全", aside = "LOCAL ONLY")
+        SettingsSection(title = "隐私与安全", aside = "LOCAL ONLY")
         SettingsPane {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
                 PrivacyBullet("只写本机数据库", "，不联网、不上传，无云端账号与第三方统计。")
@@ -118,7 +118,7 @@ fun SettingsAboutScreen(onBack: () -> Unit) {
             }
         }
 
-        SettingsSection(number = "02", title = "版本", aside = "BUILD")
+        SettingsSection(title = "版本", aside = "BUILD")
         SettingsPane {
             SettingsValueRow("版本号", "v${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
             SettingsDivider()
