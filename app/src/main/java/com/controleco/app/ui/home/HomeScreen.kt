@@ -743,6 +743,7 @@ private fun CategoryBarRow(bar: CategoryBarData, index: Int, compact: Boolean, d
                     size = iconSize,
                     radius = iconSize * 0.33f,
                     iconSize = iconSize * 0.58f,
+                    bare = true,
                 )
             } else {
                 EcoCategoryTile(
@@ -750,6 +751,7 @@ private fun CategoryBarRow(bar: CategoryBarData, index: Int, compact: Boolean, d
                     icon = bar.icon,
                     size = iconSize,
                     radius = iconSize * 0.33f,
+                    bare = true,
                 )
             }
             Spacer(Modifier.width(9.dp))

@@ -424,16 +424,32 @@ fun EcoIconTile(
     radius: Dp = 12.dp,
     iconSize: Dp = 19.dp,
     background: Color = tint.copy(alpha = 0.13f),
+    /** 去掉底色与描边，只留图标本身（首页/分类页/设置行按用户要求统一为此样式） */
+    bare: Boolean = false,
 ) {
+    // 去掉底后图标不再受 tile 尺寸限制，按原 iconSize 绘制会显小，这里按比例放大一点补足视觉重量
+    val resolvedIconSize = if (bare) (iconSize * 1.35f).coerceAtMost(size) else iconSize
     Box(
         modifier
             .size(size)
-            .clip(RoundedCornerShape(radius))
-            .background(background)
-            .border(1.dp, tint.copy(alpha = 0.16f), RoundedCornerShape(radius)),
+            .then(
+                if (bare) {
+                    Modifier
+                } else {
+                    Modifier
+                        .clip(RoundedCornerShape(radius))
+                        .background(background)
+                        .border(1.dp, tint.copy(alpha = 0.16f), RoundedCornerShape(radius))
+                },
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(iconSize))
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = tint,
+            modifier = Modifier.size(resolvedIconSize),
+        )
     }
 }
 

@@ -127,6 +127,7 @@ private fun PermissionSummary(vm: LedgerViewModel, resumeTick: Int) {
                     size = 39.dp,
                     radius = 13.dp,
                     iconSize = 19.dp,
+                    bare = true,
                 )
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {

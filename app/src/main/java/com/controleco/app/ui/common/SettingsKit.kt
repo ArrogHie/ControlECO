@@ -264,6 +264,7 @@ fun SettingsRow(
                 size = 34.dp,
                 radius = 11.dp,
                 iconSize = 17.dp,
+                bare = true,
             )
             Spacer(Modifier.width(12.dp))
         }

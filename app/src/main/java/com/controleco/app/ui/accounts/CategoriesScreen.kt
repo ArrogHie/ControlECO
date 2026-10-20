@@ -385,6 +385,7 @@ private fun CategoryRowItem(
             icon = category.icon,
             size = 31.dp,
             radius = 10.dp,
+            bare = true,
         )
         Spacer(Modifier.width(11.dp))
         Text(
@@ -511,6 +512,7 @@ private fun CategoryEditorSheet(
                     icon = icon,
                     size = 44.dp,
                     radius = 14.dp,
+                    bare = true,
                 )
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
