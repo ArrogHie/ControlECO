@@ -221,7 +221,7 @@ private fun AssetsTotalCard(totalCents: Long, accountCount: Int) {
             )
             Spacer(Modifier.height(5.dp))
             Text(
-                "$accountCount 个账户 · 点账户编辑",
+                "$accountCount 个账户，点账户编辑",
                 style = EcoType.PageNote,
                 color = c.quiet,
             )
@@ -284,7 +284,7 @@ private fun AccountRowItem(
             )
             Spacer(Modifier.height(3.dp))
             Text(
-                "期初 ${Money.formatYuanGrouped(initialCents)} · 流水 ${signedPlain(flowCents)}",
+                "期初 ${Money.formatYuanGrouped(initialCents)}，流水 ${signedPlain(flowCents)}",
                 style = EcoType.PageNote.copy(fontSize = 8.sp, lineHeight = 11.sp),
                 color = c.quiet,
                 maxLines = 1,
@@ -389,7 +389,7 @@ private fun AccountEditorSheet(
                 label = "备注",
                 value = note,
                 onValueChange = { note = it },
-                placeholder = "可选，例如：储蓄卡 · 尾号 0921",
+                placeholder = "可选，例如：储蓄卡 尾号 0921",
             )
 
             val shownError = localError ?: error

@@ -49,7 +49,6 @@ import com.controleco.app.data.db.TxType
 import com.controleco.app.ui.common.EcoIcons
 import com.controleco.app.ui.eco.EcoChip
 import com.controleco.app.ui.eco.EcoConfirm
-import com.controleco.app.ui.eco.EcoDot
 import com.controleco.app.ui.eco.EcoEmpty
 import com.controleco.app.ui.eco.EcoField
 import com.controleco.app.ui.eco.EcoGhostButton
@@ -157,10 +156,8 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                             .padding(top = 13.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        EcoDot(c.jade, size = 5.dp)
-                        Spacer(Modifier.width(6.dp))
                         Text(
-                            "共 ${pending.size} 条 · $confirmableCount 条可一键确认",
+                            "共 ${pending.size} 条，$confirmableCount 条可一键确认",
                             style = EcoType.PageNote,
                             color = c.quiet,
                         )
@@ -328,9 +325,9 @@ private fun PendingRow(
             }
             Spacer(Modifier.width(10.dp))
             when {
-                amountMissing -> EcoPill(text = "待补", tone = EcoPillTone.Warn, dot = true)
-                isAsk -> EcoPill(text = "红包", tone = EcoPillTone.Bad, dot = true)
-                else -> EcoPill(text = "待确认", tone = EcoPillTone.Blue, dot = true)
+                amountMissing -> EcoPill(text = "待补", tone = EcoPillTone.Warn)
+                isAsk -> EcoPill(text = "红包", tone = EcoPillTone.Bad)
+                else -> EcoPill(text = "待确认", tone = EcoPillTone.Blue)
             }
         }
         Row(
@@ -388,7 +385,7 @@ private fun ConfirmPendingSheet(
     EcoSheet(
         onDismiss = onDismiss,
         title = "确认$kind ${Money.formatYuan(item.amountCents)}",
-        subtitle = "${sourceLine(item)} · ${pendingTime(item.timestamp)}",
+        subtitle = "${sourceLine(item)} ${pendingTime(item.timestamp)}",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             if (item.note.isNotBlank()) PendingQuote(item.note)
@@ -422,7 +419,6 @@ private fun ConfirmPendingSheet(
                                     categoryId = cat.id
                                     if (error != null) error = null
                                 },
-                                dotColor = categoryColor(MaterialTheme.accBook.categoryPalette, cat.name),
                             )
                         }
                     }
@@ -502,7 +498,7 @@ private fun PendingAmountSheet(
     EcoSheet(
         onDismiss = onDismiss,
         title = "补录$kind 金额",
-        subtitle = "${sourceLine(item)} · ${pendingTime(item.timestamp)}",
+        subtitle = "${sourceLine(item)} ${pendingTime(item.timestamp)}",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             if (item.note.isNotBlank()) PendingQuote(item.note)
@@ -574,7 +570,7 @@ private fun PendingQuote(text: String) {
  */
 private fun sourceLine(item: PendingTransactionEntity): String {
     val label = NotificationRules.sourceLabelOrRule(item.sourcePackage, item.ruleName)
-    return if (item.ruleName.startsWith(label)) item.ruleName else "$label · ${item.ruleName}"
+    return if (item.ruleName.startsWith(label)) item.ruleName else "$label ${item.ruleName}"
 }
 
 private val pendingTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault())

@@ -1232,7 +1232,7 @@ private fun MoreSheet(
     EcoSheet(
         onDismiss = onDismiss,
         title = "更多",
-        subtitle = "主题色 · 货币符号 · 开源仓库 · 版本",
+        subtitle = "主题色 / 货币符号 / 开源仓库 / 版本",
     ) {
         Column(Modifier.fillMaxWidth()) {
             ThemeRow(selected = accent, onPick = onPickAccent)
@@ -1526,7 +1526,7 @@ private fun AboutDialog(onOpenRepo: () -> Unit, onDismiss: () -> Unit) {
                     Text("我ECO 账本", style = EcoType.ModalTitle, color = c.ink, maxLines = 1)
                     Spacer(Modifier.height(1.dp))
                     Text(
-                        "本地记账 · 账单导入 · 自动捕获",
+                        "本地记账 / 账单导入 / 自动捕获",
                         style = EcoType.PageNote,
                         color = c.muted,
                         maxLines = 1,

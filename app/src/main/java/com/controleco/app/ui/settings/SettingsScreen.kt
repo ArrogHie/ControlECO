@@ -162,7 +162,6 @@ fun SettingsScreen(
                 iconTint = MaterialTheme.eco.jade,
                 pillText = if (permissionsReady) "已就绪" else "待设置",
                 pillTone = if (permissionsReady) EcoPillTone.Good else EcoPillTone.Warn,
-                pillDot = true,
                 showChevron = true,
                 onClick = onOpenPermissions,
             )
@@ -222,7 +221,7 @@ fun SettingsScreen(
         }
 
         Text(
-            "NO CLOUD · LOCAL ONLY",
+            "NO CLOUD / LOCAL ONLY",
             style = EcoType.MicroQuiet.copy(fontSize = 8.sp),
             color = MaterialTheme.eco.quiet,
             textAlign = TextAlign.Center,
@@ -257,7 +256,7 @@ private fun AutomationStatusCard(running: Boolean, lastCaptureAt: Long) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (running) "自动记账 · 运行中" else "自动记账 · 已暂停",
+                        if (running) "自动记账（运行中）" else "自动记账（已暂停）",
                         style = EcoType.RowTitle.copy(
                             fontSize = 17.sp,
                             lineHeight = 22.sp,

@@ -162,7 +162,6 @@ private fun ChannelPill(label: String, granted: Boolean, grantedText: String) {
     EcoPill(
         text = "$label ${if (granted) grantedText else "未开启"}",
         tone = if (granted) EcoPillTone.Good else EcoPillTone.Neutral,
-        dot = granted,
     )
 }
 

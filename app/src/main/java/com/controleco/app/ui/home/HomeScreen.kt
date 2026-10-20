@@ -279,7 +279,7 @@ fun HomeScreen(
 
     Column(Modifier.fillMaxSize()) {
         EcoTopBar(
-            micro = "${period.start.year} / $monthEn · 账本",
+            micro = "${period.start.year} / $monthEn 账本",
             title = monthCn,
             low = modeLow,
             action = { EcoSettingsPill(onClick = onOpenSettings) },
@@ -395,12 +395,12 @@ private fun ModeRemaining(s: Budget.Snapshot, period: MonthPeriod, today: LocalD
             Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // 视觉重心：环略微上移，底部留白比顶部多，和原型的"环偏上"一致
-            Spacer(Modifier.weight(0.76f))
+            // 环在「顶部」与「本日剩余」之间居中：上下留白相等
+            Spacer(Modifier.weight(1f))
             BudgetRing(s = s, period = period, today = today, size = ringSize)
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.weight(1f))
             TodayCard(s = s)
-            Spacer(Modifier.weight(0.58f))
+            Spacer(Modifier.weight(0.28f))
         }
     }
 }
@@ -534,18 +534,11 @@ private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate
                 color = c.muted,
             )
             Spacer(Modifier.height(10.dp))
-            Row(
-                Modifier
-                    .clip(CircleShape)
-                    .background(c.blueSoft.copy(alpha = 0.6f))
-                    .border(1.dp, c.blue.copy(alpha = 0.18f), CircleShape)
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.size(5.dp).clip(CircleShape).background(c.blue))
-                Spacer(Modifier.width(5.dp))
-                Text("$daysLeft 天", style = EcoType.Pill.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold), color = c.blueDeep)
-            }
+            Text(
+                "$daysLeft 天",
+                style = EcoType.Pill.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                color = c.blueDeep,
+            )
         }
     }
 }
@@ -570,12 +563,10 @@ private fun TodayCard(s: Budget.Snapshot) {
         s.todayLeftCents <= s.suggestedDailyCents * 0.25f -> c.amber
         else -> c.ink
     }
-    EcoPane(
+    Box(
         modifier = Modifier
             .fillMaxWidth(0.77f)
             .height(108.dp),
-        shape = RoundedCornerShape(24.dp),
-        elevation = 12.dp,
     ) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -852,7 +843,6 @@ private fun ModeSpentAndDeposit(
             label = "本月已花",
             amountCents = spentCents,
             color = c.ink,
-            dotColor = c.amber,
             save = false,
             stageColor = c.amber,
             modifier = Modifier.weight(1f),
@@ -874,7 +864,6 @@ private fun ModeSpentAndDeposit(
             label = "总存款",
             amountCents = depositCents,
             color = if (depositCents < 0) c.clay else c.blue,
-            dotColor = if (depositCents < 0) c.clay else c.jade,
             save = true,
             stageColor = c.jade,
             modifier = Modifier.weight(1f),
@@ -887,7 +876,6 @@ private fun AssetStage(
     label: String,
     amountCents: Long,
     color: Color,
-    dotColor: Color,
     save: Boolean,
     stageColor: Color,
     modifier: Modifier = Modifier,
@@ -915,8 +903,6 @@ private fun AssetStage(
         )
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(5.dp).clip(CircleShape).background(dotColor))
-                Spacer(Modifier.width(6.dp))
                 Text(label, style = EcoType.AssetLabel, color = c.muted)
             }
             Spacer(Modifier.height(6.dp))

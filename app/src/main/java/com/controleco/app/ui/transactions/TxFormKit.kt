@@ -293,7 +293,6 @@ fun TxCategoryChip(
         selected = selected,
         onClick = onClick,
         modifier = modifier,
-        dotColor = categoryColor(MaterialTheme.accBook.categoryPalette, name),
         height = height,
     )
 }

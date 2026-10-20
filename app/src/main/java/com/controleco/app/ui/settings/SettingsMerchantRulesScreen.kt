@@ -74,7 +74,7 @@ fun SettingsMerchantRulesScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "${sorted.size} 条已学规则 · 最近在前",
+                    "${sorted.size} 条已学规则，最近在前",
                     style = EcoType.SectionAside,
                     color = MaterialTheme.eco.muted,
                     modifier = Modifier.weight(1f),
@@ -176,10 +176,10 @@ private fun MerchantRuleRow(
                         append(categoryName)
                     }
                     if (accountName != null) {
-                        append(" · ")
+                        append(" / ")
                         append(accountName)
                     }
-                    append(" · 命中 ${rule.hits} 次")
+                    append(" / 命中 ${rule.hits} 次")
                 },
                 style = EcoType.RowSub.copy(fontSize = 8.5.sp),
                 color = c.muted,

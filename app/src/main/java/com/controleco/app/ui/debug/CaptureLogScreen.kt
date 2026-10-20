@@ -464,7 +464,7 @@ private fun captureStatusText(granted: Boolean, connected: Boolean, a11yConnecte
         granted -> "已授权（连接状态未知）"
         else -> "未授权"
     }
-    return "通知监听：$notification · 无障碍：${if (a11yConnected) "已连接" else "未连接"}"
+    return "通知监听：$notification；无障碍：${if (a11yConnected) "已连接" else "未连接"}"
 }
 
 private fun captureStatusLabel(row: CapturedNotificationEntity): String = when {
@@ -514,7 +514,7 @@ private fun copyPayload(row: CapturedNotificationEntity): String =
 
 /** 展开后展示的完整快照（含元信息，排版给眼睛看） */
 private fun snapshotText(row: CapturedNotificationEntity): String = buildString {
-    appendLine("通道：${channelLabel(row.source)} · ${appLabel(row.packageName)}（${row.packageName}）")
+    appendLine("通道：${channelLabel(row.source)} ${appLabel(row.packageName)}（${row.packageName}）")
     appendLine("时间：${formatTimestamp(row.receivedAt)}")
     appendLine("规则：${row.matchedRule.ifBlank { "未匹配" }}")
     appendLine("状态：${if (row.queued) "已加入待确认" else "未入队"}")

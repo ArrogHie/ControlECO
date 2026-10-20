@@ -237,7 +237,7 @@ private fun TraceRowCard(
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    "${traceAppLabel(t.packageName)} · ${t.title.ifBlank { outcomeLabel(t.outcome) }}",
+                    "${traceAppLabel(t.packageName)} ${t.title.ifBlank { outcomeLabel(t.outcome) }}",
                     style = EcoType.RowTitle.copy(fontSize = 10.5.sp),
                     color = c.ink,
                     maxLines = 1,
@@ -245,7 +245,7 @@ private fun TraceRowCard(
                 )
                 Spacer(Modifier.height(3.dp))
                 Text(
-                    "${t.matchedRule.ifBlank { "未命中规则" }} · ${traceChannelLabel(t.channel)}",
+                    "${t.matchedRule.ifBlank { "未命中规则" }} ${traceChannelLabel(t.channel)}",
                     style = EcoType.PageNote.copy(fontSize = 8.sp),
                     color = c.quiet,
                     maxLines = 1,
@@ -281,7 +281,7 @@ private fun TraceRowCard(
                     add("去重键 ${t.dedupKey}")
                 }
                 Text(
-                    details.joinToString(" · "),
+                    details.joinToString(" "),
                     style = EcoType.PageNote.copy(fontSize = 8.5.sp),
                     color = c.muted,
                 )
@@ -436,7 +436,7 @@ private fun extraState(state: TraceState, outcome: TraceOutcome): TraceState? = 
 
 /** 展开后的完整快照（原始文本 + 解析元信息） */
 private fun traceSnapshot(t: CaptureTraceEntity, state: TraceState): String = buildString {
-    appendLine("通道：${traceChannelLabel(t.channel)} · ${traceAppLabel(t.packageName)}（${t.packageName}）")
+    appendLine("通道：${traceChannelLabel(t.channel)} ${traceAppLabel(t.packageName)}（${t.packageName}）")
     appendLine("时间：${formatTimestamp(t.capturedAt)}")
     appendLine("规则：${t.matchedRule.ifBlank { "未匹配" }}")
     appendLine("处置：${outcomeLabel(t.outcome)} / ${stateLabel(state)}")

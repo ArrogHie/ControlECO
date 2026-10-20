@@ -228,7 +228,6 @@ fun SettingsRow(
     trailColor: Color = MaterialTheme.eco.muted,
     pillText: String? = null,
     pillTone: EcoPillTone = EcoPillTone.Neutral,
-    pillDot: Boolean = false,
     showChevron: Boolean = false,
     danger: Boolean = false,
     minHeight: Dp = 54.dp,
@@ -276,7 +275,7 @@ fun SettingsRow(
         }
         if (pillText != null) {
             Spacer(Modifier.width(8.dp))
-            EcoPill(pillText, tone = pillTone, dot = pillDot)
+            EcoPill(pillText, tone = pillTone)
         }
         if (trail != null) {
             Spacer(Modifier.width(8.dp))
@@ -474,7 +473,6 @@ fun SettingsStatusRow(
         EcoPill(
             text = if (granted) grantedText else missingText,
             tone = if (granted) EcoPillTone.Good else EcoPillTone.Neutral,
-            dot = granted,
         )
         if (!granted) {
             Spacer(Modifier.width(4.dp))

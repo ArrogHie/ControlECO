@@ -149,7 +149,7 @@ private fun RefundRow(
     val merchant = row.counterparty.ifBlank { row.note }.ifBlank { "未命名支出" }
     val detail = listOf(row.categoryName, row.accountName, refundDate(row.timestamp))
         .filter { it.isNotBlank() }
-        .joinToString(" · ")
+        .joinToString(" ")
 
     Row(
         Modifier
@@ -174,7 +174,7 @@ private fun RefundRow(
                 )
                 Spacer(Modifier.width(5.dp))
                 Text(
-                    "· $merchant",
+                    "$merchant",
                     style = EcoType.RowTitle,
                     color = c.ink,
                     maxLines = 1,
@@ -213,7 +213,7 @@ private fun LinkRefundSheet(
     EcoSheet(
         onDismiss = { if (!submitting) onDismiss() },
         title = "登记退款",
-        subtitle = "原支出 ${Money.formatYuan(row.amountCents)} · $merchant · ${refundDate(row.timestamp)}",
+        subtitle = "原支出 ${Money.formatYuan(row.amountCents)}，$merchant，${refundDate(row.timestamp)}",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             EcoMoneyField(

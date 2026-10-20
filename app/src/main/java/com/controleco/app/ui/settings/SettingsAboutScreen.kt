@@ -122,7 +122,7 @@ fun SettingsAboutScreen(onBack: () -> Unit) {
         SettingsPane {
             SettingsValueRow("版本号", "v${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
             SettingsDivider()
-            SettingsValueRow("构建类型", if (BuildConfig.DEBUG) "debug · 含调试开关" else "release")
+            SettingsValueRow("构建类型", if (BuildConfig.DEBUG) "debug / 含调试开关" else "release")
             SettingsDivider()
             SettingsValueRow("开源仓库", "ArrogHie / ControlECO")
             SettingsDivider()
@@ -273,7 +273,7 @@ private fun AboutHero() {
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    "本地记账 · 账单导入 · 自动捕获",
+                    "本地记账 / 账单导入 / 自动捕获",
                     style = EcoType.RowSub.copy(fontSize = 8.5.sp, lineHeight = 13.sp),
                     color = HERO_SUB,
                     maxLines = 1,

@@ -207,7 +207,6 @@ fun EcoChip(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    dotColor: Color? = null,
     height: Dp = 30.dp,
 ) {
     val c = MaterialTheme.eco
@@ -224,10 +223,6 @@ fun EcoChip(
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (dotColor != null) {
-            Box(Modifier.size(5.dp).clip(CircleShape).background(dotColor.copy(alpha = 0.85f)))
-            Spacer(Modifier.width(6.dp))
-        }
         Text(text, style = EcoType.Chip, color = fg, maxLines = 1)
     }
 }
@@ -239,7 +234,6 @@ fun EcoPill(
     text: String,
     tone: EcoPillTone = EcoPillTone.Neutral,
     modifier: Modifier = Modifier,
-    dot: Boolean = false,
 ) {
     val c = MaterialTheme.eco
     val bg = when (tone) {
@@ -265,10 +259,6 @@ fun EcoPill(
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (dot) {
-            Box(Modifier.size(5.dp).clip(CircleShape).background(fg))
-            Spacer(Modifier.width(4.dp))
-        }
         Text(text, style = EcoType.Pill, color = fg, maxLines = 1)
     }
 }
@@ -708,12 +698,6 @@ fun EcoMoneyField(
 @Composable
 fun EcoRowValue(text: String, modifier: Modifier = Modifier) {
     Text(text, style = EcoType.RowTrail, color = MaterialTheme.eco.muted, modifier = modifier)
-}
-
-/** 顶部/侧边小标签的彩色圆点 */
-@Composable
-fun EcoDot(color: Color, size: Dp = 5.dp, modifier: Modifier = Modifier) {
-    Box(modifier.size(size).clip(CircleShape).background(color))
 }
 
 /** 金额符号 + 数字：统一正负号/颜色 */

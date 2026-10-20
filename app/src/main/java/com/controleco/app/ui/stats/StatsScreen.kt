@@ -526,8 +526,8 @@ private fun StatsSummaryLine(
         Text(
             buildString {
                 append("日均结余 ${Money.formatYuanGrouped(dailyBalanceCents)}")
-                if (maxExpenseCents > 0) append(" · 最大单笔 ${Money.formatYuanGrouped(maxExpenseCents)}")
-                if (showRefund && refundCents > 0) append(" · 退款 ${Money.formatYuanGrouped(refundCents)}")
+                if (maxExpenseCents > 0) append(" 最大单笔 ${Money.formatYuanGrouped(maxExpenseCents)}")
+                if (showRefund && refundCents > 0) append(" 退款 ${Money.formatYuanGrouped(refundCents)}")
             },
             style = EcoType.Micro.copy(fontSize = 8.sp),
             color = c.quiet,

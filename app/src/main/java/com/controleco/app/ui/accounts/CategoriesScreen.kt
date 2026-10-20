@@ -176,12 +176,12 @@ fun CategoriesScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                     ) {
                         Text(
                             buildString {
-                                append("支出分类 · 已分配 ")
+                                append("支出分类 已分配 ")
                                 append(Money.formatYuanGroupedFixed(allocatedCents))
                                 if (monthlyBudget > 0L) {
                                     append(" / ").append(Money.formatYuanGroupedFixed(monthlyBudget))
                                 } else {
-                                    append(" · 未设月预算")
+                                    append("，未设月预算")
                                 }
                             },
                             style = EcoType.RowSub.copy(

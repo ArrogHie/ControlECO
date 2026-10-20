@@ -607,13 +607,9 @@ fun EcoProgressBar(
     }
 }
 
-/** 小圆点 + 文字的状态标签（顶栏 micro 用） */
+/** 顶栏 micro 状态标签（不带前置圆点） */
 @Composable
-fun EcoMicro(text: String, dotColor: Color = MaterialTheme.eco.jade) {
+fun EcoMicro(text: String) {
     val c = MaterialTheme.eco
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(5.dp).clip(CircleShape).background(dotColor))
-        Spacer(Modifier.width(6.dp))
-        Text(text, style = EcoType.Micro, color = c.blue)
-    }
+    Text(text, style = EcoType.Micro, color = c.blue)
 }

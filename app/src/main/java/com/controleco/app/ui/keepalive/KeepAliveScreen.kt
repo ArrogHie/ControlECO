@@ -224,7 +224,7 @@ fun KeepAliveScreen(
                     minHeight = 58.dp,
                     trailing = {
                         if (batteryIgnoring) {
-                            EcoPill(text = "已加入", tone = EcoPillTone.Good, dot = true)
+                            EcoPill(text = "已加入", tone = EcoPillTone.Good)
                         } else {
                             EcoTextAction(
                                 text = "申请忽略",
@@ -260,8 +260,8 @@ fun KeepAliveScreen(
 @Composable
 private fun ServicePill(running: Boolean, grantedAny: Boolean) {
     when {
-        running -> EcoPill(text = "服务在运行", tone = EcoPillTone.Good, dot = true)
-        grantedAny -> EcoPill(text = "待连接", tone = EcoPillTone.Warn, dot = true)
+        running -> EcoPill(text = "服务在运行", tone = EcoPillTone.Good)
+        grantedAny -> EcoPill(text = "待连接", tone = EcoPillTone.Warn)
         else -> EcoPill(text = "未就绪", tone = EcoPillTone.Neutral)
     }
 }
@@ -402,5 +402,5 @@ private fun StepRow(index: Int, step: KeepAliveStep, brand: Brand) {
 /** 机型行：`23127PN0CC · Android 15`（型号缺失时给占位，不显示空点号）。 */
 private fun deviceLine(model: String, androidVersion: String): String {
     val head = model.ifBlank { "未知机型" }
-    return if (androidVersion.isBlank()) head else "$head · Android $androidVersion"
+    return if (androidVersion.isBlank()) head else "$head Android $androidVersion"
 }
