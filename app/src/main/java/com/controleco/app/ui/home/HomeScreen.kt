@@ -458,6 +458,25 @@ private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate
                 center = Offset(cx, cy),
                 style = Stroke(stroke),
             )
+            // 凹槽：内壁压暗、外壁提亮，没被填充的部分看起来是凹下去的
+            drawCircle(
+                color = Color.Black.copy(alpha = if (c.isDark) 0.30f else 0.13f),
+                radius = r - stroke * 0.22f,
+                center = Offset(cx, cy - 0.8f * u),
+                style = Stroke(stroke * 0.44f),
+            )
+            drawCircle(
+                color = Color.Black.copy(alpha = if (c.isDark) 0.18f else 0.07f),
+                radius = r - stroke * 0.40f,
+                center = Offset(cx, cy - 1.4f * u),
+                style = Stroke(stroke * 0.20f),
+            )
+            drawCircle(
+                color = Color.White.copy(alpha = if (c.isDark) 0.10f else 0.22f),
+                radius = r + stroke * 0.24f,
+                center = Offset(cx, cy + 0.8f * u),
+                style = Stroke(stroke * 0.42f),
+            )
             // 外描边 + 内亮线
             drawCircle(
                 color = c.rule.copy(alpha = 0.8f),
@@ -964,9 +983,9 @@ private fun AssetChart(save: Boolean, color: Color, modifier: Modifier = Modifie
         )
         drawPath(
             path = line,
-            color = color.copy(alpha = if (save) 0.80f else 0.88f),
+            color = color.copy(alpha = if (save) 0.34f else 0.40f),
             style = Stroke(
-                width = (if (save) 3.1.dp else 2.9.dp).toPx(),
+                width = (if (save) 1.3.dp else 1.2.dp).toPx(),
                 cap = StrokeCap.Round,
                 join = StrokeJoin.Round,
             ),

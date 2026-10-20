@@ -375,7 +375,7 @@ private fun DonutCard(
                     onSelect = onSelect,
                     ringSize = 150.dp,
                     showCenterLabels = false,
-                    singleRing = true,
+                    singleRing = false,
                 )
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
                     Text(

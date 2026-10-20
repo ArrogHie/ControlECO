@@ -122,25 +122,23 @@ fun EcoTopBar(
     }
 }
 
-/** 首页右上角的"设置"小胶囊 */
+/** 首页/账单右上角的设置入口：只有一个齿轮图标，无底、无边框、无文字 */
 @Composable
 fun EcoSettingsPill(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = MaterialTheme.eco
-    Row(
+    Box(
         modifier
-            .width(72.dp)
-            .height(36.dp)
-            .shadow(7.dp, RoundedCornerShape(19.dp, 9.dp, 19.dp, 9.dp), ambientColor = c.ink.copy(alpha = .10f), spotColor = c.ink.copy(alpha = .14f))
-            .clip(RoundedCornerShape(19.dp, 9.dp, 19.dp, 9.dp))
-            .background(c.surface.copy(alpha = 0.93f))
-            .border(1.dp, c.jade.copy(alpha = 0.18f), RoundedCornerShape(19.dp, 9.dp, 19.dp, 9.dp))
+            .size(40.dp)
+            .clip(CircleShape)
             .ecoPressable(onClick = onClick),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(EcoIcons.Gear, contentDescription = null, tint = c.blueDeep, modifier = Modifier.size(17.dp))
-        Spacer(Modifier.width(6.dp))
-        Text("设置", style = EcoType.Pill.copy(fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = c.blueDeep)
+        Icon(
+            EcoIcons.Gear,
+            contentDescription = "设置",
+            tint = c.blueDeep,
+            modifier = Modifier.size(21.dp),
+        )
     }
 }
 

@@ -50,8 +50,13 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -112,6 +117,37 @@ private val START_CARD_HEIGHT = 80.dp
 private val SETTINGS_CARD_HEIGHT = 62.dp
 private val MID_GAP = 8.dp
 private val BOTTOM_HEIGHT = 66.dp
+
+/** 卡片的右下方向性投影：多层微缩放堆出柔和的下沉阴影（不碰描边） */
+private fun Modifier.ecoLiftShadow(shape: Shape, c: EcoColors): Modifier = drawBehind {
+    val base = Path().apply { addOutline(shape.createOutline(size, layoutDirection, this@drawBehind)) }
+    val alpha = if (c.isDark) 0.34f else 0.13f
+    val layers = 10
+    for (i in 1..layers) {
+        val grow = 1f + i * 0.006f
+        translate(0.30.dp.toPx() * i, 0.55.dp.toPx() * i) {
+            scale(grow, grow, pivot = Offset.Zero) {
+                drawPath(base, Color.Black.copy(alpha = alpha / layers))
+            }
+        }
+    }
+}
+
+/** 卡片的左上高光：从左上角向外淡出的白色径向光 */
+private fun Modifier.ecoLiftGlow(shape: Shape, c: EcoColors): Modifier = drawBehind {
+    val path = Path().apply { addOutline(shape.createOutline(size, layoutDirection, this@drawBehind)) }
+    drawPath(
+        path = path,
+        brush = Brush.radialGradient(
+            colors = listOf(
+                Color.White.copy(alpha = if (c.isDark) 0.12f else 0.42f),
+                Color.Transparent,
+            ),
+            center = Offset(0f, 0f),
+            radius = size.maxDimension * 0.62f,
+        ),
+    )
+}
 
 // 深色 hero 上的前景色（hero 渐变永远是深色，这组色不随深浅主题变）
 private val HERO_MINT = Color(0xFFBDE9DA)
@@ -176,7 +212,7 @@ fun ProfileScreen(
                 .padding(top = 2.dp, bottom = ecoBottomContentPadding(extra = 10.dp)),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            EcoArrival(delayMillis = 60, turn = 3.2f) {
+            EcoArrival(randomDelay = true, delayMillis = 60, turn = 3.2f) {
                 BudgetHero(
                     budgetCents = budget,
                     spentCents = spentReady,
@@ -463,7 +499,7 @@ private fun BudgetDuo(
             Modifier.weight(1f).fillMaxHeight(),
             verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            EcoArrival(delayMillis = 140, turn = -2.6f) {
+            EcoArrival(randomDelay = true, delayMillis = 140, turn = -2.6f) {
                 EcoSegmented(
                     options = listOf("月预算", "日预算"),
                     selectedIndex = if (dailyMode) 1 else 0,
@@ -474,7 +510,7 @@ private fun BudgetDuo(
                     selectedContentColor = c.paper,
                 )
             }
-            EcoArrival(delayMillis = 210, turn = 2.2f, modifier = Modifier.weight(1f)) {
+            EcoArrival(randomDelay = true, delayMillis = 210, turn = 2.2f, modifier = Modifier.weight(1f)) {
                 DailyTile(
                     // 用户明确要求：这块永远显示日预算，不随「月预算 / 日预算」切换
                     amountCents = dailyBudgetCents,
@@ -483,7 +519,7 @@ private fun BudgetDuo(
                 )
             }
         }
-        EcoArrival(delayMillis = 280, turn = -2.2f, modifier = Modifier.width(PENDING_WIDTH).fillMaxHeight()) {
+        EcoArrival(randomDelay = true, delayMillis = 280, turn = -2.2f, modifier = Modifier.width(PENDING_WIDTH).fillMaxHeight()) {
             PendingPill(
                 count = pendingCount,
                 onClick = onOpenPending,
@@ -510,14 +546,16 @@ private fun DailyTile(
     Box(
         modifier
             .shadow(
-                elevation = 11.dp,
+                elevation = 18.dp,
                 shape = shape,
                 clip = false,
-                ambientColor = c.ink.copy(alpha = if (c.isDark) 0.3f else 0.08f),
-                spotColor = c.ink.copy(alpha = if (c.isDark) 0.4f else 0.14f),
+                ambientColor = c.ink.copy(alpha = if (c.isDark) 0.44f else 0.16f),
+                spotColor = c.ink.copy(alpha = if (c.isDark) 0.58f else 0.26f),
             )
+            .ecoLiftShadow(shape, c)
             .clip(shape)
             .background(softGradient(c, c.blueSoft, 0.62f, 0.5f))
+            .ecoLiftGlow(shape, c)
             .border(1.dp, c.rule, shape)
             .clickable(onClick = onManage),
     ) {
@@ -626,12 +664,13 @@ private fun PendingPill(count: Int, onClick: () -> Unit, modifier: Modifier = Mo
     Box(
         modifier
             .shadow(
-                elevation = 12.dp,
+                elevation = 19.dp,
                 shape = shape,
                 clip = false,
-                ambientColor = fg.copy(alpha = if (c.isDark) 0.22f else 0.16f),
-                spotColor = fg.copy(alpha = if (c.isDark) 0.28f else 0.20f),
+                ambientColor = fg.copy(alpha = if (c.isDark) 0.34f else 0.26f),
+                spotColor = fg.copy(alpha = if (c.isDark) 0.42f else 0.32f),
             )
+            .ecoLiftShadow(shape, c)
             .clip(shape)
             .drawBehind {
                 drawRect(
@@ -642,6 +681,7 @@ private fun PendingPill(count: Int, onClick: () -> Unit, modifier: Modifier = Mo
                     ),
                 )
             }
+            .ecoLiftGlow(shape, c)
             .border(1.dp, borderColor, shape)
             .clickable(onClick = onClick),
     ) {
@@ -724,6 +764,7 @@ private fun MidRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         EcoArrival(
+            randomDelay = true,
             delayMillis = 350,
             turn = 2.4f,
             modifier = Modifier
@@ -740,14 +781,14 @@ private fun MidRow(
             Modifier.width(UTILITY_WIDTH),
             verticalArrangement = Arrangement.spacedBy(MID_GAP),
         ) {
-            EcoArrival(delayMillis = 420, turn = -2.6f) {
+            EcoArrival(randomDelay = true, delayMillis = 420, turn = -2.6f) {
                 MonthStartCard(
                     monthStartDay = monthStartDay,
                     onOpen = onOpenMonthStart,
                     modifier = Modifier.fillMaxWidth().height(START_CARD_HEIGHT),
                 )
             }
-            EcoArrival(delayMillis = 490, turn = 2.2f) {
+            EcoArrival(randomDelay = true, delayMillis = 490, turn = 2.2f) {
                 SettingsCard(
                     onClick = onOpenSettings,
                     modifier = Modifier.fillMaxWidth().height(SETTINGS_CARD_HEIGHT),
@@ -769,14 +810,16 @@ private fun CategoryCard(
     Box(
         modifier
             .shadow(
-                elevation = 12.dp,
+                elevation = 19.dp,
                 shape = shape,
                 clip = false,
-                ambientColor = c.jade.copy(alpha = if (c.isDark) 0.24f else 0.16f),
-                spotColor = c.ink.copy(alpha = if (c.isDark) 0.4f else 0.12f),
+                ambientColor = c.jade.copy(alpha = if (c.isDark) 0.36f else 0.26f),
+                spotColor = c.ink.copy(alpha = if (c.isDark) 0.58f else 0.24f),
             )
+            .ecoLiftShadow(shape, c)
             .clip(shape)
             .background(softGradient(c, c.jadeSoft, 0.92f, 0.62f))
+            .ecoLiftGlow(shape, c)
             .border(1.dp, c.jade.copy(alpha = 0.18f), shape)
             .clickable(onClick = onClick),
     ) {
@@ -848,14 +891,16 @@ private fun MonthStartCard(
     Box(
         modifier
             .shadow(
-                elevation = 11.dp,
+                elevation = 18.dp,
                 shape = shape,
                 clip = false,
-                ambientColor = c.ink.copy(alpha = if (c.isDark) 0.3f else 0.08f),
-                spotColor = c.ink.copy(alpha = if (c.isDark) 0.4f else 0.14f),
+                ambientColor = c.ink.copy(alpha = if (c.isDark) 0.44f else 0.16f),
+                spotColor = c.ink.copy(alpha = if (c.isDark) 0.58f else 0.26f),
             )
+            .ecoLiftShadow(shape, c)
             .clip(shape)
             .background(softGradient(c, c.blueSoft, 0.72f, 0.5f), shape)
+            .ecoLiftGlow(shape, c)
             .border(1.dp, c.blue.copy(alpha = 0.16f), shape)
             .clickable(onClick = onOpen),
     ) {
@@ -915,14 +960,16 @@ private fun SettingsCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
             .shadow(
-                elevation = 10.dp,
+                elevation = 17.dp,
                 shape = shape,
                 clip = false,
-                ambientColor = c.ink.copy(alpha = if (c.isDark) 0.3f else 0.07f),
-                spotColor = c.ink.copy(alpha = if (c.isDark) 0.4f else 0.12f),
+                ambientColor = c.ink.copy(alpha = if (c.isDark) 0.44f else 0.15f),
+                spotColor = c.ink.copy(alpha = if (c.isDark) 0.58f else 0.24f),
             )
+            .ecoLiftShadow(shape, c)
             .clip(shape)
             .background(softGradient(c, c.amberSoft, 0.5f, 0.42f))
+            .ecoLiftGlow(shape, c)
             .border(1.dp, c.rule, shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp),
@@ -955,17 +1002,17 @@ private fun BottomRow(
         Modifier.fillMaxWidth().height(BOTTOM_HEIGHT),
         horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
-        EcoArrival(delayMillis = 560, turn = -2.4f) {
+        EcoArrival(randomDelay = true, delayMillis = 560, turn = -2.4f) {
             GitHubOrb(onClick = onOpenRepo, modifier = Modifier.size(63.dp))
         }
         // 中间列：打赏 + 主题各占一半（原型 support-actions）
-        EcoArrival(delayMillis = 610, turn = 2.4f, modifier = Modifier.weight(1.03f).fillMaxHeight()) {
+        EcoArrival(randomDelay = true, delayMillis = 610, turn = 2.4f, modifier = Modifier.weight(1.03f).fillMaxHeight()) {
             Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                 RewardTile(onClick = onReward, modifier = Modifier.weight(1f).fillMaxHeight())
                 AccentTile(onClick = onTheme, modifier = Modifier.weight(1f).fillMaxHeight())
             }
         }
-        EcoArrival(delayMillis = 680, turn = 2.2f, modifier = Modifier.weight(1.27f).fillMaxHeight()) {
+        EcoArrival(randomDelay = true, delayMillis = 680, turn = 2.2f, modifier = Modifier.weight(1.27f).fillMaxHeight()) {
             ImportTile(onClick = onOpenImport, modifier = Modifier.fillMaxSize())
         }
     }
@@ -976,7 +1023,7 @@ private fun BottomRow(
 private fun GitHubOrb(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
-            .shadow(10.dp, CircleShape, ambientColor = Color(0x4410242A), spotColor = Color(0x5510242A))
+            .shadow(10.dp, CircleShape, ambientColor = Color(0x6B10242A), spotColor = Color(0x8010242A))
             .clip(CircleShape)
             .background(Color(0xFF18282D))
             .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
@@ -995,7 +1042,7 @@ private fun GitHubOrb(onClick: () -> Unit, modifier: Modifier = Modifier) {
 private fun AccentTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
-            .shadow(10.dp, RoundedCornerShape(50), ambientColor = Color(0x334C6F6B), spotColor = Color(0x444C6F6B))
+            .shadow(10.dp, RoundedCornerShape(50), ambientColor = Color(0x554C6F6B), spotColor = Color(0x664C6F6B))
             .clip(RoundedCornerShape(50))
             .background(
                 Brush.linearGradient(
@@ -1027,7 +1074,7 @@ private fun ImportTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
             .shadow(
-                elevation = 11.dp,
+                elevation = 18.dp,
                 shape = RoundedCornerShape(50),
                 clip = false,
                 ambientColor = c.heroB.copy(alpha = 0.34f),
@@ -1096,7 +1143,7 @@ private fun RewardTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
             .shadow(
-                elevation = 12.dp,
+                elevation = 19.dp,
                 shape = RoundedCornerShape(50),
                 clip = false,
                 ambientColor = Color(0xFFC45854).copy(alpha = 0.34f),
@@ -1139,7 +1186,7 @@ private fun AboutTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
             .shadow(
-                elevation = 12.dp,
+                elevation = 19.dp,
                 shape = RoundedCornerShape(50),
                 clip = false,
                 ambientColor = c.heroB.copy(alpha = 0.34f),

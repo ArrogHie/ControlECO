@@ -334,6 +334,7 @@ private fun MainScaffold(
                     1 -> TransactionListScreen(
                         vm = vm,
                         onEditTransaction = onEditTransaction,
+                        onOpenSettings = onOpenSettings,
                         scrollToTopTick = reenterTick,
                     )
                     2 -> StatsScreen(vm = vm, scrollToTopTick = reenterTick)

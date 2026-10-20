@@ -380,11 +380,16 @@ fun EcoArrival(
     delayMillis: Int = 0,
     turn: Float = 3f,
     modifier: Modifier = Modifier,
+    /** true 时忽略 delayMillis，改用 0–720ms 的随机延迟（个人页卡片无序弹出） */
+    randomDelay: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     var shown by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(delayMillis.toLong())
+    val actualDelay = remember(randomDelay, delayMillis) {
+        if (randomDelay) kotlin.random.Random.nextInt(0, 720) else delayMillis
+    }
+    LaunchedEffect(actualDelay) {
+        kotlinx.coroutines.delay(actualDelay.toLong())
         shown = true
     }
     val scale by animateFloatAsState(
