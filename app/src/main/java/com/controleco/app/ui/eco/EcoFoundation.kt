@@ -27,15 +27,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -372,54 +377,65 @@ fun EcoCountUpMoney(
 }
 
 /**
- * 个人页「散落弹入」：对应原型 .profile-arrival / ecoScatteredPop。
- * 每张卡延迟出现，带 25dp 上移、0.79→1 弹簧缩放和轻微旋转。
+ * 个人页「散落弹入」：逐帧照搬原型 `.profile-arrival` / `ecoScatteredPop`
+ * （0.56s cubic-bezier(.17,.8,.18,1)：25px 上移 + .79 缩放 + 起始 2px 模糊，
+ * 65% 处过冲到 -5px / 1.042 / -0.7°，84% 回落到 1px / .992，最后归位）。
  */
 @Composable
 fun EcoArrival(
     delayMillis: Int = 0,
     turn: Float = 3f,
     modifier: Modifier = Modifier,
-    /** true 时忽略 delayMillis，改用 0–720ms 的随机延迟（个人页卡片无序弹出） */
+    /** true 时忽略 delayMillis，30–630ms 随机延迟（个人页卡片无序弹出） */
     randomDelay: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    var shown by remember { mutableStateOf(false) }
     val actualDelay = remember(randomDelay, delayMillis) {
-        if (randomDelay) kotlin.random.Random.nextInt(0, 720) else delayMillis
+        if (randomDelay) 30 + kotlin.random.Random.nextInt(0, 600) else delayMillis
     }
+    // 原型：--arrival-turn 符号随序号交替，幅度 2.8–5.0deg
+    val startTurn = remember(turn) {
+        if (turn == 0f) 0f
+        else (if (kotlin.random.Random.nextBoolean()) -1f else 1f) * (2.8f + kotlin.random.Random.nextFloat() * 2.2f)
+    }
+    val progress = remember { Animatable(0f) }
+    val ease = CubicBezierEasing(0.17f, 0.8f, 0.18f, 1f)
     LaunchedEffect(actualDelay) {
         kotlinx.coroutines.delay(actualDelay.toLong())
-        shown = true
+        progress.animateTo(0.65f, tween(durationMillis = 364, easing = ease))
+        progress.animateTo(0.84f, tween(durationMillis = 106, easing = ease))
+        progress.animateTo(1f, tween(durationMillis = 90, easing = ease))
     }
-    val scale by animateFloatAsState(
-        targetValue = if (shown) 1f else 0.79f,
-        animationSpec = spring(dampingRatio = 0.56f, stiffness = 420f),
-        label = "arrival-scale",
-    )
-    val rise by animateFloatAsState(
-        targetValue = if (shown) 0f else 25f,
-        animationSpec = spring(dampingRatio = 0.58f, stiffness = 420f),
-        label = "arrival-rise",
-    )
-    val turnNow by animateFloatAsState(
-        targetValue = if (shown) 0f else turn,
-        animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f),
-        label = "arrival-turn",
-    )
-    val alpha by animateFloatAsState(
-        targetValue = if (shown) 1f else 0f,
-        animationSpec = tween(190),
-        label = "arrival-alpha",
-    )
+    val p = progress.value
+    fun lerpTo(a: Float, b: Float, t: Float) = a + (b - a) * t
+    val risePx = when {
+        p <= 0.65f -> lerpTo(25f, -5f, p / 0.65f)
+        p <= 0.84f -> lerpTo(-5f, 1f, (p - 0.65f) / 0.19f)
+        else -> lerpTo(1f, 0f, (p - 0.84f) / 0.16f)
+    }
+    val scale = when {
+        p <= 0.65f -> lerpTo(0.79f, 1.042f, p / 0.65f)
+        p <= 0.84f -> lerpTo(1.042f, 0.992f, (p - 0.65f) / 0.19f)
+        else -> lerpTo(0.992f, 1f, (p - 0.84f) / 0.16f)
+    }
+    val rot = when {
+        p <= 0.65f -> lerpTo(startTurn, -0.7f, p / 0.65f)
+        p <= 0.84f -> lerpTo(-0.7f, 0f, (p - 0.65f) / 0.19f)
+        else -> 0f
+    }
+    val fade = (p / 0.65f).coerceIn(0f, 1f)
+    val blurPx = (1f - p / 0.65f).coerceIn(0f, 1f) * 2f
     Box(
-        modifier.graphicsLayer {
-            this.alpha = alpha
-            scaleX = scale
-            scaleY = scale
-            translationY = rise.dp.toPx()
-            rotationZ = turnNow
-        },
+        modifier
+            .blur(blurPx.dp)
+            .graphicsLayer {
+                transformOrigin = TransformOrigin(0.5f, 0.66f)
+                alpha = fade
+                scaleX = scale
+                scaleY = scale
+                translationY = risePx.dp.toPx()
+                rotationZ = rot
+            },
     ) {
         content()
     }
@@ -526,15 +542,39 @@ fun EcoHeroCard(
     Box(
         modifier
             .shadow(
-                elevation = 16.dp,
+                elevation = 13.dp,
                 shape = shape,
                 clip = false,
-                ambientColor = Color(0x55103539),
-                spotColor = Color(0x66103539),
+                ambientColor = Color(0x4012373E),
+                spotColor = Color(0x9E12373E),
             )
             .clip(shape)
             .background(Brush.linearGradient(gradient, start = Offset.Zero, end = Offset.Infinite))
-            .border(1.dp, Color.White.copy(alpha = 0.16f), shape),
+            .border(1.dp, Color.White.copy(alpha = 0.16f), shape)
+            // 原型 hero 的 inset 高光/暗边：顶边 1px 白、底边内侧压深
+            .drawWithContent {
+                val outlinePath = Path().apply {
+                    addOutline(shape.createOutline(size, layoutDirection, this@drawWithContent))
+                }
+                clipPath(outlinePath) {
+                    drawRect(
+                        color = Color.White.copy(alpha = 0.24f),
+                        size = Size(size.width, 1.2.dp.toPx()),
+                    )
+                    val band = 10.dp.toPx()
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = 0.30f),
+                            startY = size.height - band,
+                            endY = size.height,
+                        ),
+                        topLeft = Offset(0f, size.height - band),
+                        size = Size(size.width, band),
+                    )
+                }
+                drawContent()
+            },
     ) {
         Canvas(Modifier.fillMaxSize()) {
             // 原型 hero 右上柔光只能用 shader 画，但本机 Skia 会把大的 radialGradient

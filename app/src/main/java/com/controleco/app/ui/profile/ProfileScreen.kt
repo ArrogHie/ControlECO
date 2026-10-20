@@ -43,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -55,6 +56,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.lerp
@@ -118,37 +120,38 @@ private val SETTINGS_CARD_HEIGHT = 62.dp
 private val MID_GAP = 8.dp
 private val BOTTOM_HEIGHT = 66.dp
 
-/** 卡片的右下方向性投影：多层微缩放堆出柔和的下沉阴影（不碰描边） */
-private fun Modifier.ecoLiftShadow(shape: Shape, c: EcoColors): Modifier = drawBehind {
-    val base = Path().apply { addOutline(shape.createOutline(size, layoutDirection, this@drawBehind)) }
-    val alpha = if (c.isDark) 0.34f else 0.13f
-    val layers = 10
-    for (i in 1..layers) {
-        val grow = 1f + i * 0.006f
-        translate(0.30.dp.toPx() * i, 0.55.dp.toPx() * i) {
-            scale(grow, grow, pivot = Offset.Zero) {
-                drawPath(base, Color.Black.copy(alpha = alpha / layers))
-            }
-        }
-    }
-}
-
-/** 卡片的左上高光：从左上角向外淡出的白色径向光 */
-private fun Modifier.ecoLiftGlow(shape: Shape, c: EcoColors): Modifier = drawBehind {
-    val path = Path().apply { addOutline(shape.createOutline(size, layoutDirection, this@drawBehind)) }
-    drawPath(
-        path = path,
-        brush = Brush.radialGradient(
-            colors = listOf(
-                Color.White.copy(alpha = if (c.isDark) 0.12f else 0.42f),
-                Color.Transparent,
+/**
+ * 卡片浮雕：照原型 CSS 的多层 box-shadow 拆开画。
+ * inset 0 1px 0 白色高光贴顶边，inset 0 -3px 7px 暗边压底边；
+ * 外投影仍交给 Modifier.shadow，描边保持 1dp 不变。
+ */
+private fun Modifier.cardRelief(
+    shape: Shape,
+    c: EcoColors,
+    topAlpha: Float = if (c.isDark) 0.16f else 0.78f,
+    bottomAlpha: Float = if (c.isDark) 0.22f else 0.12f,
+): Modifier = drawWithContent {
+    val path = Path().apply { addOutline(shape.createOutline(size, layoutDirection, this@drawWithContent)) }
+    clipPath(path) {
+        drawRect(
+            color = Color.White.copy(alpha = topAlpha),
+            size = Size(size.width, 1.2.dp.toPx()),
+        )
+        val band = 12.dp.toPx()
+        drawRect(
+            brush = Brush.verticalGradient(
+                0f to Color.Transparent,
+                0.5f to Color.Black.copy(alpha = bottomAlpha * 0.45f),
+                1f to Color.Black.copy(alpha = bottomAlpha),
+                startY = size.height - band,
+                endY = size.height,
             ),
-            center = Offset(0f, 0f),
-            radius = size.maxDimension * 0.62f,
-        ),
-    )
+            topLeft = Offset(0f, size.height - band),
+            size = Size(size.width, band),
+        )
+    }
+    drawContent()
 }
-
 // 深色 hero 上的前景色（hero 渐变永远是深色，这组色不随深浅主题变）
 private val HERO_MINT = Color(0xFFBDE9DA)
 private val HERO_MINT_SOFT = Color(0xFFD0F6D5)
@@ -546,16 +549,15 @@ private fun DailyTile(
     Box(
         modifier
             .shadow(
-                elevation = 18.dp,
+                elevation = 10.dp,
                 shape = shape,
                 clip = false,
                 ambientColor = c.ink.copy(alpha = if (c.isDark) 0.44f else 0.16f),
                 spotColor = c.ink.copy(alpha = if (c.isDark) 0.58f else 0.26f),
             )
-            .ecoLiftShadow(shape, c)
             .clip(shape)
             .background(softGradient(c, c.blueSoft, 0.62f, 0.5f))
-            .ecoLiftGlow(shape, c)
+            .cardRelief(shape, c)
             .border(1.dp, c.rule, shape)
             .clickable(onClick = onManage),
     ) {
@@ -664,13 +666,12 @@ private fun PendingPill(count: Int, onClick: () -> Unit, modifier: Modifier = Mo
     Box(
         modifier
             .shadow(
-                elevation = 19.dp,
+                elevation = 11.dp,
                 shape = shape,
                 clip = false,
                 ambientColor = fg.copy(alpha = if (c.isDark) 0.34f else 0.26f),
                 spotColor = fg.copy(alpha = if (c.isDark) 0.42f else 0.32f),
             )
-            .ecoLiftShadow(shape, c)
             .clip(shape)
             .drawBehind {
                 drawRect(
@@ -681,7 +682,7 @@ private fun PendingPill(count: Int, onClick: () -> Unit, modifier: Modifier = Mo
                     ),
                 )
             }
-            .ecoLiftGlow(shape, c)
+            .cardRelief(shape, c)
             .border(1.dp, borderColor, shape)
             .clickable(onClick = onClick),
     ) {
@@ -810,16 +811,15 @@ private fun CategoryCard(
     Box(
         modifier
             .shadow(
-                elevation = 19.dp,
+                elevation = 11.dp,
                 shape = shape,
                 clip = false,
                 ambientColor = c.jade.copy(alpha = if (c.isDark) 0.36f else 0.26f),
                 spotColor = c.ink.copy(alpha = if (c.isDark) 0.58f else 0.24f),
             )
-            .ecoLiftShadow(shape, c)
             .clip(shape)
             .background(softGradient(c, c.jadeSoft, 0.92f, 0.62f))
-            .ecoLiftGlow(shape, c)
+            .cardRelief(shape, c)
             .border(1.dp, c.jade.copy(alpha = 0.18f), shape)
             .clickable(onClick = onClick),
     ) {
@@ -891,16 +891,15 @@ private fun MonthStartCard(
     Box(
         modifier
             .shadow(
-                elevation = 18.dp,
+                elevation = 10.dp,
                 shape = shape,
                 clip = false,
                 ambientColor = c.ink.copy(alpha = if (c.isDark) 0.44f else 0.16f),
                 spotColor = c.ink.copy(alpha = if (c.isDark) 0.58f else 0.26f),
             )
-            .ecoLiftShadow(shape, c)
             .clip(shape)
             .background(softGradient(c, c.blueSoft, 0.72f, 0.5f), shape)
-            .ecoLiftGlow(shape, c)
+            .cardRelief(shape, c)
             .border(1.dp, c.blue.copy(alpha = 0.16f), shape)
             .clickable(onClick = onOpen),
     ) {
@@ -960,16 +959,15 @@ private fun SettingsCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
             .shadow(
-                elevation = 17.dp,
+                elevation = 10.dp,
                 shape = shape,
                 clip = false,
                 ambientColor = c.ink.copy(alpha = if (c.isDark) 0.44f else 0.15f),
                 spotColor = c.ink.copy(alpha = if (c.isDark) 0.58f else 0.24f),
             )
-            .ecoLiftShadow(shape, c)
             .clip(shape)
             .background(softGradient(c, c.amberSoft, 0.5f, 0.42f))
-            .ecoLiftGlow(shape, c)
+            .cardRelief(shape, c)
             .border(1.dp, c.rule, shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp),
@@ -1074,7 +1072,7 @@ private fun ImportTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
             .shadow(
-                elevation = 18.dp,
+                elevation = 10.dp,
                 shape = RoundedCornerShape(50),
                 clip = false,
                 ambientColor = c.heroB.copy(alpha = 0.34f),
@@ -1143,7 +1141,7 @@ private fun RewardTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
             .shadow(
-                elevation = 19.dp,
+                elevation = 11.dp,
                 shape = RoundedCornerShape(50),
                 clip = false,
                 ambientColor = Color(0xFFC45854).copy(alpha = 0.34f),
@@ -1186,7 +1184,7 @@ private fun AboutTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
             .shadow(
-                elevation = 19.dp,
+                elevation = 11.dp,
                 shape = RoundedCornerShape(50),
                 clip = false,
                 ambientColor = c.heroB.copy(alpha = 0.34f),
