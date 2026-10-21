@@ -1249,26 +1249,6 @@ private fun GitHubOrb(onClick: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 /**
- * 白色章鱼猫图标（GitHub 圆钮用）。
- *
- * 需求是「按钮上先铺一层纯白圆，再把 logo 叠上去，得到白色章鱼猫、且圆不能超出 logo 露白边」。
- * 等价实现：白圆只可能在 logo 的猫形区域内留下颜色，所以直接把 logo 填白即可——
- * 结果与「白圆 + 猫形遮罩」完全一致，还省掉一层离屏混合，不会有白边。
- *
- * logo 自带 128 画布、猫身外接圆只占 96/128（四周是透明留白），
- * 所以图标框给 22dp，猫本身约 16.5dp，与原来 18dp 的线性图标视觉重量相当。
- */
-@Composable
-private fun GitHubOctocat(size: Dp = 22.dp) {
-    Icon(
-        painter = painterResource(R.drawable.ic_github_octocat),
-        contentDescription = "GitHub 仓库",
-        tint = Color.White,
-        modifier = Modifier.size(size),
-    )
-}
-
-/**
  * 主题按钮：彩虹渐变底 + 白色画笔，**不叠任何白色圆底**。
  * 按用户要求只负责主题色，不再充当「更多」入口。
  */
