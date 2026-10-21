@@ -341,8 +341,10 @@ fun EcoAutoMoney(
 }
 
 /**
- * 金额滚数：按原型 940ms easeOutQuart 从 0 滚到目标值。
- * 每次目标变化都会重新滚（与原型每次 render 都执行 animateCounters 一致）。
+ * 金额滚数：数值变化时按 940ms easeOutQuart 从旧值滚到新值。
+ *
+ * 首帧直接以目标值创建（不做 0 → 目标），因此切 tab 重新组合时金额不会再从 ¥0.00 滚一遍；
+ * 那正是页面上最明显的“闪一下”。目标值真正变化（切月份、改预算、到账）时仍然滚动。
  */
 @Composable
 fun EcoCountUpMoney(
@@ -356,11 +358,12 @@ fun EcoCountUpMoney(
     durationMillis: Int = 940,
     format: (Long) -> String = { Money.formatYuanGroupedFixed(it) },
 ) {
-    val anim = remember { Animatable(0f) }
+    val anim = remember { Animatable(cents.toFloat()) }
     LaunchedEffect(cents) {
-        anim.snapTo(0f)
+        val target = cents.toFloat()
+        if (anim.value == target) return@LaunchedEffect
         anim.animateTo(
-            targetValue = cents.toFloat(),
+            targetValue = target,
             animationSpec = tween(
                 durationMillis = durationMillis,
                 easing = CubicBezierEasing(0.25f, 1f, 0.5f, 1f),
@@ -639,9 +642,10 @@ fun EcoProgressBar(
     animationDelayMillis: Int = 0,
 ) {
     val target = progress.coerceIn(0f, 1f)
-    val drawn = remember { Animatable(0f) }
+    // 首帧即目标值：切 tab 重新组合时不再从 0 重播（否则整页进度条会集体“闪一下”）
+    val drawn = remember { Animatable(target) }
     LaunchedEffect(target) {
-        drawn.snapTo(0f)
+        if (drawn.value == target) return@LaunchedEffect
         if (animationDelayMillis > 0) kotlinx.coroutines.delay(animationDelayMillis.toLong())
         drawn.animateTo(
             target,
