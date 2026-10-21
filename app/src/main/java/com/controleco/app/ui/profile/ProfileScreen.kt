@@ -648,17 +648,21 @@ private fun DailyTile(
                         cents = amountCents,
                         style = EcoType.DailyValue,
                         color = c.ink,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                         textAlign = TextAlign.Start,
-                        minSize = 13.sp,
+                        minSize = 12.sp,
+
+                        // 将金额和单位作为同一段文字处理
+                        format = { cents ->
+                            "${Money.formatYuanGroupedFixed(cents)}/day"
+                        }
                     )
                 } else {
                     Text(
-                        "未设置",
+                        text = "未设置",
                         style = EcoType.RowTitle,
                         color = c.muted,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
+                        maxLines = 1
                     )
                 }
                 Text(
@@ -672,25 +676,40 @@ private fun DailyTile(
         }
 
         // 原型右侧的大铅笔只是水印，透明度 .2；文字「预算管理」在右下
-        Icon(
-            EcoIcons.Edit,
-            contentDescription = null,
-            tint = c.blue.copy(alpha = 0.20f),
+        Column(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .padding(end = 16.dp)
-                .size(43.dp)
-                .graphicsLayer { rotationZ = -8f },
-        )
-        Text(
-            "预算管理",
-            style = EcoType.Chip.copy(fontSize = 10.sp, fontWeight = FontWeight(800), letterSpacing = 0.sp),
-            color = c.blue,
-            maxLines = 1,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 15.dp, bottom = 12.dp),
-        )
+                .width(66.dp)
+                .padding(end = 9.dp),
+
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = EcoIcons.Edit,
+                contentDescription = null,
+                tint = c.blue.copy(alpha = 0.28f),
+                modifier = Modifier
+                    .size(34.dp)
+                    .graphicsLayer {
+                        rotationZ = -8f
+                    }
+            )
+
+            Spacer(Modifier.height(3.dp))
+
+            Text(
+                text = "预算管理",
+                style = EcoType.Chip.copy(
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight(800),
+                    letterSpacing = 0.sp
+                ),
+                color = c.blue,
+                textAlign = TextAlign.Center,
+                maxLines = 1
+            )
+        }
     }
 }
 
@@ -812,7 +831,7 @@ private fun PendingPill(count: Int, onClick: () -> Unit, modifier: Modifier = Mo
                 contentDescription = null,
                 tint = fg.copy(alpha = 0.92f),
                 modifier = Modifier
-                    .size(22.dp)
+                    .size(32.dp)
                     .graphicsLayer { if (alert) rotationZ = wiggle },
             )
             if (alert) {
@@ -827,7 +846,7 @@ private fun PendingPill(count: Int, onClick: () -> Unit, modifier: Modifier = Mo
             Spacer(Modifier.height(1.dp))
             Text(
                 "待确认",
-                style = EcoType.RowTrail.copy(fontSize = 10.5.sp, fontWeight = FontWeight(740)),
+                style = EcoType.RowTrail.copy(fontSize = 15.5.sp, fontWeight = FontWeight(740)),
                 color = fg.copy(alpha = 0.86f),
                 maxLines = 1,
             )
@@ -1083,18 +1102,40 @@ private fun SettingsCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
             .border(1.dp, c.rule, shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp),
-    ) {
-        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-            Icon(EcoIcons.Gear, contentDescription = null, tint = c.amber, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(8.dp))
-            Text(
-                "设置",
-                style = EcoType.CatAmount.copy(fontSize = 16.sp, fontWeight = FontWeight(750), lineHeight = 20.sp),
-                color = c.ink,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
+    ) {  
+        Box(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Icon(
+                imageVector = EcoIcons.Gear,
+                contentDescription = null,
+                tint = c.amber,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .size(18.dp)
             )
-            Icon(EcoIcons.Chev, contentDescription = null, tint = c.quiet, modifier = Modifier.size(13.dp))
+
+            Text(
+                text = "设置",
+                style = EcoType.CatAmount.copy(
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight(750),
+                    lineHeight = 20.sp
+                ),
+                color = c.ink,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                modifier = Modifier.align(Alignment.Center)
+            )
+
+            Icon(
+                imageVector = EcoIcons.Chev,
+                contentDescription = null,
+                tint = c.quiet,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .size(13.dp)
+            )
         }
     }
 }
