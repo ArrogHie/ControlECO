@@ -653,11 +653,14 @@ private fun DailyTile(
                     textAlign = TextAlign.Start,
                     minSize = 13.sp,
 
-                    suffix = "/day",
+                    // 金额的 DailyValue 带 -0.065em（31sp 时约 -2sp）负字距，后缀必须显式归零，
+                    // 否则 "/day" 会继承负字距挤成一团；前面的空格用来和金额留一点呼吸。
+                    suffix = " /day",
                     suffixStyle = SpanStyle(
                         fontSize = 10.sp,
                         color = c.muted,
                         fontWeight = FontWeight(700),
+                        letterSpacing = 0.sp,
                     ),
                 )
             } else {

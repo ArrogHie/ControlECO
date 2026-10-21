@@ -343,7 +343,8 @@ fun EcoAutoMoney(
             while (guard++ < 12) {
                 val result = measurer.measure(
                     text = fitRichText,
-                    style = style.copy(fontSize = size),
+                    // 字号缩小要同步缩字距，否则 DailyValue 的 -2sp 会把数字压在一起
+                    style = style.fitTo(size),
                     maxLines = 1,
                     softWrap = false,
                 )
@@ -354,7 +355,7 @@ fun EcoAutoMoney(
         }
         Text(
             text = richText,
-            style = style.copy(fontSize = fitted),
+            style = style.fitTo(fitted),
             color = color,
             maxLines = 1,
             softWrap = false,
@@ -409,6 +410,21 @@ fun EcoCountUpMoney(
         fitText = fitText,
         suffix = suffix,
         suffixStyle = suffixStyle,
+    )
+}
+
+/**
+ * 按目标字号等比例缩放 sp 字距。
+ * 命名版式里的 `letterSpacing` 是按设计字号算出的固定 sp 值（如 DailyValue 31sp × -0.065 = -2.015sp），
+ * 自适应缩到 13sp 后若仍用 -2sp，数字会压在一起；em 字距本身随字号缩放，保持原样。
+ */
+private fun TextStyle.fitTo(size: TextUnit): TextStyle {
+    val base = fontSize.value
+    val ratio = if (base > 0f) size.value / base else 1f
+    val tracking = letterSpacing
+    return copy(
+        fontSize = size,
+        letterSpacing = if (tracking.isSp) (tracking.value * ratio).sp else tracking,
     )
 }
 
