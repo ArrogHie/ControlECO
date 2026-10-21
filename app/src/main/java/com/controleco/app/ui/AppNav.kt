@@ -1,11 +1,14 @@
 package com.controleco.app.ui
 
 import android.content.Intent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
@@ -16,6 +19,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,8 +30,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -144,34 +152,35 @@ fun AccBookNav(
             }
         }
     }
-    // 转场：默认的 700ms 淡入淡出太慢，改成 180ms 淡入 + 轻微横向位移（层级更清楚、手感利落）
+    // 转场：旧页保持不透明到新页淡入过半后再退场（200ms 就退场会露出纸面，看起来“闪一下”）
     Box(Modifier.fillMaxSize()) {
         EcoBackdrop()
         NavHost(
         navController = navController,
         startDestination = "main",
         modifier = Modifier.fillMaxSize(),
-        // 原型 .page-enter：380ms 淡入 + 7px 下移回弹；返回用 pageInRight 的横向 14px
+        // 原型 .page-enter：淡入 + 8px 下移；返回走横向位移
         enterTransition = {
-            fadeIn(tween(380, easing = FastOutSlowInEasing)) +
+            fadeIn(tween(300, easing = FastOutSlowInEasing)) +
                 slideInVertically(
-                    animationSpec = tween(380, easing = FastOutSlowInEasing),
-                    initialOffsetY = { (it * 0.0085f).roundToInt() },
+                    animationSpec = tween(300, easing = FastOutSlowInEasing),
+                    initialOffsetY = { (it * 0.0095f).roundToInt() },
                 )
         },
-        exitTransition = { fadeOut(tween(200)) },
+        // 延迟退场：新页先淡入覆盖，旧页再退，避免中间露出背景纸面
+        exitTransition = { fadeOut(tween(180, delayMillis = 170)) },
         popEnterTransition = {
-            fadeIn(tween(340, easing = FastOutSlowInEasing)) +
+            fadeIn(tween(280, easing = FastOutSlowInEasing)) +
                 slideInHorizontally(
-                    animationSpec = tween(340, easing = FastOutSlowInEasing),
-                    initialOffsetX = { it / 28 },
+                    animationSpec = tween(280, easing = FastOutSlowInEasing),
+                    initialOffsetX = { it / 32 },
                 )
         },
         popExitTransition = {
-            fadeOut(tween(200)) +
+            fadeOut(tween(180, delayMillis = 150)) +
                 slideOutHorizontally(
                     animationSpec = tween(300, easing = FastOutSlowInEasing),
-                    targetOffsetX = { it / 28 },
+                    targetOffsetX = { it / 32 },
                 )
         },
     ) {
@@ -290,6 +299,9 @@ fun AccBookNav(
     }
 }
 
+/** tab 切换的交叉淡入时长：短到不拖沓，长到足以盖住新页首帧布局 */
+private const val TAB_SWITCH_MS = 260
+
 @Composable
 private fun MainScaffold(
     vm: LedgerViewModel,
@@ -305,64 +317,141 @@ private fun MainScaffold(
     // 再次点击当前标签 → 计数 +1，由页面自己"回到顶部"（列表/滚动页通用）
     var reenterTick by rememberSaveable { mutableIntStateOf(0) }
     val tabStates = rememberSaveableStateHolder()
-    // 原型每次切页重放 .page-enter：新页面直接替换旧页面，从透明 + 7px 下移淡入。
-    // 不用 AnimatedContent 叠放两页（会残留旧页的 pointerInput，挡掉新页点击）。
-    val pageIn = remember { Animatable(1f) }
+
+    // 单页直接替换时旧页瞬间消失、新页又从 alpha 0 淡入，中间几帧只剩纸面 —— 观感就是“闪一下”。
+    // 这里把旧页保留为过渡底图（动画结束立刻释放），新页在它上面淡入，任何一帧都有完整内容。
+    var previousTab by remember { mutableStateOf<Int?>(null) }
+    // 旧页被替换时它自身可能还在淡入；记下当前 alpha，避免瞬间跳回 1（快速连点会闪亮）。
+    var previousAlpha by remember { mutableFloatStateOf(1f) }
+    var hasSwitched by remember { mutableStateOf(false) }
+    // 首帧就用目标值创建：旧写法 remember { Animatable(1f) } + 事后 snapTo(0f) 会让新页
+    // 先以全不透明画一帧再突然归零，正是“闪一下”的来源。remember(tab) 保证首帧即目标值。
+    val pageIn = remember(tab) { Animatable(if (hasSwitched) 0f else 1f) }
     LaunchedEffect(tab) {
-        pageIn.snapTo(0f)
-        pageIn.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(380, easing = FastOutSlowInEasing),
-        )
+        if (pageIn.value < 1f) {
+            pageIn.animateTo(1f, tween(TAB_SWITCH_MS, easing = FastOutSlowInEasing))
+        }
+        // 新页已完全不透明，撤掉旧底图不会产生任何视觉变化
+        previousTab = null
     }
+
     Box(Modifier.fillMaxSize()) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    alpha = pageIn.value
-                    translationY = (1f - pageIn.value) * 24f
-                },
-        ) {
-            tabStates.SaveableStateProvider(tab) {
-                when (tab) {
-                    0 -> HomeScreen(
-                        vm = vm,
-                        onOpenSettings = onOpenSettings,
-                        onOpenCategories = onOpenCategories,
-                    )
-                    1 -> TransactionListScreen(
-                        vm = vm,
-                        onEditTransaction = onEditTransaction,
-                        onOpenSettings = onOpenSettings,
-                        scrollToTopTick = reenterTick,
-                    )
-                    2 -> StatsScreen(vm = vm, scrollToTopTick = reenterTick)
-                    3 -> ProfileScreen(
-                        vm = vm,
-                        onOpenAccount = onOpenAccount,
-                        onOpenImport = onOpenImport,
-                        onOpenPending = onOpenPending,
-                        onOpenSettings = onOpenSettings,
-                        onOpenCategories = onOpenCategories,
-                    )
+        // 每个 tab 用固定 key 占位：切走后它仍在树上（只是退到底层），
+        // SaveableStateProvider 只有一份，滚动位置/rememberSaveable 原地保留，不重建、不重播入场动画。
+        for (index in 0..3) {
+            val isCurrent = index == tab
+            val isPrevious = index == previousTab
+            if (isCurrent || isPrevious) {
+                key(index) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            // 当前页必须在最上层；旧页在下层并吞掉全部触摸，
+                            // 否则旧页 pointerInput 会挡住新页点击（AnimatedContent 时代的坑）。
+                            .zIndex(if (isCurrent) 1f else 0f)
+                            // alpha 在 draw 阶段读取，动画每帧只失效图层，不重组整页
+                            .graphicsLayer {
+                                this.alpha = if (isCurrent) pageIn.value else previousAlpha
+                                if (isCurrent) translationY = (1f - pageIn.value) * 8.dp.toPx()
+                            }
+                            .then(if (isCurrent) Modifier else Modifier.blockPointerInput()),
+                    ) {
+                        tabStates.SaveableStateProvider(index) {
+                            TabPage(
+                                tab = index,
+                                vm = vm,
+                                reenterTick = reenterTick,
+                                onEditTransaction = onEditTransaction,
+                                onOpenAccount = onOpenAccount,
+                                onOpenImport = onOpenImport,
+                                onOpenPending = onOpenPending,
+                                onOpenSettings = onOpenSettings,
+                                onOpenCategories = onOpenCategories,
+                            )
+                        }
+                    }
                 }
             }
         }
         EcoBottomNav(
             selected = tab,
             onSelect = { index ->
-                if (tab == index) reenterTick++ else tab = index
+                if (tab == index) {
+                    reenterTick++
+                } else {
+                    hasSwitched = true
+                    previousTab = tab
+                    previousAlpha = pageIn.value
+                    tab = index
+                }
             },
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                // 页面当前层是 zIndex 1，底栏必须更高才能压在上面并优先接收点击
+                .zIndex(2f),
         )
-        if (tab == 0 || tab == 1) {
-            EcoFab(
-                onClick = onQuickAdd,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 19.dp, bottom = ecoFabBottomOffset()),
-            )
+        // FAB 只属于首页/账单：切换时淡出+缩小，不要突然消失（比页面本身更扎眼）
+        AnimatedVisibility(
+            visible = tab == 0 || tab == 1,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .zIndex(2f)
+                .padding(end = 19.dp, bottom = ecoFabBottomOffset()),
+            enter = fadeIn(tween(180)) +
+                scaleIn(initialScale = 0.86f, animationSpec = tween(220, easing = FastOutSlowInEasing)),
+            exit = fadeOut(tween(140)) +
+                scaleOut(targetScale = 0.86f, animationSpec = tween(160, easing = FastOutSlowInEasing)),
+        ) {
+            EcoFab(onClick = onQuickAdd)
+        }
+    }
+}
+
+/** 当前 tab 的真实内容；主页面与过渡底图共用，保证两处渲染完全一致 */
+@Composable
+private fun TabPage(
+    tab: Int,
+    vm: LedgerViewModel,
+    reenterTick: Int,
+    onEditTransaction: (Long) -> Unit,
+    onOpenAccount: () -> Unit,
+    onOpenImport: () -> Unit,
+    onOpenPending: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenCategories: () -> Unit,
+) {
+    when (tab) {
+        0 -> HomeScreen(
+            vm = vm,
+            onOpenSettings = onOpenSettings,
+            onOpenCategories = onOpenCategories,
+        )
+        1 -> TransactionListScreen(
+            vm = vm,
+            onEditTransaction = onEditTransaction,
+            onOpenSettings = onOpenSettings,
+            scrollToTopTick = reenterTick,
+        )
+        2 -> StatsScreen(vm = vm, scrollToTopTick = reenterTick)
+        3 -> ProfileScreen(
+            vm = vm,
+            onOpenAccount = onOpenAccount,
+            onOpenImport = onOpenImport,
+            onOpenPending = onOpenPending,
+            onOpenSettings = onOpenSettings,
+            onOpenCategories = onOpenCategories,
+        )
+    }
+}
+
+/**
+ * 消费子树内的全部指针事件（Initial 阶段，先于子节点）。
+ * 只给“过渡中的旧页”用：它看得见但不该再响应任何点击/滑动。
+ */
+private fun Modifier.blockPointerInput(): Modifier = pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) {
+            awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
         }
     }
 }
