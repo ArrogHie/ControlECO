@@ -47,10 +47,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -293,6 +295,9 @@ fun Modifier.ecoPressable(
 /**
  * 大金额自适应：先按设计字号测量，超宽依次降到 88% / 78% / 68%，不换行。
  * 用法：`EcoAutoMoney(text, EcoType.MeterMoney, maxWidth = 220.dp)`
+ *
+ * [suffix] 紧跟在金额后面，用 [suffixStyle] 单独设字号/颜色（如 `/day`），
+ * 与金额同属一行，不会被挤到右侧。
  */
 @Composable
 fun EcoAutoMoney(
@@ -307,6 +312,8 @@ fun EcoAutoMoney(
     // 动画期间逐帧换数字不再重复量 12 次（切页/滚数卡顿的主因）。
     // remember 以 fitText 为 key，数值更新时旧测量结果自动丢弃，不会越积越多。
     fitText: String = text,
+    suffix: String = "",
+    suffixStyle: SpanStyle = SpanStyle(),
 ) {
     val measurer = rememberTextMeasurer()
     BoxWithConstraints(modifier) {
@@ -317,12 +324,25 @@ fun EcoAutoMoney(
         } else {
             with(density) { available.toPx() }
         }
-        val fitted = remember(fitText, style, availablePx) {
+        val richText = remember(text, suffix, suffixStyle) {
+            buildAnnotatedString {
+                append(text)
+                if (suffix.isNotEmpty()) withStyle(suffixStyle) { append(suffix) }
+            }
+        }
+        // 量字号用“最终值 + 后缀”：滚动时只量一次，后缀的小字号也计入宽度
+        val fitRichText = remember(fitText, suffix, suffixStyle) {
+            buildAnnotatedString {
+                append(fitText)
+                if (suffix.isNotEmpty()) withStyle(suffixStyle) { append(suffix) }
+            }
+        }
+        val fitted = remember(fitRichText, style, availablePx) {
             var size = style.fontSize
             var guard = 0
             while (guard++ < 12) {
                 val result = measurer.measure(
-                    text = AnnotatedString(fitText),
+                    text = fitRichText,
                     style = style.copy(fontSize = size),
                     maxLines = 1,
                     softWrap = false,
@@ -333,7 +353,7 @@ fun EcoAutoMoney(
             size
         }
         Text(
-            text = text,
+            text = richText,
             style = style.copy(fontSize = fitted),
             color = color,
             maxLines = 1,
@@ -359,6 +379,9 @@ fun EcoCountUpMoney(
     textAlign: TextAlign = TextAlign.Center,
     durationMillis: Int = 940,
     format: (Long) -> String = { Money.formatYuanGroupedFixed(it) },
+    // 紧跟在金额后面的小字（如 "/day"），与金额同一行、单独样式
+    suffix: String = "",
+    suffixStyle: SpanStyle = SpanStyle(),
 ) {
     val anim = remember { Animatable(0f) }
     // 目标值的字符串只算一次：作为 EcoAutoMoney 的测量缓存 key，
@@ -384,6 +407,8 @@ fun EcoCountUpMoney(
         textAlign = textAlign,
         // 用最终值做一次测量并缓存，滚动过程中复用，避免每帧重新量
         fitText = fitText,
+        suffix = suffix,
+        suffixStyle = suffixStyle,
     )
 }
 

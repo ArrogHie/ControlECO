@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -64,6 +65,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -642,35 +644,28 @@ private fun DailyTile(
                 .padding(start = 15.dp, top = 16.dp, end = 62.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.Center,
         ) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                if (amountCents > 0) {
-                    EcoCountUpMoney(
-                        cents = amountCents,
-                        style = EcoType.DailyValue,
-                        color = c.ink,
-                        modifier = Modifier.fillMaxWidth(),
-                        textAlign = TextAlign.Start,
-                        minSize = 12.sp,
+            if (amountCents > 0) {
+                EcoCountUpMoney(
+                    cents = amountCents,
+                    style = EcoType.DailyValue,
+                    color = c.ink,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Start,
+                    minSize = 13.sp,
 
-                        // 将金额和单位作为同一段文字处理
-                        format = { cents ->
-                            "${Money.formatYuanGroupedFixed(cents)}/day"
-                        }
-                    )
-                } else {
-                    Text(
-                        text = "未设置",
-                        style = EcoType.RowTitle,
+                    suffix = "/day",
+                    suffixStyle = SpanStyle(
+                        fontSize = 10.sp,
                         color = c.muted,
-                        maxLines = 1
-                    )
-                }
+                        fontWeight = FontWeight(700),
+                    ),
+                )
+            } else {
                 Text(
-                    "/day",
-                    style = EcoType.Micro.copy(fontSize = 10.sp, fontWeight = FontWeight(700), letterSpacing = 0.sp),
+                    text = "未设置",
+                    style = EcoType.RowTitle,
                     color = c.muted,
                     maxLines = 1,
-                    modifier = Modifier.padding(bottom = 3.dp, start = 2.dp),
                 )
             }
         }
@@ -822,7 +817,11 @@ private fun PendingPill(count: Int, onClick: () -> Unit, modifier: Modifier = Mo
         }
 
         Column(
-            Modifier.fillMaxSize().padding(horizontal = 9.dp, vertical = 11.dp),
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 9.dp, vertical = 11.dp)
+                // 卡片底部有书签凹口，几何中心偏高一点，整组上移 7dp 视觉更居中
+                .offset(y = (-7).dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
