@@ -243,8 +243,13 @@ fun TransactionListScreen(
         }
     }
 
+    // 只在“再次点击当前 tab”时回顶：页面从别的 tab 切回来时不应复位已保留的滚动位置
+    var lastReenterTick by remember { mutableIntStateOf(scrollToTopTick) }
     LaunchedEffect(scrollToTopTick) {
-        if (scrollToTopTick > 0) listState.animateScrollToItem(0)
+        if (scrollToTopTick > lastReenterTick) {
+            lastReenterTick = scrollToTopTick
+            listState.animateScrollToItem(0)
+        }
     }
     LaunchedEffect(month, mode) {
         selecting = false

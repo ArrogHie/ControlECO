@@ -183,9 +183,13 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
         .format(DateTimeFormatter.ofPattern("MMM", Locale.ENGLISH))
         .uppercase(Locale.ENGLISH)
     val listState = rememberLazyListState()
-    // 再次点击底部「统计」标签：回到顶部
+    // 再次点击底部「统计」标签才回到顶部；从别的 tab 切回来保持原滚动位置
+    var lastReenterTick by remember { mutableIntStateOf(scrollToTopTick) }
     LaunchedEffect(scrollToTopTick) {
-        if (scrollToTopTick > 0) listState.animateScrollToItem(0)
+        if (scrollToTopTick > lastReenterTick) {
+            lastReenterTick = scrollToTopTick
+            listState.animateScrollToItem(0)
+        }
     }
 
     Column(Modifier.fillMaxSize()) {
