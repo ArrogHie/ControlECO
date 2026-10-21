@@ -99,6 +99,7 @@ import com.controleco.app.ui.eco.EcoPrimaryButton
 import com.controleco.app.ui.eco.EcoProgressBar
 import com.controleco.app.ui.eco.EcoSettingsPill
 import com.controleco.app.ui.eco.EcoTopBar
+import com.controleco.app.ui.eco.LocalContentAnimationsEnabled
 import com.controleco.app.ui.eco.ecoBottomContentPadding
 import com.controleco.app.ui.theme.EcoColors
 import com.controleco.app.ui.theme.EcoType
@@ -424,13 +425,22 @@ private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate
     // 原型：液面 1.1s、时间环稍慢地画出来（每次进入首页都从 0 重播）
     val drawn = remember { Animatable(0f) }
     val timeDrawn = remember { Animatable(0f) }
-    LaunchedEffect(ratio) {
+    val animationsEnabled = LocalContentAnimationsEnabled.current
+    LaunchedEffect(ratio, animationsEnabled) {
+        if (!animationsEnabled) {
+            drawn.snapTo(ratio)
+            return@LaunchedEffect
+        }
         drawn.animateTo(
             ratio,
             tween(1100, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)),
         )
     }
-    LaunchedEffect(timeRatio) {
+    LaunchedEffect(timeRatio, animationsEnabled) {
+        if (!animationsEnabled) {
+            timeDrawn.snapTo(timeRatio)
+            return@LaunchedEffect
+        }
         timeDrawn.animateTo(
             timeRatio,
             tween(1300, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)),
@@ -951,7 +961,12 @@ private fun AssetChart(save: Boolean, color: Color, modifier: Modifier = Modifie
         )
     }
     val reveal = remember { Animatable(0f) }
-    LaunchedEffect(save) {
+    val animationsEnabled = LocalContentAnimationsEnabled.current
+    LaunchedEffect(save, animationsEnabled) {
+        if (!animationsEnabled) {
+            reveal.snapTo(1f)
+            return@LaunchedEffect
+        }
         reveal.snapTo(0f)
         reveal.animateTo(1f, tween(1100, delayMillis = 220, easing = FastOutSlowInEasing))
     }

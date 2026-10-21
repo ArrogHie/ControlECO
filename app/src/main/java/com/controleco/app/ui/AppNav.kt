@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -28,6 +29,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -70,6 +72,7 @@ import com.controleco.app.ui.eco.EcoBackdrop
 import com.controleco.app.ui.eco.EcoBottomNav
 import com.controleco.app.ui.eco.EcoFab
 import com.controleco.app.ui.eco.EcoToastHost
+import com.controleco.app.ui.eco.LocalContentAnimationsEnabled
 import com.controleco.app.ui.eco.ecoFabBottomOffset
 import com.controleco.app.ui.stats.StatsScreen
 import com.controleco.app.ui.transactions.EditTransactionScreen
@@ -319,6 +322,9 @@ private fun MainScaffold(
     var renderedTab by rememberSaveable { mutableIntStateOf(0) }
     var outgoingTab by remember { mutableStateOf<Int?>(null) }
     var direction by remember { mutableIntStateOf(1) }
+    // 页面是否已完全切换到位：滑动期间为 false，内容动画只定格终值、不播放；
+    // 滑完置 true，页面里的金额/环/柱状图等再统一重播，避免两页同时动画掉帧。
+    var settled by remember { mutableStateOf(true) }
     // 再次点击当前标签 → 计数 +1，由页面自己"回到顶部"（列表/滚动页通用）
     var reenterTick by rememberSaveable { mutableIntStateOf(0) }
     val tabStates = rememberSaveableStateHolder()
@@ -332,11 +338,17 @@ private fun MainScaffold(
             if (target == renderedTab) return@collect
             val from = renderedTab
             direction = if (target > from) 1 else -1
+            // 先关动画，再换页：保证新页第一帧就是“定格终值”，不会先播一帧动画
+            settled = false
             outgoingTab = from
             renderedTab = target
             slide.snapTo(0f)
+            // 新页此刻停在屏外：先放过一帧，让它完成组合/布局/首绘，再开始滑动，
+            // 避免滑动第一帧就撞上整页构建导致卡顿
+            withFrameNanos { }
             slide.animateTo(1f, tween(TAB_SLIDE_MS, easing = FastOutSlowInEasing))
             outgoingTab = null
+            settled = true
         }
     }
 
@@ -364,17 +376,20 @@ private fun MainScaffold(
                             .then(if (isOutgoing) Modifier.blockPointerInput() else Modifier),
                     ) {
                         tabStates.SaveableStateProvider(index) {
-                            TabPage(
-                                tab = index,
-                                vm = vm,
-                                reenterTick = reenterTick,
-                                onEditTransaction = onEditTransaction,
-                                onOpenAccount = onOpenAccount,
-                                onOpenImport = onOpenImport,
-                                onOpenPending = onOpenPending,
-                                onOpenSettings = onOpenSettings,
-                                onOpenCategories = onOpenCategories,
-                            )
+                            // 滑动期间 settled=false：页面内容动画只定格终值；滑完再重播
+                            CompositionLocalProvider(LocalContentAnimationsEnabled provides settled) {
+                                TabPage(
+                                    tab = index,
+                                    vm = vm,
+                                    reenterTick = reenterTick,
+                                    onEditTransaction = onEditTransaction,
+                                    onOpenAccount = onOpenAccount,
+                                    onOpenImport = onOpenImport,
+                                    onOpenPending = onOpenPending,
+                                    onOpenSettings = onOpenSettings,
+                                    onOpenCategories = onOpenCategories,
+                                )
+                            }
                         }
                     }
                 }

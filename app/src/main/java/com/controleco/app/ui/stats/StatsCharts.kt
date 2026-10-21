@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.controleco.app.ui.common.AutoScaledText
+import com.controleco.app.ui.eco.LocalContentAnimationsEnabled
 import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.accBook
 import com.controleco.app.ui.theme.categoryColor
@@ -135,7 +136,12 @@ fun ExpenseBarChart(
 
     // 柱子从轴线向上生长，31 根柱子依次错开 6ms（原型 .chart-bar 的 scaleY 入场，每次进入重播）
     val grow = remember { Animatable(0f) }
-    LaunchedEffect(bars) {
+    val animationsEnabled = LocalContentAnimationsEnabled.current
+    LaunchedEffect(bars, animationsEnabled) {
+        if (!animationsEnabled) {
+            grow.snapTo(1f)
+            return@LaunchedEffect
+        }
         grow.snapTo(0f)
         grow.animateTo(1f, tween(820, easing = FastOutSlowInEasing))
     }
