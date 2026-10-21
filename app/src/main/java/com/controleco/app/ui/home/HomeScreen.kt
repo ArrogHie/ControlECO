@@ -99,6 +99,7 @@ import com.controleco.app.ui.eco.EcoPrimaryButton
 import com.controleco.app.ui.eco.EcoProgressBar
 import com.controleco.app.ui.eco.EcoSettingsPill
 import com.controleco.app.ui.eco.EcoTopBar
+import com.controleco.app.ui.eco.LocalAnimationsEnabled
 import com.controleco.app.ui.eco.ecoBottomContentPadding
 import com.controleco.app.ui.theme.EcoColors
 import com.controleco.app.ui.theme.EcoType
@@ -201,6 +202,8 @@ fun HomeScreen(
     }
     val s = snapshot
     val reducedMotion = rememberReducedMotion()
+    // 设置里关掉「显示动画」后等同于减少动效：翻转/环/趋势图都直接到位
+    val motionOff = reducedMotion || !LocalAnimationsEnabled.current
     val scope = rememberCoroutineScope()
     var mode by rememberSaveable { mutableIntStateOf(0) }
     val flip = remember { Animatable(0f) }
@@ -214,7 +217,7 @@ fun HomeScreen(
         val t = wrap(target)
         if (!flip.isRunning && t != mode) {
             scope.launch {
-                if (reducedMotion) {
+                if (motionOff) {
                     mode = t
                 } else {
                     val forward = wrap(t - mode)
@@ -238,7 +241,7 @@ fun HomeScreen(
                 val flicked = abs(velocityX) >= widthPx * FLICK_WIDTHS_PER_SECOND
                 val turned = abs(rotation) >= DRAG_FLIP_THRESHOLD_DEG
                 val next = if (flicked && !turned) velocityX < 0f else rotation < 0f
-                if (reducedMotion) {
+                if (motionOff) {
                     if (flicked || turned) mode = wrap(mode + if (next) 1 else -1)
                     flip.snapTo(0f)
                 } else if (flicked || turned) {
@@ -424,13 +427,22 @@ private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate
     // 原型：液面 1.1s、时间环稍慢地画出来（每次进入首页都从 0 重播）
     val drawn = remember { Animatable(0f) }
     val timeDrawn = remember { Animatable(0f) }
-    LaunchedEffect(ratio) {
+    val animationsEnabled = LocalAnimationsEnabled.current
+    LaunchedEffect(ratio, animationsEnabled) {
+        if (!animationsEnabled) {
+            drawn.snapTo(ratio)
+            return@LaunchedEffect
+        }
         drawn.animateTo(
             ratio,
             tween(1100, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)),
         )
     }
-    LaunchedEffect(timeRatio) {
+    LaunchedEffect(timeRatio, animationsEnabled) {
+        if (!animationsEnabled) {
+            timeDrawn.snapTo(timeRatio)
+            return@LaunchedEffect
+        }
         timeDrawn.animateTo(
             timeRatio,
             tween(1300, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)),
@@ -951,7 +963,12 @@ private fun AssetChart(save: Boolean, color: Color, modifier: Modifier = Modifie
         )
     }
     val reveal = remember { Animatable(0f) }
-    LaunchedEffect(save) {
+    val animationsEnabled = LocalAnimationsEnabled.current
+    LaunchedEffect(save, animationsEnabled) {
+        if (!animationsEnabled) {
+            reveal.snapTo(1f)
+            return@LaunchedEffect
+        }
         reveal.snapTo(0f)
         reveal.animateTo(1f, tween(1100, delayMillis = 220, easing = FastOutSlowInEasing))
     }

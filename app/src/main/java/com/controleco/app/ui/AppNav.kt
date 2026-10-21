@@ -64,6 +64,7 @@ import com.controleco.app.ui.eco.EcoBackdrop
 import com.controleco.app.ui.eco.EcoBottomNav
 import com.controleco.app.ui.eco.EcoFab
 import com.controleco.app.ui.eco.EcoToastHost
+import com.controleco.app.ui.eco.LocalAnimationsEnabled
 import com.controleco.app.ui.eco.ecoFabBottomOffset
 import com.controleco.app.ui.stats.StatsScreen
 import com.controleco.app.ui.transactions.EditTransactionScreen
@@ -318,10 +319,14 @@ private fun MainScaffold(
     // 切 tab 只保留当前页：旧页立即移除，新页整体上移 10dp 就位。
     // 不做两页叠加/整页 alpha：那会让旧页透出来（重影），还要多一层全屏离屏缓冲，明显掉帧。
     var hasSwitched by remember { mutableStateOf(false) }
-    // 首帧即目标值：避免先按 1f 画一帧再归零的闪；启动首帧不播位移动画。
-    val pageIn = remember(tab) { Animatable(if (hasSwitched) 0f else 1f) }
-    LaunchedEffect(tab) {
-        if (pageIn.value < 1f) {
+    // 设置里关掉「显示动画」后，切 tab 直接换页，不做上移
+    val animationsEnabled = LocalAnimationsEnabled.current
+    // 首帧即目标值：避免先按 1f 画一帧再归零的闪；启动首帧/关闭动效时不播位移。
+    val pageIn = remember(tab) { Animatable(if (hasSwitched && animationsEnabled) 0f else 1f) }
+    LaunchedEffect(tab, animationsEnabled) {
+        if (!animationsEnabled) {
+            pageIn.snapTo(1f)
+        } else if (pageIn.value < 1f) {
             pageIn.animateTo(1f, tween(TAB_SWITCH_MS, easing = FastOutSlowInEasing))
         }
     }

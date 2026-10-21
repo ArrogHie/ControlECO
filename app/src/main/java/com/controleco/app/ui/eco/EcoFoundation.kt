@@ -25,6 +25,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -82,6 +83,13 @@ import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.eco
 
 /**
+ * 美化动效开关（来自设置里的「显示动画」，默认 true）。
+ * 为 false 时组件把动画值直接定格到终值：不滚数、不逐帧画环/柱、卡片不弹入。
+ * 由 [com.controleco.app.MainActivity] 在根部提供。
+ */
+val LocalAnimationsEnabled = compositionLocalOf { true }
+
+/**
  * 纸面背景：纸色 + 两团极淡径向光。整页共用一张，位于所有内容之下；
  * 状态栏区域也铺满，配合 edge-to-edge 让顶部没有色带。
  */
@@ -89,7 +97,15 @@ import com.controleco.app.ui.theme.eco
 fun EcoBackdrop(modifier: Modifier = Modifier) {
     val c = MaterialTheme.eco
     val reveal = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { reveal.animateTo(1f, tween(620, easing = FastOutSlowInEasing)) }
+    val animationsEnabled = LocalAnimationsEnabled.current
+    LaunchedEffect(animationsEnabled) {
+        if (!animationsEnabled) {
+            reveal.snapTo(1f)
+            return@LaunchedEffect
+        }
+        reveal.snapTo(0f)
+        reveal.animateTo(1f, tween(620, easing = FastOutSlowInEasing))
+    }
     Canvas(modifier.fillMaxSize()) {
         drawRect(c.paper)
         val w = size.width
@@ -388,7 +404,13 @@ fun EcoCountUpMoney(
     // 目标值的字符串只算一次：作为 EcoAutoMoney 的测量缓存 key，
     // cents 变化时 key 变化，旧的测量结果被自动丢弃，不会累积。
     val fitText = remember(cents, format) { format(cents) }
-    LaunchedEffect(cents) {
+    val animationsEnabled = LocalAnimationsEnabled.current
+    LaunchedEffect(cents, animationsEnabled) {
+        if (!animationsEnabled) {
+            // 关闭美化动效：直接显示目标金额
+            anim.snapTo(cents.toFloat())
+            return@LaunchedEffect
+        }
         anim.snapTo(0f)
         anim.animateTo(
             targetValue = cents.toFloat(),
@@ -452,7 +474,13 @@ fun EcoArrival(
     }
     val progress = remember { Animatable(0f) }
     val ease = CubicBezierEasing(0.17f, 0.8f, 0.18f, 1f)
-    LaunchedEffect(actualDelay) {
+    val animationsEnabled = LocalAnimationsEnabled.current
+    LaunchedEffect(actualDelay, animationsEnabled) {
+        if (!animationsEnabled) {
+            // 关闭美化动效：卡片直接落位
+            progress.snapTo(1f)
+            return@LaunchedEffect
+        }
         kotlinx.coroutines.delay(actualDelay.toLong())
         progress.animateTo(0.65f, tween(durationMillis = 364, easing = ease))
         progress.animateTo(0.84f, tween(durationMillis = 106, easing = ease))
@@ -691,7 +719,13 @@ fun EcoProgressBar(
     val target = progress.coerceIn(0f, 1f)
     // 每次进入页面都从 0 重播入场（与原型一致）
     val drawn = remember { Animatable(0f) }
-    LaunchedEffect(target) {
+    val animationsEnabled = LocalAnimationsEnabled.current
+    LaunchedEffect(target, animationsEnabled) {
+        if (!animationsEnabled) {
+            // 关闭美化动效：进度条直接到位
+            drawn.snapTo(target)
+            return@LaunchedEffect
+        }
         drawn.snapTo(0f)
         if (animationDelayMillis > 0) kotlinx.coroutines.delay(animationDelayMillis.toLong())
         drawn.animateTo(

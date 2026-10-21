@@ -20,11 +20,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -34,6 +37,9 @@ import com.controleco.app.capture.CaptureCenter
 import com.controleco.app.capture.CapturePermissions
 import com.controleco.app.data.LedgerViewModel
 import com.controleco.app.ui.AccBookNav
+import com.controleco.app.ui.ColdStartSplash
+import com.controleco.app.ui.common.AnimationPrefs
+import com.controleco.app.ui.eco.LocalAnimationsEnabled
 import com.controleco.app.ui.theme.AccBookTheme
 import com.controleco.app.ui.theme.AccentThemeStore
 import com.controleco.app.update.AppUpdate
@@ -69,9 +75,33 @@ class MainActivity : ComponentActivity() {
             ) {
                 AccBookTheme(accent = AccentThemeStore.current) {
                     val vm: LedgerViewModel = viewModel()
-                    Box(Modifier.fillMaxSize()) {
-                        AccBookNav(vm, navEvent, promptPermissions)
-                        UpdateAvailableDialog()
+                    // 「显示动画」关掉后连开屏也不播，直接进内容
+                    val animations = AnimationPrefs.enabled
+                    // 冷启动才播开屏：旋转/重建不重播
+                    var showSplash by rememberSaveable { mutableStateOf(coldStart && animations) }
+                    // 先让开屏画出第一帧，再把真实内容挂上去在开屏后面完成组合/布局/首绘，
+                    // 这样用户第一眼看到的是开屏而不是空屏，同时把首帧开销都预热掉。
+                    var contentMounted by remember { mutableStateOf(!showSplash) }
+                    LaunchedEffect(Unit) {
+                        if (!contentMounted) {
+                            withFrameNanos { }
+                            contentMounted = true
+                        }
+                    }
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        // 开屏期间也压住内容动画：内容已在后面布局/首绘完（这正是预热），
+                        // 但金额/环/柱状图先定格在终值；开屏淡出的一瞬间再统一重播，用户才看得到入场。
+                        LocalAnimationsEnabled provides (animations && !showSplash),
+                    ) {
+                        Box(Modifier.fillMaxSize()) {
+                            if (contentMounted) {
+                                AccBookNav(vm, navEvent, promptPermissions)
+                                UpdateAvailableDialog()
+                            }
+                            if (showSplash) {
+                                ColdStartSplash(onFinished = { showSplash = false })
+                            }
+                        }
                     }
                 }
             }

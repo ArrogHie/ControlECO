@@ -41,6 +41,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.controleco.app.BuildConfig
 import com.controleco.app.capture.CaptureAppCatalog
 import com.controleco.app.data.LedgerViewModel
+import com.controleco.app.ui.common.AnimationPrefs
 import com.controleco.app.ui.common.EcoIcons
 import com.controleco.app.ui.common.SettingsDivider
 import com.controleco.app.ui.common.SettingsPage
@@ -169,6 +170,13 @@ fun SettingsScreen(
 
         SettingsSection(title = "系统", aside = "SYSTEM / 系统")
         SettingsPane {
+            // 美化动效总开关：关掉后圆环填充、金额滚动、柱状图升起、卡片弹入等都不播
+            SettingsSwitchRow(
+                title = "显示动画",
+                checked = AnimationPrefs.enabled,
+                onCheckedChange = { AnimationPrefs.set(context, it) },
+            )
+            SettingsDivider()
             SettingsSwitchRow(
                 title = "自动更新",
                 checked = autoUpdate,
