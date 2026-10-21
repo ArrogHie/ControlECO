@@ -7,6 +7,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -56,7 +57,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -202,6 +202,22 @@ fun EcoBottomNav(
                     animationSpec = tween(220),
                     label = "nav-label-$index",
                 )
+                // 胶囊底/投影/小点一起淡入淡出：只让图标颜色渐变、底色却瞬切，切换时最扎眼
+                val pillAlpha by animateFloatAsState(
+                    targetValue = if (on) 1f else 0f,
+                    animationSpec = tween(220),
+                    label = "nav-pill-$index",
+                )
+                val pillElevation by animateDpAsState(
+                    targetValue = if (on) 9.dp else 0.dp,
+                    animationSpec = tween(220),
+                    label = "nav-pill-shadow-$index",
+                )
+                val dotAlpha by animateFloatAsState(
+                    targetValue = if (on) 1f else 0f,
+                    animationSpec = tween(220),
+                    label = "nav-dot-$index",
+                )
                 Column(
                     Modifier
                         .weight(1f)
@@ -219,8 +235,9 @@ fun EcoBottomNav(
                             .offset(y = lift)
                             .width(46.dp)
                             .height(29.dp)
+                            .graphicsLayer { alpha = pillAlpha }
                             .shadow(
-                                elevation = if (on) 9.dp else 0.dp,
+                                elevation = pillElevation,
                                 shape = RoundedCornerShape(15.dp),
                                 clip = false,
                                 ambientColor = c.blueDeep.copy(alpha = 0.27f),
@@ -228,13 +245,9 @@ fun EcoBottomNav(
                             )
                             .clip(RoundedCornerShape(15.dp))
                             .background(
-                                if (on) {
-                                    Brush.linearGradient(
-                                        listOf(Color(0xFFD0F2E5), c.blueSoft),
-                                    )
-                                } else {
-                                    SolidColor(Color.Transparent)
-                                },
+                                Brush.linearGradient(
+                                    listOf(Color(0xFFD0F2E5), c.blueSoft),
+                                ),
                             ),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -258,7 +271,8 @@ fun EcoBottomNav(
                             .padding(top = 1.dp)
                             .size(3.dp)
                             .clip(CircleShape)
-                            .background(if (on) c.jade else Color.Transparent),
+                            .graphicsLayer { alpha = dotAlpha }
+                            .background(c.jade),
                     )
                 }
             }
