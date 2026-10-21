@@ -250,8 +250,12 @@ fun ProfileScreen(
     var showReward by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     var showTheme by remember { mutableStateOf(false) }
-    var showDayBudget by remember { mutableStateOf(false) }
     var showMonthStart by remember { mutableStateOf(false) }
+
+    // 预算卡永远显示「日均」：日预算模式下就是日预算本身；
+    // 月预算模式下是月预算折算的日均（月预算 ÷ 本期天数，四舍五入），
+    // 这样改完月预算卡片会立刻跟着变，不会停在旧的日预算上。
+    val tileDailyCents = if (dailyBudgetMode) dailyBudgetCents else Budget.dailyEquivalent(budget, period.days)
 
     // 开源仓库链接：用系统浏览器打开（没有浏览器时静默失败，不影响其它功能）
     val openRepo: () -> Unit = {
@@ -285,10 +289,11 @@ fun ProfileScreen(
 
             BudgetDuo(
                 dailyMode = dailyBudgetMode,
-                dailyBudgetCents = dailyBudgetCents,
+                dailyBudgetCents = tileDailyCents,
                 pendingCount = pendingCount,
                 onModeChange = { vm.setDailyBudgetMode(it) },
-                onManageBudget = { showDayBudget = true },
+                // 点卡片编辑当前模式对应的预算（月预算 → 月预算 sheet，日预算 → 日预算 sheet）
+                onManageBudget = { showBudgetSheet = true },
                 onOpenPending = onOpenPending,
             )
 
@@ -310,6 +315,7 @@ fun ProfileScreen(
     }
 
     if (showBudgetSheet) {
+        // 同一个 sheet：跟着分段走——「月预算」编辑月预算，「日预算」编辑日预算
         EcoBudgetSheet(
             dailyMode = dailyBudgetMode,
             currentCents = if (dailyBudgetMode) dailyBudgetCents else budget,
@@ -318,18 +324,6 @@ fun ProfileScreen(
                 showBudgetSheet = false
             },
             onDismiss = { showBudgetSheet = false },
-        )
-    }
-
-    if (showDayBudget) {
-        EcoBudgetSheet(
-            dailyMode = true,
-            currentCents = dailyBudgetCents,
-            onSave = {
-                vm.setDailyBudget(it)
-                showDayBudget = false
-            },
-            onDismiss = { showDayBudget = false },
         )
     }
 
@@ -585,7 +579,7 @@ private fun BudgetDuo(
             }
             EcoArrival(randomDelay = true, delayMillis = 210, turn = 2.2f, modifier = Modifier.weight(1f)) {
                 DailyTile(
-                    // 用户明确要求：这块永远显示日预算，不随「月预算 / 日预算」切换
+                    // 永远显示日均：日预算模式下是日预算，月预算模式下是月预算折算的日均
                     amountCents = dailyBudgetCents,
                     onManage = onManageBudget,
                     modifier = Modifier.fillMaxSize(),
@@ -603,10 +597,12 @@ private fun BudgetDuo(
 }
 
 /**
- * 日预算瓦片：非对称圆角 10/27/10/27。
+ * 预算瓦片：非对称圆角 10/27/10/27。
  *
- * 用户明确要求：无论上面选「月预算」还是「日预算」，这里**永远显示日预算**；
- * 整张卡都可点开日预算管理，右侧铅笔只是装饰，不再单独接点击。
+ * 永远显示**日均**：日预算模式下是日预算本身，月预算模式下是「月预算 ÷ 本期天数」的折算值，
+ * 所以改完月预算这张卡会立刻跟着变。
+ * 整张卡都可点，打开的是**当前分段模式**对应的预算 sheet（月预算 → 月预算，日预算 → 日预算）；
+ * 右侧铅笔只是装饰，不单独接点击。
  */
 @Composable
 private fun DailyTile(

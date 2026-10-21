@@ -222,4 +222,24 @@ class BudgetTest {
         assertEquals(1f, Budget.warningSeverity(-0.3f, 0.2f), 0.0001f)  // 超支 30% 封顶
         assertEquals(1f, Budget.warningSeverity(-2f, 0.2f), 0.0001f)    // 更深超支不超上限
     }
+
+    // ---------- 月预算折算日均（个人页预算卡） ----------
+
+    @Test
+    fun `月预算折算日均_四舍五入`() {
+        // 5000 元 / 31 天 = 161.29 元 → 161.29 元（16129 分）
+        assertEquals(161_29, Budget.dailyEquivalent(5_000_00, 31))
+        // 整除时不引入误差
+        assertEquals(100_00, Budget.dailyEquivalent(3_100_00, 31))
+        // 5000 元 / 30 天 = 166.67 → 166.67 元（16667 分）
+        assertEquals(166_67, Budget.dailyEquivalent(5_000_00, 30))
+    }
+
+    @Test
+    fun `月预算未设置或天数非法时折算为 0`() {
+        assertEquals(0L, Budget.dailyEquivalent(0L, 31))
+        assertEquals(0L, Budget.dailyEquivalent(-1L, 31))
+        assertEquals(0L, Budget.dailyEquivalent(5_000_00, 0))
+        assertEquals(0L, Budget.dailyEquivalent(5_000_00, -1))
+    }
 }

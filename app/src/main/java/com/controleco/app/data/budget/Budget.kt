@@ -72,6 +72,18 @@ object Budget {
     fun warningSeverity(remainingRatio: Float, redBelow: Float): Float =
         ((redBelow - remainingRatio) / (redBelow + 0.3f)).coerceIn(0f, 1f)
 
+    /**
+     * 月预算折算成日均：月预算 ÷ 本期天数，四舍五入到分。
+     *
+     * 个人页预算卡永远显示日均——日预算模式下直接用日预算，月预算模式下用这个折算值，
+     * 所以改完月预算卡片会立刻跟着变，不会停在旧日预算上。
+     * 月预算 ≤ 0（未设置）或天数非法时返回 0，卡片显示「未设置」。
+     */
+    fun dailyEquivalent(monthlyCents: Long, days: Int): Long {
+        if (monthlyCents <= 0L || days <= 0) return 0L
+        return (monthlyCents + days / 2) / days
+    }
+
     data class Snapshot(
         val budgetCents: Long,
         val spentCents: Long,

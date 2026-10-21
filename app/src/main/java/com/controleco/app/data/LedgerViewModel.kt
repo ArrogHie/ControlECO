@@ -179,15 +179,18 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 切换日/月预算：切到按日时若日预算还是空的，用"月预算 ÷ 本期天数"预填，
-     * 避免对话框打开是空的（用户已设过月预算的情况下）。
+     * 切换日/月预算：切到按日时若日预算还是空的，用"月预算 ÷ 本期天数"预填；
+     * 反向切回月预算时同理用"日预算 × 本期天数"预填——个人页预算卡的日均靠月预算折算，
+     * 月预算若是空的，卡片会突然显示「未设置」，看起来像数据丢了。
      */
     fun setDailyBudgetMode(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_DAILY_BUDGET_MODE, enabled).apply()
         _dailyBudgetMode.value = enabled
+        val days = MonthPeriod.of(LocalDate.now(zone), _monthStartDay.value).days
         if (enabled && _dailyBudgetAmount.value <= 0L && _monthlyBudgetAmount.value > 0L) {
-            val days = MonthPeriod.of(LocalDate.now(zone), _monthStartDay.value).days
             setDailyBudget((_monthlyBudgetAmount.value + days - 1) / days)
+        } else if (!enabled && _monthlyBudgetAmount.value <= 0L && _dailyBudgetAmount.value > 0L) {
+            setMonthlyBudget(_dailyBudgetAmount.value * days)
         }
         AppLog.i("settings", "budgetDailyMode=$enabled")
     }
