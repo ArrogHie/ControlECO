@@ -139,7 +139,7 @@ fun ExpenseBarChart(
     val animationsEnabled = LocalContentAnimationsEnabled.current
     LaunchedEffect(bars, animationsEnabled) {
         if (!animationsEnabled) {
-            grow.snapTo(1f)
+            grow.snapTo(0f)
             return@LaunchedEffect
         }
         grow.snapTo(0f)

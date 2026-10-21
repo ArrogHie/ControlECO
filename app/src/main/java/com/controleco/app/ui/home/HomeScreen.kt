@@ -428,7 +428,7 @@ private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate
     val animationsEnabled = LocalContentAnimationsEnabled.current
     LaunchedEffect(ratio, animationsEnabled) {
         if (!animationsEnabled) {
-            drawn.snapTo(ratio)
+            drawn.snapTo(0f)
             return@LaunchedEffect
         }
         drawn.animateTo(
@@ -438,7 +438,7 @@ private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate
     }
     LaunchedEffect(timeRatio, animationsEnabled) {
         if (!animationsEnabled) {
-            timeDrawn.snapTo(timeRatio)
+            timeDrawn.snapTo(0f)
             return@LaunchedEffect
         }
         timeDrawn.animateTo(
@@ -964,7 +964,7 @@ private fun AssetChart(save: Boolean, color: Color, modifier: Modifier = Modifie
     val animationsEnabled = LocalContentAnimationsEnabled.current
     LaunchedEffect(save, animationsEnabled) {
         if (!animationsEnabled) {
-            reveal.snapTo(1f)
+            reveal.snapTo(0f)
             return@LaunchedEffect
         }
         reveal.snapTo(0f)

@@ -399,8 +399,8 @@ fun EcoCountUpMoney(
     val animationsEnabled = LocalContentAnimationsEnabled.current
     LaunchedEffect(cents, animationsEnabled) {
         if (!animationsEnabled) {
-            // 滑页过程中：直接定格到目标值，不逐帧滚数
-            anim.snapTo(cents.toFloat())
+            // 滑页过程中：停在动画起点（0），滑动结束再滚数
+            anim.snapTo(0f)
             return@LaunchedEffect
         }
         anim.snapTo(0f)
@@ -469,8 +469,8 @@ fun EcoArrival(
     val animationsEnabled = LocalContentAnimationsEnabled.current
     LaunchedEffect(actualDelay, animationsEnabled) {
         if (!animationsEnabled) {
-            // 滑页过程中：卡片直接落位，等切页完成再播“散落弹入”
-            progress.snapTo(1f)
+            // 滑页过程中：卡片停在入场前的状态（透明 + 上移 + 缩小），切完再弹入
+            progress.snapTo(0f)
             return@LaunchedEffect
         }
         kotlinx.coroutines.delay(actualDelay.toLong())
@@ -714,8 +714,8 @@ fun EcoProgressBar(
     val animationsEnabled = LocalContentAnimationsEnabled.current
     LaunchedEffect(target, animationsEnabled) {
         if (!animationsEnabled) {
-            // 滑页过程中：直接显示目标进度，不播 900ms 动画
-            drawn.snapTo(target)
+            // 滑页过程中：进度条停在 0，切完再画到目标进度
+            drawn.snapTo(0f)
             return@LaunchedEffect
         }
         drawn.snapTo(0f)

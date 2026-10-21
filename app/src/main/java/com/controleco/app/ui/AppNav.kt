@@ -376,8 +376,11 @@ private fun MainScaffold(
                             .then(if (isOutgoing) Modifier.blockPointerInput() else Modifier),
                     ) {
                         tabStates.SaveableStateProvider(index) {
-                            // 滑动期间 settled=false：页面内容动画只定格终值；滑完再重播
-                            CompositionLocalProvider(LocalContentAnimationsEnabled provides settled) {
+                            // 只冻结“新进入的当前页”：滑动时停在动画起点，滑完再播；
+                            // 滑出的旧页保持 true，避免它突然变空白。
+                            CompositionLocalProvider(
+                                LocalContentAnimationsEnabled provides (settled || !isCurrent),
+                            ) {
                                 TabPage(
                                     tab = index,
                                     vm = vm,
