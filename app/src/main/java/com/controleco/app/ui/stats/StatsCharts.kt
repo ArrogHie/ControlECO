@@ -27,7 +27,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -134,13 +133,9 @@ fun ExpenseBarChart(
     // 文字量测缓存：拖动手势每帧都会重画，避免重复量同一串数字
     val labelCache = remember(measurer, labelStyle) { mutableMapOf<String, TextLayoutResult>() }
 
-    // 柱子从轴线向上生长（原型 .chart-bar 的 scaleY 入场）。
-    // 首帧即 1f：切回统计页不再重播“整排柱子从 0 长出来”；只有柱子数据真的变了才重播。
-    val grow = remember { Animatable(1f) }
-    val lastBars = remember { mutableStateOf(bars) }
+    // 柱子从轴线向上生长，31 根柱子依次错开 6ms（原型 .chart-bar 的 scaleY 入场，每次进入重播）
+    val grow = remember { Animatable(0f) }
     LaunchedEffect(bars) {
-        if (lastBars.value == bars) return@LaunchedEffect
-        lastBars.value = bars
         grow.snapTo(0f)
         grow.animateTo(1f, tween(820, easing = FastOutSlowInEasing))
     }

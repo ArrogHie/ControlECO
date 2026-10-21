@@ -421,19 +421,16 @@ private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate
     val ratio = s.remainingRatio.coerceIn(0f, 1f)
     val daysLeft = period.daysLeft(today)
     val timeRatio = (daysLeft.toFloat() / period.days.coerceAtLeast(1)).coerceIn(0f, 1f)
-    // 首帧即当前比例：切走再切回首页时圆环不再从 0 重画（那就是视觉上的“闪”）。
-    // 只有比例真的变化（改预算 / 数据刷新）才播放 1.1s 液面与 1.3s 时间环动画。
-    val drawn = remember { Animatable(ratio) }
-    val timeDrawn = remember { Animatable(timeRatio) }
+    // 原型：液面 1.1s、时间环稍慢地画出来（每次进入首页都从 0 重播）
+    val drawn = remember { Animatable(0f) }
+    val timeDrawn = remember { Animatable(0f) }
     LaunchedEffect(ratio) {
-        if (drawn.value == ratio) return@LaunchedEffect
         drawn.animateTo(
             ratio,
             tween(1100, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)),
         )
     }
     LaunchedEffect(timeRatio) {
-        if (timeDrawn.value == timeRatio) return@LaunchedEffect
         timeDrawn.animateTo(
             timeRatio,
             tween(1300, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)),
