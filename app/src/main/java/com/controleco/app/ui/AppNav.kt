@@ -294,10 +294,9 @@ fun AccBookNav(
     }
 }
 
-/** tab 切换的位移动画时长：只做整体上移，不做两页交叉淡入 */
-private const val TAB_SWITCH_MS = 220
-/** 新页进入时上移的距离 */
-private const val TAB_RISE_DP = 10
+/** 切 tab：旧页先淡出、换页后再淡入，避免两页叠加，也不做位移“弹跳” */
+private const val TAB_FADE_OUT_MS = 100
+private const val TAB_FADE_IN_MS = 170
 
 @Composable
 private fun MainScaffold(
@@ -311,32 +310,38 @@ private fun MainScaffold(
     onOpenCategories: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    // 底栏高亮用 tab（点击即变）；页面内容用 renderedTab（淡出完成后再换），两者分离才能做“淡出→淡入”
+    var renderedTab by rememberSaveable { mutableIntStateOf(0) }
     // 再次点击当前标签 → 计数 +1，由页面自己"回到顶部"（列表/滚动页通用）
     var reenterTick by rememberSaveable { mutableIntStateOf(0) }
     val tabStates = rememberSaveableStateHolder()
 
-    // 切 tab 只保留当前页：旧页立即移除，新页整体上移 10dp 就位。
-    // 不做两页叠加/整页 alpha：那会让旧页透出来（重影），还会多一层全屏离屏缓冲，明显掉帧。
-    var hasSwitched by remember { mutableStateOf(false) }
-    // 首帧即目标值：避免先按 1f 画一帧再归零的闪；启动首帧不播位移动画。
-    val pageIn = remember(tab) { Animatable(if (hasSwitched) 0f else 1f) }
+    // 单页淡入淡出：先让旧页 alpha 1→0，再换 renderedTab 并 0→1。
+    // 全程只有一页在画，不会重叠/透出重影；换页发生在 alpha=0，看不到硬切。
+    val pageAlpha = remember { Animatable(1f) }
     LaunchedEffect(tab) {
-        if (pageIn.value < 1f) {
-            pageIn.animateTo(1f, tween(TAB_SWITCH_MS, easing = FastOutSlowInEasing))
+        if (renderedTab == tab) {
+            // 淡出途中又点回当前页：把透明度补回 1，避免停在半透明
+            if (pageAlpha.value < 1f) {
+                pageAlpha.animateTo(1f, tween(TAB_FADE_IN_MS, easing = FastOutSlowInEasing))
+            }
+            return@LaunchedEffect
         }
+        pageAlpha.animateTo(0f, tween(TAB_FADE_OUT_MS, easing = FastOutSlowInEasing))
+        renderedTab = tab
+        pageAlpha.animateTo(1f, tween(TAB_FADE_IN_MS, easing = FastOutSlowInEasing))
     }
 
     Box(Modifier.fillMaxSize()) {
-        // 只保留当前页：SaveableStateProvider 按 tab 保存滚动/局部状态，切走再回来仍在。
-        // translationY 在 layer 阶段读取，每帧只改变换矩阵：不重组、不重新测量整页，也不产生离屏 alpha 缓冲。
+        // 只渲染当前页；alpha 在 layer 阶段读取，动画期间不重组页面内容。
         Box(
             Modifier
                 .fillMaxSize()
-                .graphicsLayer { translationY = (1f - pageIn.value) * TAB_RISE_DP.dp.toPx() },
+                .graphicsLayer { alpha = pageAlpha.value },
         ) {
-            tabStates.SaveableStateProvider(tab) {
+            tabStates.SaveableStateProvider(renderedTab) {
                 TabPage(
-                    tab = tab,
+                    tab = renderedTab,
                     vm = vm,
                     reenterTick = reenterTick,
                     onEditTransaction = onEditTransaction,
@@ -354,15 +359,14 @@ private fun MainScaffold(
                 if (tab == index) {
                     reenterTick++
                 } else {
-                    hasSwitched = true
                     tab = index
                 }
             },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
-        // FAB 只属于首页/账单：切换时淡出+缩小，不要突然消失（比页面本身更扎眼）
+        // FAB 只属于首页/账单：跟实际渲染的页面走，避免页面淡出时 FAB 先消失
         AnimatedVisibility(
-            visible = tab == 0 || tab == 1,
+            visible = renderedTab == 0 || renderedTab == 1,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 19.dp, bottom = ecoFabBottomOffset()),
