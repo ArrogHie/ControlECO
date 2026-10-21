@@ -13,34 +13,26 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import kotlinx.coroutines.flow.conflate
 import kotlin.math.roundToInt
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -72,7 +64,6 @@ import com.controleco.app.ui.eco.EcoBackdrop
 import com.controleco.app.ui.eco.EcoBottomNav
 import com.controleco.app.ui.eco.EcoFab
 import com.controleco.app.ui.eco.EcoToastHost
-import com.controleco.app.ui.eco.LocalContentAnimationsEnabled
 import com.controleco.app.ui.eco.ecoFabBottomOffset
 import com.controleco.app.ui.stats.StatsScreen
 import com.controleco.app.ui.transactions.EditTransactionScreen
@@ -303,8 +294,10 @@ fun AccBookNav(
     }
 }
 
-/** 切 tab：左右平移，旧页滑出、新页滑入，两页拼满屏幕（无空白、无叠加） */
-private const val TAB_SLIDE_MS = 260
+/** tab 切换的位移动画时长：只做整体上移，不做两页交叉淡入 */
+private const val TAB_SWITCH_MS = 220
+/** 新页进入时上移的距离 */
+private const val TAB_RISE_DP = 10
 
 @Composable
 private fun MainScaffold(
@@ -318,84 +311,41 @@ private fun MainScaffold(
     onOpenCategories: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    // 底栏高亮用 tab（点击即变）；renderedTab 是当前页，outgoingTab 是正在滑出的旧页
-    var renderedTab by rememberSaveable { mutableIntStateOf(0) }
-    var outgoingTab by remember { mutableStateOf<Int?>(null) }
-    var direction by remember { mutableIntStateOf(1) }
-    // 页面是否已完全切换到位：滑动期间为 false，内容动画只定格终值、不播放；
-    // 滑完置 true，页面里的金额/环/柱状图等再统一重播，避免两页同时动画掉帧。
-    var settled by remember { mutableStateOf(true) }
     // 再次点击当前标签 → 计数 +1，由页面自己"回到顶部"（列表/滚动页通用）
     var reenterTick by rememberSaveable { mutableIntStateOf(0) }
     val tabStates = rememberSaveableStateHolder()
-    // 0 → 1 的滑动进度：0 时旧页在屏幕内、新页在屏幕外，1 时反过来
-    val slide = remember { Animatable(1f) }
 
-    // 顺序处理 tab 变化，conflate 只保留最新目标：滑动中再次点击会等当前滑完再切，
-    // 避免三页同屏，也避免同一个 tab 的 SaveableStateProvider 在两个槽位间来回搬家丢状态。
-    LaunchedEffect(Unit) {
-        snapshotFlow { tab }.conflate().collect { target ->
-            if (target == renderedTab) return@collect
-            val from = renderedTab
-            direction = if (target > from) 1 else -1
-            // 先关动画，再换页：保证新页第一帧就是“定格终值”，不会先播一帧动画
-            settled = false
-            outgoingTab = from
-            renderedTab = target
-            slide.snapTo(0f)
-            // 新页此刻停在屏外：先放过一帧，让它完成组合/布局/首绘，再开始滑动，
-            // 避免滑动第一帧就撞上整页构建导致卡顿
-            withFrameNanos { }
-            slide.animateTo(1f, tween(TAB_SLIDE_MS, easing = FastOutSlowInEasing))
-            outgoingTab = null
-            settled = true
+    // 切 tab 只保留当前页：旧页立即移除，新页整体上移 10dp 就位。
+    // 不做两页叠加/整页 alpha：那会让旧页透出来（重影），还要多一层全屏离屏缓冲，明显掉帧。
+    var hasSwitched by remember { mutableStateOf(false) }
+    // 首帧即目标值：避免先按 1f 画一帧再归零的闪；启动首帧不播位移动画。
+    val pageIn = remember(tab) { Animatable(if (hasSwitched) 0f else 1f) }
+    LaunchedEffect(tab) {
+        if (pageIn.value < 1f) {
+            pageIn.animateTo(1f, tween(TAB_SWITCH_MS, easing = FastOutSlowInEasing))
         }
     }
 
     Box(Modifier.fillMaxSize()) {
-        BoxWithConstraints(Modifier.fillMaxSize()) {
-            val pageWidth = constraints.maxWidth.toFloat()
-            // 每个 tab 固定 key 占位：旧页从“当前页”变成“滑出页”时不会重建，状态原地保留
-            for (index in 0..3) {
-                val isCurrent = index == renderedTab
-                val isOutgoing = index == outgoingTab
-                if (!isCurrent && !isOutgoing) continue
-                key(index) {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            // 两页同时平移：旧页 -W·p，新页 +W·(1-p)，边缘始终相接，没有空白也没有叠影
-                            .graphicsLayer {
-                                translationX = if (isCurrent) {
-                                    direction * pageWidth * (1f - slide.value)
-                                } else {
-                                    -direction * pageWidth * slide.value
-                                }
-                            }
-                            // 滑出中的旧页不再接收触摸，避免点左侧区域误触上一个 tab
-                            .then(if (isOutgoing) Modifier.blockPointerInput() else Modifier),
-                    ) {
-                        tabStates.SaveableStateProvider(index) {
-                            // 只冻结“新进入的当前页”：滑动时停在动画起点，滑完再播；
-                            // 滑出的旧页保持 true，避免它突然变空白。
-                            CompositionLocalProvider(
-                                LocalContentAnimationsEnabled provides (settled || !isCurrent),
-                            ) {
-                                TabPage(
-                                    tab = index,
-                                    vm = vm,
-                                    reenterTick = reenterTick,
-                                    onEditTransaction = onEditTransaction,
-                                    onOpenAccount = onOpenAccount,
-                                    onOpenImport = onOpenImport,
-                                    onOpenPending = onOpenPending,
-                                    onOpenSettings = onOpenSettings,
-                                    onOpenCategories = onOpenCategories,
-                                )
-                            }
-                        }
-                    }
-                }
+        // 只保留当前页：SaveableStateProvider 按 tab 保存滚动/局部状态，切走再回来仍在。
+        // translationY 在 layer 阶段读取，每帧只改变换矩阵：不重组、不重新测量整页，也不产生离屏 alpha 缓冲。
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer { translationY = (1f - pageIn.value) * TAB_RISE_DP.dp.toPx() },
+        ) {
+            tabStates.SaveableStateProvider(tab) {
+                TabPage(
+                    tab = tab,
+                    vm = vm,
+                    reenterTick = reenterTick,
+                    onEditTransaction = onEditTransaction,
+                    onOpenAccount = onOpenAccount,
+                    onOpenImport = onOpenImport,
+                    onOpenPending = onOpenPending,
+                    onOpenSettings = onOpenSettings,
+                    onOpenCategories = onOpenCategories,
+                )
             }
         }
         EcoBottomNav(
@@ -404,14 +354,15 @@ private fun MainScaffold(
                 if (tab == index) {
                     reenterTick++
                 } else {
+                    hasSwitched = true
                     tab = index
                 }
             },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
-        // FAB 只属于首页/账单：跟实际渲染的页面走，避免页面滑动时先消失
+        // FAB 只属于首页/账单：跟当前页走，切换时淡出+缩小，不要突然消失
         AnimatedVisibility(
-            visible = renderedTab == 0 || renderedTab == 1,
+            visible = tab == 0 || tab == 1,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 19.dp, bottom = ecoFabBottomOffset()),
@@ -459,17 +410,5 @@ private fun TabPage(
             onOpenSettings = onOpenSettings,
             onOpenCategories = onOpenCategories,
         )
-    }
-}
-
-/**
- * 消费子树内的全部指针事件（Initial 阶段，先于子节点）。
- * 只给“滑出中的旧页”用：它看得见但不该再响应点击/滑动。
- */
-private fun Modifier.blockPointerInput(): Modifier = pointerInput(Unit) {
-    awaitPointerEventScope {
-        while (true) {
-            awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
-        }
     }
 }

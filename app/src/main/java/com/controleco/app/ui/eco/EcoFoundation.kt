@@ -25,7 +25,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -81,13 +80,6 @@ import kotlin.math.roundToLong
 import com.controleco.app.ui.theme.EcoColors
 import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.eco
-
-/**
- * 内容动画开关：tab 左右滑动切换期间为 false。
- * 组件在 false 时把动画值直接定格到终值、不产生逐帧动画；切页完成后置 true 再统一重播，
- * 避免“旧页还在跑、新页又开始跑”两页同时动画导致掉帧。
- */
-val LocalContentAnimationsEnabled = compositionLocalOf { true }
 
 /**
  * 纸面背景：纸色 + 两团极淡径向光。整页共用一张，位于所有内容之下；
@@ -396,13 +388,7 @@ fun EcoCountUpMoney(
     // 目标值的字符串只算一次：作为 EcoAutoMoney 的测量缓存 key，
     // cents 变化时 key 变化，旧的测量结果被自动丢弃，不会累积。
     val fitText = remember(cents, format) { format(cents) }
-    val animationsEnabled = LocalContentAnimationsEnabled.current
-    LaunchedEffect(cents, animationsEnabled) {
-        if (!animationsEnabled) {
-            // 滑页过程中：停在动画起点（0），滑动结束再滚数
-            anim.snapTo(0f)
-            return@LaunchedEffect
-        }
+    LaunchedEffect(cents) {
         anim.snapTo(0f)
         anim.animateTo(
             targetValue = cents.toFloat(),
@@ -466,13 +452,7 @@ fun EcoArrival(
     }
     val progress = remember { Animatable(0f) }
     val ease = CubicBezierEasing(0.17f, 0.8f, 0.18f, 1f)
-    val animationsEnabled = LocalContentAnimationsEnabled.current
-    LaunchedEffect(actualDelay, animationsEnabled) {
-        if (!animationsEnabled) {
-            // 滑页过程中：卡片停在入场前的状态（透明 + 上移 + 缩小），切完再弹入
-            progress.snapTo(0f)
-            return@LaunchedEffect
-        }
+    LaunchedEffect(actualDelay) {
         kotlinx.coroutines.delay(actualDelay.toLong())
         progress.animateTo(0.65f, tween(durationMillis = 364, easing = ease))
         progress.animateTo(0.84f, tween(durationMillis = 106, easing = ease))
@@ -711,13 +691,7 @@ fun EcoProgressBar(
     val target = progress.coerceIn(0f, 1f)
     // 每次进入页面都从 0 重播入场（与原型一致）
     val drawn = remember { Animatable(0f) }
-    val animationsEnabled = LocalContentAnimationsEnabled.current
-    LaunchedEffect(target, animationsEnabled) {
-        if (!animationsEnabled) {
-            // 滑页过程中：进度条停在 0，切完再画到目标进度
-            drawn.snapTo(0f)
-            return@LaunchedEffect
-        }
+    LaunchedEffect(target) {
         drawn.snapTo(0f)
         if (animationDelayMillis > 0) kotlinx.coroutines.delay(animationDelayMillis.toLong())
         drawn.animateTo(
