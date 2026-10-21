@@ -88,10 +88,10 @@ ui/
 2. **edge-to-edge**：Activity 已 `enableEdgeToEdge()`；页面顶栏自己 `statusBarsPadding()`，底部用 `navigationBarsPadding()` 或 `ecoBottomContentPadding()`。不要在页面里再套一层 `Scaffold`。
 3. **字体最大 1.25**：`MainActivity` 用 `LocalDensity` 把系统 `fontScale` 限制在 1.25。设计按 1.25 验收；新增固定高度容器必须检查 1.25 下不裁字。
 4. **只用 ECO 组件和 token**：颜色取 `MaterialTheme.eco.*`，字号取 `EcoType.*`；不要硬编码十六进制色，不要用原生 M3 `Card` / `Scaffold` / 默认按钮。
-5. **四个 tab 的内容互斥替换**：`MainScaffold` 用 `pageIn` 做淡入 + 24px 上移，不用 `AnimatedContent` 叠两页（会残留 pointerInput 挡点击）。
-6. **再次点当前 tab 回到顶部**：通过 `reenterTick` → 页面的 `scrollToTopTick` 参数实现。新增滚动页若要支持该手势，照此接入。
+5. **四个 tab 的内容互斥替换**：`MainScaffold` 每个 tab 用固定 key 占位，切 tab 时旧页只作过渡底图（zIndex 0、触摸全消费）保留 260ms，新页 `pageIn` 淡入 + 8dp 上移；不用默认 `AnimatedContent` 叠两页（旧页 z 序/pointerInput 会挡点击）。
+6. **再次点当前 tab 回到顶部**：通过 `reenterTick` → 页面的 `scrollToTopTick` 参数实现；页面要记 `lastReenterTick`、只在 tick 增大时回顶，否则从别的 tab 切回来会复位滚动位置。新增滚动页照此接入。
 7. **底部栏与 FAB 是 overlay**：内容在它们下面滚动。滚动内容底部 padding 用 `ecoBottomContentPadding(extra)`；FAB 位置用 `ecoFabBottomOffset()`，不要自己算导航栏高度。
-8. **动效克制**：页面进入 380ms；sheet/dialog 自带入场；金额用 `EcoAutoMoney` / `EcoCountUpMoney` 自适应；尊重 `rememberReducedMotion()`（首页翻转）。
+8. **动效克制**：tab 切换 260ms、路由 300ms；sheet/dialog 自带入场；金额用 `EcoAutoMoney` / `EcoCountUpMoney` 自适应；**金额/柱状图/进度条首帧即目标值**，只在数据变化时播动画（否则切 tab 会“闪一下”）；尊重 `rememberReducedMotion()`（首页翻转）。
 9. **文案短、状态准**：标题/按钮尽量 2–4 字；动态状态（待补、待确认、已退款、未开启）不能省；**真正不可恢复的删除（记录/账户）**保留「删除后不可恢复」，分类删除则说明流水归入「其他」；**页面不预置规则/边界说明**，只在用户触发时提示；导入步骤、权限教程属于功能文案，不要“精简”掉；**任何文字前不加 `·`**，也不用 `·` 分隔字段（用空格、`/` 或中文标点）。
 10. **数据未就绪先不画**：首页/统计/个人页在关键 Flow 为 `null` 时直接 `return`，避免先显示 0 再跳数。新增汇总卡沿用该约定。
 
