@@ -54,6 +54,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
@@ -66,6 +67,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -121,33 +125,81 @@ private val MID_GAP = 8.dp
 private val BOTTOM_HEIGHT = 66.dp
 
 /**
- * 卡片浮雕：照原型 CSS 的多层 box-shadow 拆开画。
- * inset 0 1px 0 白色高光贴顶边，inset 0 -3px 7px 暗边压底边；
- * 外投影仍交给 Modifier.shadow，描边保持 1dp 不变。
+ * 书签形待确认卡：上边与左右是圆角，下边中间向上凹一个 V 形口。
+ * 对应原型里那张异形卡（不是贴图，是路径）。
  */
-private fun Modifier.cardRelief(
+private object BookmarkShape : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val w = size.width
+        val h = size.height
+        val r = with(density) { 16.dp.toPx() }.coerceAtMost(w / 2f).coerceAtMost(h / 4f)
+        val notchHalf = w * 0.26f
+        val notchDepth = h * 0.22f
+        val path = Path().apply {
+            moveTo(r, 0f)
+            lineTo(w - r, 0f)
+            quadraticBezierTo(w, 0f, w, r)
+            lineTo(w, h - r)
+            quadraticBezierTo(w, h, w - r, h)
+            // 下边：右角 → 中间凸峰（峰顶略作圆角）→ 左角
+            lineTo(w * 0.5f + notchHalf, h)
+            quadraticBezierTo(
+                w * 0.5f + notchHalf * 0.35f, h - notchDepth * 0.72f,
+                w * 0.5f, h - notchDepth,
+            )
+            quadraticBezierTo(
+                w * 0.5f - notchHalf * 0.35f, h - notchDepth * 0.72f,
+                w * 0.5f - notchHalf, h,
+            )
+            lineTo(r, h)
+            quadraticBezierTo(0f, h, 0f, h - r)
+            lineTo(0f, r)
+            quadraticBezierTo(0f, 0f, r, 0f)
+            close()
+        }
+        return Outline.Generic(path)
+    }
+}
+
+/**
+ * 同形状底盘：把同样的路径往右下垫一层实色，做出「厚」的侧面。
+ * 右边比底边薄（原型里侧面只露一点点），所以水平偏移默认小于垂直偏移。
+ * 它和卡片同一个形状，所以不会像外投影那样在圆角/异形处冒出方框。
+ */
+private fun Modifier.cardPlate(
     shape: Shape,
-    c: EcoColors,
-    topAlpha: Float = if (c.isDark) 0.16f else 0.78f,
-    bottomAlpha: Float = if (c.isDark) 0.22f else 0.12f,
+    color: Color,
+    offsetX: Dp = 1.5.dp,
+    offsetY: Dp = 3.5.dp,
+): Modifier = drawBehind {
+    val path = Path().apply { addOutline(shape.createOutline(size, layoutDirection, this@drawBehind)) }
+    translate(offsetX.toPx(), offsetY.toPx()) { drawPath(path, color) }
+}
+
+/**
+ * 卡内浮雕：贴顶边一圈高光 + 底边内侧一道暗边，都按卡片自身形状裁切。
+ * 颜色/厚度逐卡传参，用来区分不同卡片的材质。
+ */
+private fun Modifier.cardInset(
+    shape: Shape,
+    topColor: Color,
+    topHeight: Dp = 1.2.dp,
+    bottomColor: Color,
+    band: Dp = 12.dp,
 ): Modifier = drawWithContent {
     val path = Path().apply { addOutline(shape.createOutline(size, layoutDirection, this@drawWithContent)) }
     clipPath(path) {
-        drawRect(
-            color = Color.White.copy(alpha = topAlpha),
-            size = Size(size.width, 1.2.dp.toPx()),
-        )
-        val band = 12.dp.toPx()
+        drawRect(topColor, size = Size(size.width, topHeight.toPx()))
+        val b = band.toPx()
         drawRect(
             brush = Brush.verticalGradient(
                 0f to Color.Transparent,
-                0.5f to Color.Black.copy(alpha = bottomAlpha * 0.45f),
-                1f to Color.Black.copy(alpha = bottomAlpha),
-                startY = size.height - band,
+                1f to bottomColor,
+                startY = size.height - b,
                 endY = size.height,
             ),
-            topLeft = Offset(0f, size.height - band),
-            size = Size(size.width, band),
+            topLeft = Offset(0f, size.height - b),
+            size = Size(size.width, b),
         )
     }
     drawContent()
@@ -211,7 +263,8 @@ fun ProfileScreen(
                 .fillMaxWidth()
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 22.dp)
+                // 留出右侧底盘（1.5dp）与弹出缩放的余量，避免被滚动容器裁掉
+                .padding(horizontal = 20.dp)
                 .padding(top = 2.dp, bottom = ecoBottomContentPadding(extra = 10.dp)),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -326,6 +379,7 @@ private fun BudgetHero(
     onOpenAccount: () -> Unit,
     onManageBudget: () -> Unit,
 ) {
+    val c = MaterialTheme.eco
     val ratio = (snapshot?.spentRatio ?: if (budgetCents > 0) spentCents.toFloat() / budgetCents else 0f)
         .coerceIn(0f, 1f)
     val pct = (ratio * 100f).roundToInt()
@@ -333,7 +387,20 @@ private fun BudgetHero(
     // 原型 hero 金额固定两位小数（¥3,000.00），未设置时显示短字样
     val amountText = if (budgetCents > 0) Money.formatYuanGroupedFixed(budgetCents) else "未设置"
 
-    EcoHeroCard(modifier = Modifier.fillMaxWidth().height(HERO_HEIGHT)) {
+    // 本月预算：圆角方形（不再是 12/33 的非对称圆角）
+    val heroShape = RoundedCornerShape(28.dp)
+    EcoHeroCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(HERO_HEIGHT)
+            // hero 的厚度：同形状底盘下移 4dp
+            .cardPlate(
+                heroShape,
+                (if (c.isDark) Color(0xFF07171C) else Color(0xFF0B2A33)).copy(alpha = 0.55f),
+                offsetX = 2.dp, offsetY = 4.2.dp,
+            ),
+        shape = heroShape,
+    ) {
         Column(Modifier.fillMaxSize().padding(17.dp)) {
             // 眉毛 + 右侧两个动作
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -549,15 +616,22 @@ private fun DailyTile(
     Box(
         modifier
             .shadow(
-                elevation = 10.dp,
+                elevation = 2.dp,
                 shape = shape,
                 clip = false,
-                ambientColor = c.ink.copy(alpha = if (c.isDark) 0.44f else 0.16f),
-                spotColor = c.ink.copy(alpha = if (c.isDark) 0.58f else 0.26f),
+                ambientColor = Color.Transparent,
+                spotColor = c.ink.copy(alpha = if (c.isDark) 0.34f else 0.16f),
             )
+            .cardPlate(shape, c.blue.copy(alpha = if (c.isDark) 0.34f else 0.26f), offsetX = 1.2.dp, offsetY = 2.8.dp)
             .clip(shape)
             .background(softGradient(c, c.blueSoft, 0.62f, 0.5f))
-            .cardRelief(shape, c)
+            .cardInset(
+                shape = shape,
+                topColor = Color.White.copy(alpha = if (c.isDark) 0.14f else 0.72f),
+                topHeight = 1.5.dp,
+                bottomColor = c.blue.copy(alpha = if (c.isDark) 0.20f else 0.13f),
+                band = 13.dp,
+            )
             .border(1.dp, c.rule, shape)
             .clickable(onClick = onManage),
     ) {
@@ -646,32 +720,40 @@ private fun PendingPill(count: Int, onClick: () -> Unit, modifier: Modifier = Mo
         ),
         label = "pending-wiggle-angle",
     )
-    val shape = RoundedCornerShape(50)
+    val shape: Shape = BookmarkShape
     val bgTop: Color
     val bgBottom: Color
     val borderColor: Color
     val fg: Color
+    val plate: Color
+    val innerShade: Color
     if (alert) {
         bgTop = if (c.isDark) lerp(c.claySoft, Color.White, 0.10f) else Color(0xFFFFF8ED)
         bgBottom = if (c.isDark) lerp(c.claySoft, c.surface, 0.18f) else Color(0xFFF9DED0)
         borderColor = if (c.isDark) c.clay.copy(alpha = 0.42f) else Color(0xFFF0CEBC)
         fg = if (c.isDark) c.clayHi else Color(0xFFA74E42)
+        plate = Color(0xFFD9A28F)
+        innerShade = Color(0xFFB4785F)
     } else {
         bgTop = if (c.isDark) lerp(c.jadeSoft, Color.White, 0.05f) else Color(0xFFF2FAF1)
         bgBottom = if (c.isDark) lerp(c.jadeSoft, c.surface, 0.16f) else Color(0xFFDCEFE1)
         borderColor = if (c.isDark) c.jade.copy(alpha = 0.36f) else Color(0xFFCBE4D2)
         fg = if (c.isDark) c.jade else Color(0xFF356B4E)
+        plate = Color(0xFFA9C7B2)
+        innerShade = Color(0xFF7FA88C)
     }
 
     Box(
         modifier
             .shadow(
-                elevation = 11.dp,
+                elevation = 2.dp,
                 shape = shape,
                 clip = false,
-                ambientColor = fg.copy(alpha = if (c.isDark) 0.34f else 0.26f),
-                spotColor = fg.copy(alpha = if (c.isDark) 0.42f else 0.32f),
+                ambientColor = Color.Transparent,
+                spotColor = fg.copy(alpha = if (c.isDark) 0.34f else 0.18f),
             )
+            // 书签的“厚度”：同形状底盘下移 3.5dp
+            .cardPlate(shape, plate.copy(alpha = if (c.isDark) 0.80f else 0.70f), offsetX = 1.7.dp, offsetY = 3.8.dp)
             .clip(shape)
             .drawBehind {
                 drawRect(
@@ -682,35 +764,41 @@ private fun PendingPill(count: Int, onClick: () -> Unit, modifier: Modifier = Mo
                     ),
                 )
             }
-            .cardRelief(shape, c)
+            .cardInset(
+                shape = shape,
+                topColor = Color.White.copy(alpha = if (c.isDark) 0.16f else 0.74f),
+                topHeight = 3.dp,
+                bottomColor = innerShade.copy(alpha = if (c.isDark) 0.22f else 0.16f),
+                band = 15.dp,
+            )
             .border(1.dp, borderColor, shape)
             .clickable(onClick = onClick),
     ) {
-        // 内置双层环：外层虚线（inset 6）、内层实线（inset 18x17）
+        // 内圈虚线：同一书签形状内缩 6dp，跟着缺口走
         Canvas(Modifier.matchParentSize()) {
             val stroke = 1.dp.toPx()
             val inset = 6.dp.toPx()
-            drawRoundRect(
-                color = fg.copy(alpha = 0.30f),
-                topLeft = Offset(inset, inset),
-                size = Size(size.width - inset * 2f, size.height - inset * 2f),
-                cornerRadius = CornerRadius((size.width - inset * 2f) / 2f),
-                style = Stroke(
-                    width = stroke,
-                    pathEffect = PathEffect.dashPathEffect(
-                        floatArrayOf(3.dp.toPx(), 4.dp.toPx()),
+            val inner = Path().apply {
+                addOutline(
+                    BookmarkShape.createOutline(
+                        Size(size.width - inset * 2f, size.height - inset * 2f),
+                        LayoutDirection.Ltr,
+                        this@Canvas,
                     ),
-                ),
-            )
-            val ix = 18.dp.toPx()
-            val iy = 17.dp.toPx()
-            drawRoundRect(
-                color = fg.copy(alpha = 0.15f),
-                topLeft = Offset(ix, iy),
-                size = Size(size.width - ix * 2f, size.height - iy * 2f),
-                cornerRadius = CornerRadius((size.width - ix * 2f) / 2f),
-                style = Stroke(width = stroke),
-            )
+                )
+            }
+            translate(inset, inset) {
+                drawPath(
+                    path = inner,
+                    color = fg.copy(alpha = 0.28f),
+                    style = Stroke(
+                        width = stroke,
+                        pathEffect = PathEffect.dashPathEffect(
+                            floatArrayOf(3.dp.toPx(), 4.dp.toPx()),
+                        ),
+                    ),
+                )
+            }
         }
 
         Column(
@@ -811,15 +899,22 @@ private fun CategoryCard(
     Box(
         modifier
             .shadow(
-                elevation = 11.dp,
+                elevation = 2.dp,
                 shape = shape,
                 clip = false,
-                ambientColor = c.jade.copy(alpha = if (c.isDark) 0.36f else 0.26f),
-                spotColor = c.ink.copy(alpha = if (c.isDark) 0.58f else 0.24f),
+                ambientColor = Color.Transparent,
+                spotColor = c.jade.copy(alpha = if (c.isDark) 0.34f else 0.16f),
             )
+            .cardPlate(shape, c.jade.copy(alpha = if (c.isDark) 0.34f else 0.26f), offsetX = 1.5.dp, offsetY = 3.4.dp)
             .clip(shape)
             .background(softGradient(c, c.jadeSoft, 0.92f, 0.62f))
-            .cardRelief(shape, c)
+            .cardInset(
+                shape = shape,
+                topColor = Color.White.copy(alpha = if (c.isDark) 0.16f else 0.85f),
+                topHeight = 1.5.dp,
+                bottomColor = c.jade.copy(alpha = if (c.isDark) 0.22f else 0.14f),
+                band = 14.dp,
+            )
             .border(1.dp, c.jade.copy(alpha = 0.18f), shape)
             .clickable(onClick = onClick),
     ) {
@@ -885,21 +980,29 @@ private fun MonthStartCard(
     modifier: Modifier = Modifier,
 ) {
     val c = MaterialTheme.eco
-    val shape = RoundedCornerShape(12.dp, 28.dp, 12.dp, 28.dp)
+    // 每月首日：圆角方形
+    val shape = RoundedCornerShape(24.dp)
     val dayLabel = "%02d 日".format(monthStartDay)
 
     Box(
         modifier
             .shadow(
-                elevation = 10.dp,
+                elevation = 2.dp,
                 shape = shape,
                 clip = false,
-                ambientColor = c.ink.copy(alpha = if (c.isDark) 0.44f else 0.16f),
-                spotColor = c.ink.copy(alpha = if (c.isDark) 0.58f else 0.26f),
+                ambientColor = Color.Transparent,
+                spotColor = c.ink.copy(alpha = if (c.isDark) 0.34f else 0.16f),
             )
+            .cardPlate(shape, c.blue.copy(alpha = if (c.isDark) 0.34f else 0.26f), offsetX = 1.5.dp, offsetY = 3.4.dp)
             .clip(shape)
             .background(softGradient(c, c.blueSoft, 0.72f, 0.5f), shape)
-            .cardRelief(shape, c)
+            .cardInset(
+                shape = shape,
+                topColor = Color.White.copy(alpha = if (c.isDark) 0.15f else 0.80f),
+                topHeight = 1.5.dp,
+                bottomColor = c.blue.copy(alpha = if (c.isDark) 0.20f else 0.13f),
+                band = 13.dp,
+            )
             .border(1.dp, c.blue.copy(alpha = 0.16f), shape)
             .clickable(onClick = onOpen),
     ) {
@@ -955,19 +1058,27 @@ private fun MonthStartCard(
 @Composable
 private fun SettingsCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = MaterialTheme.eco
-    val shape = RoundedCornerShape(28.dp, 12.dp, 28.dp, 12.dp)
+    // 设置：横向胶囊（上下直边、左右半圆）
+    val shape = RoundedCornerShape(50)
     Box(
         modifier
             .shadow(
-                elevation = 10.dp,
+                elevation = 2.dp,
                 shape = shape,
                 clip = false,
-                ambientColor = c.ink.copy(alpha = if (c.isDark) 0.44f else 0.15f),
-                spotColor = c.ink.copy(alpha = if (c.isDark) 0.58f else 0.24f),
+                ambientColor = Color.Transparent,
+                spotColor = c.jade.copy(alpha = if (c.isDark) 0.34f else 0.16f),
             )
+            .cardPlate(shape, c.amber.copy(alpha = if (c.isDark) 0.34f else 0.26f), offsetX = 1.5.dp, offsetY = 3.4.dp)
             .clip(shape)
             .background(softGradient(c, c.amberSoft, 0.5f, 0.42f))
-            .cardRelief(shape, c)
+            .cardInset(
+                shape = shape,
+                topColor = Color.White.copy(alpha = if (c.isDark) 0.14f else 0.78f),
+                topHeight = 1.5.dp,
+                bottomColor = c.amber.copy(alpha = if (c.isDark) 0.20f else 0.13f),
+                band = 12.dp,
+            )
             .border(1.dp, c.rule, shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp),
@@ -1001,13 +1112,17 @@ private fun BottomRow(
         horizontalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         EcoArrival(randomDelay = true, delayMillis = 560, turn = -2.4f) {
-            GitHubOrb(onClick = onOpenRepo, modifier = Modifier.size(63.dp))
+            GitHubOrb(onClick = onOpenRepo, modifier = Modifier.size(BOTTOM_HEIGHT))
         }
-        // 中间列：打赏 + 主题各占一半（原型 support-actions）
+        // 中间列：打赏 + 主题，两个正圆
         EcoArrival(randomDelay = true, delayMillis = 610, turn = 2.4f, modifier = Modifier.weight(1.03f).fillMaxHeight()) {
-            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                RewardTile(onClick = onReward, modifier = Modifier.weight(1f).fillMaxHeight())
-                AccentTile(onClick = onTheme, modifier = Modifier.weight(1f).fillMaxHeight())
+            Row(
+                Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RewardTile(onClick = onReward, modifier = Modifier.size(BOTTOM_HEIGHT))
+                AccentTile(onClick = onTheme, modifier = Modifier.size(BOTTOM_HEIGHT))
             }
         }
         EcoArrival(randomDelay = true, delayMillis = 680, turn = 2.2f, modifier = Modifier.weight(1.27f).fillMaxHeight()) {
@@ -1021,9 +1136,17 @@ private fun BottomRow(
 private fun GitHubOrb(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
-            .shadow(10.dp, CircleShape, ambientColor = Color(0x6B10242A), spotColor = Color(0x8010242A))
+            .shadow(1.5.dp, CircleShape, ambientColor = Color.Transparent, spotColor = Color(0x4010242A))
+            .cardPlate(CircleShape, Color(0xFF050F14).copy(alpha = 0.85f), offsetX = 1.5.dp, offsetY = 3.4.dp)
             .clip(CircleShape)
             .background(Color(0xFF18282D))
+            .cardInset(
+                shape = CircleShape,
+                topColor = Color.White.copy(alpha = 0.18f),
+                topHeight = 2.dp,
+                bottomColor = Color.Black.copy(alpha = 0.24f),
+                band = 14.dp,
+            )
             .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -1040,8 +1163,9 @@ private fun GitHubOrb(onClick: () -> Unit, modifier: Modifier = Modifier) {
 private fun AccentTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
-            .shadow(10.dp, RoundedCornerShape(50), ambientColor = Color(0x554C6F6B), spotColor = Color(0x664C6F6B))
-            .clip(RoundedCornerShape(50))
+            .shadow(1.5.dp, CircleShape, ambientColor = Color.Transparent, spotColor = Color(0x404C6F6B))
+            .cardPlate(CircleShape, Color(0xFF5A6F6B).copy(alpha = 0.55f), offsetX = 1.5.dp, offsetY = 3.4.dp)
+            .clip(CircleShape)
             .background(
                 Brush.linearGradient(
                     listOf(
@@ -1052,7 +1176,14 @@ private fun AccentTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
                     end = Offset.Infinite,
                 ),
             )
-            .border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(50))
+            .cardInset(
+                shape = CircleShape,
+                topColor = Color.White.copy(alpha = 0.40f),
+                topHeight = 2.dp,
+                bottomColor = Color(0xFF122A26).copy(alpha = 0.22f),
+                band = 14.dp,
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.65f), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -1072,10 +1203,10 @@ private fun ImportTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
             .shadow(
-                elevation = 10.dp,
+                elevation = 2.dp,
                 shape = RoundedCornerShape(50),
                 clip = false,
-                ambientColor = c.heroB.copy(alpha = 0.34f),
+                ambientColor = Color.Transparent,
                 spotColor = c.heroB.copy(alpha = 0.4f),
             )
             .clip(RoundedCornerShape(50))
@@ -1104,10 +1235,10 @@ private fun ImportOrb(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
             .shadow(
-                elevation = 13.dp,
+                elevation = 3.dp,
                 shape = CircleShape,
                 clip = false,
-                ambientColor = c.heroB.copy(alpha = 0.36f),
+                ambientColor = Color.Transparent,
                 spotColor = c.heroB.copy(alpha = 0.42f),
             )
             .clip(CircleShape)
@@ -1141,13 +1272,14 @@ private fun RewardTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
             .shadow(
-                elevation = 11.dp,
-                shape = RoundedCornerShape(50),
+                elevation = 2.dp,
+                shape = CircleShape,
                 clip = false,
-                ambientColor = Color(0xFFC45854).copy(alpha = 0.34f),
-                spotColor = Color(0xFFC45854).copy(alpha = 0.4f),
+                ambientColor = Color.Transparent,
+                spotColor = Color(0xFFC45854).copy(alpha = 0.30f),
             )
-            .clip(RoundedCornerShape(50))
+            .cardPlate(CircleShape, Color(0xFF8E3A31).copy(alpha = 0.70f), offsetX = 1.5.dp, offsetY = 3.4.dp)
+            .clip(CircleShape)
             .background(
                 Brush.linearGradient(
                     listOf(Color(0xFFE78C74), Color(0xFFC45854)),
@@ -1155,7 +1287,14 @@ private fun RewardTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
                     end = Offset.Infinite,
                 ),
             )
-            .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(50))
+            .cardInset(
+                shape = CircleShape,
+                topColor = Color.White.copy(alpha = 0.42f),
+                topHeight = 2.dp,
+                bottomColor = Color(0xFF6E2A22).copy(alpha = 0.24f),
+                band = 14.dp,
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -1184,10 +1323,10 @@ private fun AboutTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier
             .shadow(
-                elevation = 11.dp,
+                elevation = 2.dp,
                 shape = RoundedCornerShape(50),
                 clip = false,
-                ambientColor = c.heroB.copy(alpha = 0.34f),
+                ambientColor = Color.Transparent,
                 spotColor = c.heroB.copy(alpha = 0.4f),
             )
             .clip(RoundedCornerShape(50))

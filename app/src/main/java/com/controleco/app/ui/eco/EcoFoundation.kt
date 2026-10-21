@@ -408,15 +408,16 @@ fun EcoArrival(
     }
     val p = progress.value
     fun lerpTo(a: Float, b: Float, t: Float) = a + (b - a) * t
+    // 幅度按可见区域收窄：缩放上限 1.012、上移 14px，避免被父容器裁掉
     val risePx = when {
-        p <= 0.65f -> lerpTo(25f, -5f, p / 0.65f)
-        p <= 0.84f -> lerpTo(-5f, 1f, (p - 0.65f) / 0.19f)
-        else -> lerpTo(1f, 0f, (p - 0.84f) / 0.16f)
+        p <= 0.65f -> lerpTo(14f, -3f, p / 0.65f)
+        p <= 0.84f -> lerpTo(-3f, 0.6f, (p - 0.65f) / 0.19f)
+        else -> lerpTo(0.6f, 0f, (p - 0.84f) / 0.16f)
     }
     val scale = when {
-        p <= 0.65f -> lerpTo(0.79f, 1.042f, p / 0.65f)
-        p <= 0.84f -> lerpTo(1.042f, 0.992f, (p - 0.65f) / 0.19f)
-        else -> lerpTo(0.992f, 1f, (p - 0.84f) / 0.16f)
+        p <= 0.65f -> lerpTo(0.90f, 1.012f, p / 0.65f)
+        p <= 0.84f -> lerpTo(1.012f, 0.996f, (p - 0.65f) / 0.19f)
+        else -> lerpTo(0.996f, 1f, (p - 0.84f) / 0.16f)
     }
     val rot = when {
         p <= 0.65f -> lerpTo(startTurn, -0.7f, p / 0.65f)
