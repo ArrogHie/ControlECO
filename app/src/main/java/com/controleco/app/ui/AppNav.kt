@@ -19,8 +19,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,11 +28,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -299,8 +294,10 @@ fun AccBookNav(
     }
 }
 
-/** tab 切换的交叉淡入时长：短到不拖沓，长到足以盖住新页首帧布局 */
-private const val TAB_SWITCH_MS = 260
+/** tab 切换的位移动画时长：只做整体上移，不做两页交叉淡入 */
+private const val TAB_SWITCH_MS = 220
+/** 新页进入时上移的距离 */
+private const val TAB_RISE_DP = 10
 
 @Composable
 private fun MainScaffold(
@@ -318,59 +315,37 @@ private fun MainScaffold(
     var reenterTick by rememberSaveable { mutableIntStateOf(0) }
     val tabStates = rememberSaveableStateHolder()
 
-    // 单页直接替换时旧页瞬间消失、新页又从 alpha 0 淡入，中间几帧只剩纸面 —— 观感就是“闪一下”。
-    // 这里把旧页保留为过渡底图（动画结束立刻释放），新页在它上面淡入，任何一帧都有完整内容。
-    var previousTab by remember { mutableStateOf<Int?>(null) }
-    // 旧页被替换时它自身可能还在淡入；记下当前 alpha，避免瞬间跳回 1（快速连点会闪亮）。
-    var previousAlpha by remember { mutableFloatStateOf(1f) }
+    // 切 tab 只保留当前页：旧页立即移除，新页整体上移 10dp 就位。
+    // 不做两页叠加/整页 alpha：那会让旧页透出来（重影），还会多一层全屏离屏缓冲，明显掉帧。
     var hasSwitched by remember { mutableStateOf(false) }
-    // 首帧就用目标值创建：旧写法 remember { Animatable(1f) } + 事后 snapTo(0f) 会让新页
-    // 先以全不透明画一帧再突然归零，正是“闪一下”的来源。remember(tab) 保证首帧即目标值。
+    // 首帧即目标值：避免先按 1f 画一帧再归零的闪；启动首帧不播位移动画。
     val pageIn = remember(tab) { Animatable(if (hasSwitched) 0f else 1f) }
     LaunchedEffect(tab) {
         if (pageIn.value < 1f) {
             pageIn.animateTo(1f, tween(TAB_SWITCH_MS, easing = FastOutSlowInEasing))
         }
-        // 新页已完全不透明，撤掉旧底图不会产生任何视觉变化
-        previousTab = null
     }
 
     Box(Modifier.fillMaxSize()) {
-        // 每个 tab 用固定 key 占位：切走后它仍在树上（只是退到底层），
-        // SaveableStateProvider 只有一份，滚动位置/rememberSaveable 原地保留，不重建、不重播入场动画。
-        for (index in 0..3) {
-            val isCurrent = index == tab
-            val isPrevious = index == previousTab
-            if (isCurrent || isPrevious) {
-                key(index) {
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            // 当前页必须在最上层；旧页在下层并吞掉全部触摸，
-                            // 否则旧页 pointerInput 会挡住新页点击（AnimatedContent 时代的坑）。
-                            .zIndex(if (isCurrent) 1f else 0f)
-                            // alpha 在 draw 阶段读取，动画每帧只失效图层，不重组整页
-                            .graphicsLayer {
-                                this.alpha = if (isCurrent) pageIn.value else previousAlpha
-                                if (isCurrent) translationY = (1f - pageIn.value) * 8.dp.toPx()
-                            }
-                            .then(if (isCurrent) Modifier else Modifier.blockPointerInput()),
-                    ) {
-                        tabStates.SaveableStateProvider(index) {
-                            TabPage(
-                                tab = index,
-                                vm = vm,
-                                reenterTick = reenterTick,
-                                onEditTransaction = onEditTransaction,
-                                onOpenAccount = onOpenAccount,
-                                onOpenImport = onOpenImport,
-                                onOpenPending = onOpenPending,
-                                onOpenSettings = onOpenSettings,
-                                onOpenCategories = onOpenCategories,
-                            )
-                        }
-                    }
-                }
+        // 只保留当前页：SaveableStateProvider 按 tab 保存滚动/局部状态，切走再回来仍在。
+        // translationY 在 layer 阶段读取，每帧只改变换矩阵：不重组、不重新测量整页，也不产生离屏 alpha 缓冲。
+        Box(
+            Modifier
+                .fillMaxSize()
+                .graphicsLayer { translationY = (1f - pageIn.value) * TAB_RISE_DP.dp.toPx() },
+        ) {
+            tabStates.SaveableStateProvider(tab) {
+                TabPage(
+                    tab = tab,
+                    vm = vm,
+                    reenterTick = reenterTick,
+                    onEditTransaction = onEditTransaction,
+                    onOpenAccount = onOpenAccount,
+                    onOpenImport = onOpenImport,
+                    onOpenPending = onOpenPending,
+                    onOpenSettings = onOpenSettings,
+                    onOpenCategories = onOpenCategories,
+                )
             }
         }
         EcoBottomNav(
@@ -380,22 +355,16 @@ private fun MainScaffold(
                     reenterTick++
                 } else {
                     hasSwitched = true
-                    previousTab = tab
-                    previousAlpha = pageIn.value
                     tab = index
                 }
             },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                // 页面当前层是 zIndex 1，底栏必须更高才能压在上面并优先接收点击
-                .zIndex(2f),
+            modifier = Modifier.align(Alignment.BottomCenter),
         )
         // FAB 只属于首页/账单：切换时淡出+缩小，不要突然消失（比页面本身更扎眼）
         AnimatedVisibility(
             visible = tab == 0 || tab == 1,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .zIndex(2f)
                 .padding(end = 19.dp, bottom = ecoFabBottomOffset()),
             enter = fadeIn(tween(180)) +
                 scaleIn(initialScale = 0.86f, animationSpec = tween(220, easing = FastOutSlowInEasing)),
@@ -407,7 +376,7 @@ private fun MainScaffold(
     }
 }
 
-/** 当前 tab 的真实内容；主页面与过渡底图共用，保证两处渲染完全一致 */
+/** 当前 tab 的真实内容；同一时刻只渲染这一份，避免两页重叠 */
 @Composable
 private fun TabPage(
     tab: Int,
@@ -441,17 +410,5 @@ private fun TabPage(
             onOpenSettings = onOpenSettings,
             onOpenCategories = onOpenCategories,
         )
-    }
-}
-
-/**
- * 消费子树内的全部指针事件（Initial 阶段，先于子节点）。
- * 只给“过渡中的旧页”用：它看得见但不该再响应任何点击/滑动。
- */
-private fun Modifier.blockPointerInput(): Modifier = pointerInput(Unit) {
-    awaitPointerEventScope {
-        while (true) {
-            awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
-        }
     }
 }
