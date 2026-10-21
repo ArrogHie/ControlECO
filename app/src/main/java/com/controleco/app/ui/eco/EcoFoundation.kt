@@ -303,6 +303,10 @@ fun EcoAutoMoney(
     widthLimit: Dp? = null,
     minSize: TextUnit = 18.sp,
     textAlign: TextAlign = TextAlign.Center,
+    // 量文本用哪个字符串：滚数时传最终值，字体尺寸只在目标变化时量一次；
+    // 动画期间逐帧换数字不再重复量 12 次（切页/滚数卡顿的主因）。
+    // remember 以 fitText 为 key，数值更新时旧测量结果自动丢弃，不会越积越多。
+    fitText: String = text,
 ) {
     val measurer = rememberTextMeasurer()
     BoxWithConstraints(modifier) {
@@ -313,12 +317,12 @@ fun EcoAutoMoney(
         } else {
             with(density) { available.toPx() }
         }
-        val fitted = remember(text, style, availablePx) {
+        val fitted = remember(fitText, style, availablePx) {
             var size = style.fontSize
             var guard = 0
             while (guard++ < 12) {
                 val result = measurer.measure(
-                    text = AnnotatedString(text),
+                    text = AnnotatedString(fitText),
                     style = style.copy(fontSize = size),
                     maxLines = 1,
                     softWrap = false,
@@ -357,6 +361,9 @@ fun EcoCountUpMoney(
     format: (Long) -> String = { Money.formatYuanGroupedFixed(it) },
 ) {
     val anim = remember { Animatable(0f) }
+    // 目标值的字符串只算一次：作为 EcoAutoMoney 的测量缓存 key，
+    // cents 变化时 key 变化，旧的测量结果被自动丢弃，不会累积。
+    val fitText = remember(cents, format) { format(cents) }
     LaunchedEffect(cents) {
         anim.snapTo(0f)
         anim.animateTo(
@@ -375,6 +382,8 @@ fun EcoCountUpMoney(
         widthLimit = widthLimit,
         minSize = minSize,
         textAlign = textAlign,
+        // 用最终值做一次测量并缓存，滚动过程中复用，避免每帧重新量
+        fitText = fitText,
     )
 }
 
