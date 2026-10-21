@@ -234,23 +234,28 @@ fun EcoBottomNav(
                         Modifier
                             .offset(y = lift)
                             .width(46.dp)
-                            .height(29.dp)
-                            .graphicsLayer { alpha = pillAlpha }
-                            .shadow(
-                                elevation = pillElevation,
-                                shape = RoundedCornerShape(15.dp),
-                                clip = false,
-                                ambientColor = c.blueDeep.copy(alpha = 0.27f),
-                                spotColor = c.blueDeep.copy(alpha = 0.27f),
-                            )
-                            .clip(RoundedCornerShape(15.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(Color(0xFFD0F2E5), c.blueSoft),
-                                ),
-                            ),
+                            .height(29.dp),
                         contentAlignment = Alignment.Center,
                     ) {
+                        // alpha 只作用于胶囊背景：图标必须始终可见，未选中时只是没有底色
+                        Box(
+                            Modifier
+                                .matchParentSize()
+                                .graphicsLayer { alpha = pillAlpha }
+                                .shadow(
+                                    elevation = pillElevation,
+                                    shape = RoundedCornerShape(15.dp),
+                                    clip = false,
+                                    ambientColor = c.blueDeep.copy(alpha = 0.27f),
+                                    spotColor = c.blueDeep.copy(alpha = 0.27f),
+                                )
+                                .clip(RoundedCornerShape(15.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(Color(0xFFD0F2E5), c.blueSoft),
+                                    ),
+                                ),
+                        )
                         Icon(
                             item.icon,
                             contentDescription = item.label,
