@@ -263,10 +263,11 @@ fun ProfileScreen(
                 .fillMaxWidth()
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
-                // 留出右侧底盘（1.5dp）与弹出缩放的余量，避免被滚动容器裁掉
-                .padding(horizontal = 20.dp)
-                .padding(top = 2.dp, bottom = ecoBottomContentPadding(extra = 10.dp)),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                // 卡片视觉上比槽位小一圈（余量由 EcoArrival 在动画图层内预留），
+                // 这里保持原设计的页面边距。
+                .padding(horizontal = 22.dp)
+                .padding(top = 6.dp, bottom = ecoBottomContentPadding(extra = 12.dp)),
+            verticalArrangement = Arrangement.spacedBy(13.dp),
         ) {
             EcoArrival(randomDelay = true, delayMillis = 60, turn = 3.2f) {
                 BudgetHero(
@@ -1100,6 +1101,7 @@ private fun SettingsCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
 
 // ---------- 4. 底排：导入 / 打赏 / 关于 ----------
 
+
 @Composable
 private fun BottomRow(
     onOpenImport: () -> Unit,
@@ -1107,26 +1109,78 @@ private fun BottomRow(
     onOpenRepo: () -> Unit,
     onTheme: () -> Unit,
 ) {
-    Row(
-        Modifier.fillMaxWidth().height(BOTTOM_HEIGHT),
-        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxWidth()
     ) {
-        EcoArrival(randomDelay = true, delayMillis = 560, turn = -2.4f) {
-            GitHubOrb(onClick = onOpenRepo, modifier = Modifier.size(BOTTOM_HEIGHT))
-        }
-        // 中间列：打赏 + 主题，两个正圆
-        EcoArrival(randomDelay = true, delayMillis = 610, turn = 2.4f, modifier = Modifier.weight(1.03f).fillMaxHeight()) {
-            Row(
-                Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically,
+        val gap = 8.dp
+
+        // 三个圆始终相同大小
+        // 窄屏自动缩小，给导入账单保留至少约 94dp
+        val circleSize = (
+            (maxWidth - 94.dp - gap * 3f) / 3f
+        ).coerceIn(48.dp, 66.dp)
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(BOTTOM_HEIGHT),
+            horizontalArrangement = Arrangement.spacedBy(gap),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+
+            // 1. GitHub
+            EcoArrival(
+                randomDelay = true,
+                delayMillis = 560,
+                turn = -2.4f,
+                modifier = Modifier.size(circleSize)
             ) {
-                RewardTile(onClick = onReward, modifier = Modifier.size(BOTTOM_HEIGHT))
-                AccentTile(onClick = onTheme, modifier = Modifier.size(BOTTOM_HEIGHT))
+                GitHubOrb(
+                    onClick = onOpenRepo,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
-        }
-        EcoArrival(randomDelay = true, delayMillis = 680, turn = 2.2f, modifier = Modifier.weight(1.27f).fillMaxHeight()) {
-            ImportTile(onClick = onOpenImport, modifier = Modifier.fillMaxSize())
+
+            // 2. 打赏
+            EcoArrival(
+                randomDelay = true,
+                delayMillis = 610,
+                turn = 2.4f,
+                modifier = Modifier.size(circleSize)
+            ) {
+                RewardTile(
+                    onClick = onReward,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // 3. 主题
+            EcoArrival(
+                randomDelay = true,
+                delayMillis = 650,
+                turn = -2.4f,
+                modifier = Modifier.size(circleSize)
+            ) {
+                AccentTile(
+                    onClick = onTheme,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+
+            // 4. 导入账单：保留胶囊形
+            EcoArrival(
+                randomDelay = true,
+                delayMillis = 680,
+                turn = 2.2f,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+            ) {
+                ImportTile(
+                    onClick = onOpenImport,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
 }

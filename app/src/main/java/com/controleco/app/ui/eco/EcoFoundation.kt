@@ -1,5 +1,7 @@
 package com.controleco.app.ui.eco
 
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -426,21 +428,31 @@ fun EcoArrival(
     }
     val fade = (p / 0.65f).coerceIn(0f, 1f)
     val blurPx = (1f - p / 0.65f).coerceIn(0f, 1f) * 2f
+    
     Box(
         modifier
-            .blur(blurPx.dp)
+            // 弹跳期间提升绘制层级，避免被相邻卡片盖住
+            .zIndex(if (p < 1f) 1f else 0f)
             .graphicsLayer {
+                // 避免透明度动画触发裁切用的离屏缓冲区
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+
+                // 允许阴影、底盘和弹跳内容超出自身边界
+                clip = false
+
                 transformOrigin = TransformOrigin(0.5f, 0.66f)
+
                 alpha = fade
                 scaleX = scale
                 scaleY = scale
                 translationY = risePx.dp.toPx()
                 rotationZ = rot
-            },
+            }
     ) {
         content()
     }
 }
+
 
 /** 章节头：标题 / 右侧说明（可选） */
 @Composable
