@@ -722,7 +722,7 @@ private fun DailyTile(
 
 /**
  * 待确认椭圆：宽 109、跨双列两行；双层虚线环 + 收据/对勾图标 + 笔数 + 待确认。
- * 有未确认时用陶土浅底（clay），清零时转玉绿（jade）；点按进待确认页。
+ * 有未确认时用陶土（clay，真语义）；清零时用**次要色**（装饰性，随主题）。
  */
 @Composable
 private fun PendingPill(count: Int, onClick: () -> Unit, modifier: Modifier = Modifier) {
@@ -763,13 +763,14 @@ private fun PendingPill(count: Int, onClick: () -> Unit, modifier: Modifier = Mo
         plate = lerp(c.clay, Color.Black, 0.05f)
         innerShade = lerp(c.clay, Color.Black, 0.30f)
     } else {
-        // 无待确认：玉绿语义色（永远不变），浅色下同样从语义色提亮
-        bgTop = if (c.isDark) lerp(c.jadeSoft, Color.White, 0.05f) else lerp(c.jadeSoft, Color.White, 0.55f)
-        bgBottom = if (c.isDark) lerp(c.jadeSoft, c.surface, 0.16f) else lerp(c.jadeSoft, c.surface, 0.40f)
-        borderColor = if (c.isDark) c.jade.copy(alpha = 0.36f) else lerp(c.jade, c.surface, 0.66f)
-        fg = if (c.isDark) c.jade else lerp(c.jade, Color.Black, 0.30f)
-        plate = lerp(c.jade, c.surface, 0.45f)
-        innerShade = lerp(c.jade, Color.Black, 0.36f)
+        // 无待确认：用**次要色**（不是语义绿 jade）——这张卡是装饰性的，
+        // 之前写死玉绿导致换任何主题它都还是绿的。
+        bgTop = if (c.isDark) lerp(c.secondSoft, Color.White, 0.05f) else lerp(c.secondSoft, Color.White, 0.55f)
+        bgBottom = if (c.isDark) lerp(c.secondSoft, c.surface, 0.16f) else lerp(c.secondSoft, c.surface, 0.40f)
+        borderColor = if (c.isDark) c.second.copy(alpha = 0.36f) else lerp(c.second, c.surface, 0.66f)
+        fg = if (c.isDark) c.second else lerp(c.second, Color.Black, 0.30f)
+        plate = lerp(c.second, c.surface, 0.45f)
+        innerShade = lerp(c.second, Color.Black, 0.36f)
     }
 
     Box(
@@ -920,7 +921,7 @@ private fun MidRow(
     }
 }
 
-/** 分类卡：玉绿渐变、圆角 25/9/25/9；标题 + 4 个真实分类图标瓦片，整卡点按进分类管理。 */
+/** 分类卡：次要色渐变、圆角 25/9/25/9；标题 + 4 个真实分类图标瓦片，整卡点按进分类管理。 */
 @Composable
 private fun CategoryCard(
     tiles: List<CategoryEntity>,
@@ -936,25 +937,25 @@ private fun CategoryCard(
                 shape = shape,
                 clip = false,
                 ambientColor = Color.Transparent,
-                spotColor = c.jade.copy(alpha = if (c.isDark) 0.34f else 0.16f),
+                spotColor = c.second.copy(alpha = if (c.isDark) 0.34f else 0.16f),
             )
-            .cardPlate(shape, c.jade.copy(alpha = if (c.isDark) 0.34f else 0.26f), offsetX = 1.5.dp, offsetY = 3.4.dp)
+            .cardPlate(shape, c.second.copy(alpha = if (c.isDark) 0.34f else 0.26f), offsetX = 1.5.dp, offsetY = 3.4.dp)
             .clip(shape)
-            .background(softGradient(c, c.jadeSoft, 0.92f, 0.62f))
+            .background(softGradient(c, c.secondSoft, 0.92f, 0.62f))
             .cardInset(
                 shape = shape,
                 topColor = Color.White.copy(alpha = if (c.isDark) 0.16f else 0.85f),
                 topHeight = 1.5.dp,
-                bottomColor = c.jade.copy(alpha = if (c.isDark) 0.22f else 0.14f),
+                bottomColor = c.second.copy(alpha = if (c.isDark) 0.22f else 0.14f),
                 band = 14.dp,
             )
-            .border(1.dp, c.jade.copy(alpha = 0.18f), shape)
+            .border(1.dp, c.second.copy(alpha = 0.18f), shape)
             .clickable(onClick = onClick),
     ) {
         // 右上小装饰环（opacity .3）
         Canvas(Modifier.matchParentSize()) {
             drawCircle(
-                color = c.jade.copy(alpha = if (c.isDark) 0.16f else 0.22f),
+                color = c.second.copy(alpha = if (c.isDark) 0.16f else 0.22f),
                 radius = minOf(size.width, size.height) * 0.42f,
                 center = Offset(size.width * 0.97f, size.height * 0.02f),
                 style = Stroke(width = 1.dp.toPx()),
@@ -1087,7 +1088,7 @@ private fun MonthStartCard(
     }
 }
 
-/** 「设置」卡：圆角 28/12/28/12、surface→amber-soft 渐变，齿轮 + 设置。 */
+/** 「设置」卡：圆角 28/12/28/12、surface→主色浅底渐变，齿轮 + 设置。 */
 @Composable
 private fun SettingsCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = MaterialTheme.eco
@@ -1100,16 +1101,16 @@ private fun SettingsCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 shape = shape,
                 clip = false,
                 ambientColor = Color.Transparent,
-                spotColor = c.jade.copy(alpha = if (c.isDark) 0.34f else 0.16f),
+                spotColor = c.blue.copy(alpha = if (c.isDark) 0.34f else 0.16f),
             )
-            .cardPlate(shape, c.amber.copy(alpha = if (c.isDark) 0.34f else 0.26f), offsetX = 1.5.dp, offsetY = 3.4.dp)
+            .cardPlate(shape, c.blue.copy(alpha = if (c.isDark) 0.34f else 0.26f), offsetX = 1.5.dp, offsetY = 3.4.dp)
             .clip(shape)
-            .background(softGradient(c, c.amberSoft, 0.5f, 0.42f))
+            .background(softGradient(c, c.blueSoft, 0.5f, 0.42f))
             .cardInset(
                 shape = shape,
                 topColor = Color.White.copy(alpha = if (c.isDark) 0.14f else 0.78f),
                 topHeight = 1.5.dp,
-                bottomColor = c.amber.copy(alpha = if (c.isDark) 0.20f else 0.13f),
+                bottomColor = c.blue.copy(alpha = if (c.isDark) 0.20f else 0.13f),
                 band = 12.dp,
             )
             .border(1.dp, c.rule, shape)
@@ -1122,7 +1123,7 @@ private fun SettingsCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
             Icon(
                 imageVector = EcoIcons.Gear,
                 contentDescription = null,
-                tint = c.amber,
+                tint = c.blue,
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .size(18.dp)
@@ -1390,14 +1391,14 @@ private fun RewardTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 shape = CircleShape,
                 clip = false,
                 ambientColor = Color.Transparent,
-                spotColor = c.clay.copy(alpha = 0.30f),
+                spotColor = c.second.copy(alpha = 0.30f),
             )
-            .cardPlate(CircleShape, lerp(c.clay, Color.Black, 0.42f).copy(alpha = 0.70f), offsetX = 1.5.dp, offsetY = 3.4.dp)
+            .cardPlate(CircleShape, lerp(c.second, Color.Black, 0.42f).copy(alpha = 0.70f), offsetX = 1.5.dp, offsetY = 3.4.dp)
             .clip(CircleShape)
             .background(
-                // 打赏：陶土语义色渐变（永远不变，与收支/危险同族）
+                // 打赏没有颜色语义，用次要色：与导入/关于的 hero 深绿区分，又随主题变
                 Brush.linearGradient(
-                    listOf(lerp(c.clay, Color.White, 0.18f), c.clay),
+                    listOf(lerp(c.second, Color.White, 0.18f), c.second),
                     start = Offset.Zero,
                     end = Offset.Infinite,
                 ),
@@ -1406,7 +1407,7 @@ private fun RewardTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 shape = CircleShape,
                 topColor = Color.White.copy(alpha = 0.42f),
                 topHeight = 2.dp,
-                bottomColor = lerp(c.clay, Color.Black, 0.42f).copy(alpha = 0.24f),
+                bottomColor = lerp(c.second, Color.Black, 0.42f).copy(alpha = 0.24f),
                 band = 14.dp,
             )
             .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
@@ -1417,14 +1418,14 @@ private fun RewardTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
             Icon(
                 EcoIcons.Coffee,
                 contentDescription = null,
-                tint = lerp(c.clay, Color.White, 0.90f),
+                tint = c.onSecond,
                 modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.height(1.dp))
             Text(
                 "打赏",
                 style = EcoType.Chip.copy(fontSize = 10.5.sp, fontWeight = FontWeight(800), letterSpacing = 0.sp),
-                color = lerp(c.clay, Color.White, 0.92f),
+                color = c.onSecond,
                 maxLines = 1,
             )
         }

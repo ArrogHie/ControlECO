@@ -183,12 +183,13 @@ fun EcoBackdrop(modifier: Modifier = Modifier) {
             }
         }
 
-        // 十字 / 菱形 / 小圆点
+        // 十字 / 菱形 / 小圆点：装饰元素用「主色 + 次要色」，不占语义色
+        // （原来这里用 amber，导致每页背景都有固定的金色点缀）
         fun cross(cx: Float, cy: Float, r: Float, color: Color) {
             drawLine(color, Offset(cx - r, cy), Offset(cx + r, cy), thin, StrokeCap.Round)
             drawLine(color, Offset(cx, cy - r), Offset(cx, cy + r), thin, StrokeCap.Round)
         }
-        cross(w * 0.075f, h * 0.635f, 7.dp.toPx(), c.amber.copy(alpha = 0.35f * a))
+        cross(w * 0.075f, h * 0.635f, 7.dp.toPx(), c.second.copy(alpha = 0.35f * a))
         cross(w * 0.80f, h * 0.405f, 8.dp.toPx(), c.blue.copy(alpha = 0.25f * a))
         val diamond = Path().apply {
             moveTo(w * 0.925f, h * 0.455f - 9.dp.toPx())
@@ -199,7 +200,7 @@ fun EcoBackdrop(modifier: Modifier = Modifier) {
         }
         drawPath(diamond, c.rule.copy(alpha = 0.35f * a), style = stroke)
         drawCircle(c.blue.copy(alpha = 0.45f * a), radius = 2.6.dp.toPx(), center = Offset(w * 0.155f, h * 0.225f))
-        drawCircle(c.amber.copy(alpha = 0.30f * a), radius = 1.8.dp.toPx(), center = Offset(w * 0.86f, h * 0.29f))
+        drawCircle(c.second.copy(alpha = 0.30f * a), radius = 1.8.dp.toPx(), center = Offset(w * 0.86f, h * 0.29f))
 
         // 斜规线：从左到右极淡消失
         drawLine(
