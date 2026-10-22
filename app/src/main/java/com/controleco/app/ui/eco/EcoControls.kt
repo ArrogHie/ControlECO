@@ -60,6 +60,7 @@ import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.accBook
 import com.controleco.app.ui.theme.categoryColor
 import com.controleco.app.ui.theme.eco
+import com.controleco.app.ui.theme.onAccentGrad
 
 // ---------- 按钮 ----------
 
@@ -129,22 +130,31 @@ fun EcoPrimaryButton(
     leading: ImageVector? = null,
     height: Dp = 44.dp,
 ) {
-    val gradient = listOf(Color(0xFF269B8C), Color(0xFF16677C))
+    val c = MaterialTheme.eco
+    // 主按钮渐变跟随主题色（原来是写死的青绿，换任何主题都不变）
+    val gradient = listOf(c.accentGradA, c.accentGradB, c.accentGradC)
+    val fg = c.onAccentGrad
     Box(
         modifier
             .fillMaxWidth()
             .height(height)
             .clip(RoundedCornerShape(13.dp))
-            .background(if (enabled) Brush.linearGradient(gradient) else Brush.linearGradient(listOf(gradient[0].copy(alpha = 0.35f), gradient[1].copy(alpha = 0.35f))))
+            .background(
+                if (enabled) {
+                    Brush.linearGradient(gradient)
+                } else {
+                    Brush.linearGradient(gradient.map { it.copy(alpha = 0.35f) })
+                },
+            )
             .ecoPressable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             if (leading != null) {
-                Icon(leading, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                Icon(leading, contentDescription = null, tint = fg, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
             }
-            Text(text, style = EcoType.Btn, color = Color.White, maxLines = 1)
+            Text(text, style = EcoType.Btn, color = fg, maxLines = 1)
         }
     }
 }
@@ -211,7 +221,7 @@ fun EcoChip(
 ) {
     val c = MaterialTheme.eco
     val bg by animateColorAsState(if (selected) c.blueDeep else c.surface, tween(160), label = "chip-bg")
-    val fg by animateColorAsState(if (selected) Color.White else c.muted, tween(160), label = "chip-fg")
+    val fg by animateColorAsState(if (selected) c.onAccent else c.muted, tween(160), label = "chip-fg")
     Row(
         modifier
             .height(height)

@@ -98,9 +98,9 @@ fun <T> SegmentedSwitch(
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
-    containerColor: Color = MaterialTheme.accBook.primaryStrong.copy(alpha = 0.16f),
-    selectedColor: Color = MaterialTheme.accBook.primaryStrong,
-    selectedContentColor: Color = MaterialTheme.colorScheme.onPrimary,
+    containerColor: Color = MaterialTheme.eco.blue.copy(alpha = 0.16f),
+    selectedColor: Color = MaterialTheme.eco.blueDeep,
+    selectedContentColor: Color = MaterialTheme.eco.onAccent,
     contentColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
     val shape = RoundedCornerShape(50)
@@ -151,6 +151,7 @@ fun SlidingSwitch(
     modifier: Modifier = Modifier,
 ) {
     if (options.isEmpty()) return
+    val c = MaterialTheme.eco
     val shape = RoundedCornerShape(50)
     val pad = 3.dp
     val segHeight = 30.dp
@@ -158,7 +159,7 @@ fun SlidingSwitch(
     BoxWithConstraints(
         modifier
             .clip(shape)
-            .background(MaterialTheme.accBook.primaryStrong.copy(alpha = 0.16f))
+            .background(c.blue.copy(alpha = 0.16f))
             .padding(pad),
     ) {
         val segWidth = maxWidth / options.size
@@ -174,7 +175,7 @@ fun SlidingSwitch(
                 .width(segWidth)
                 .height(segHeight)
                 .clip(shape)
-                .background(MaterialTheme.accBook.primaryStrong),
+                .background(c.blueDeep),
         )
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             options.forEachIndexed { index, label ->
@@ -190,7 +191,7 @@ fun SlidingSwitch(
                         label,
                         style = MaterialTheme.typography.labelLarge,
                         color = if (isSelected) {
-                            MaterialTheme.colorScheme.onPrimary
+                            c.onAccent
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },
@@ -210,9 +211,9 @@ fun SlidingSwitch(
 fun PeriodSwitch(    mode: PeriodMode,
     onChange: (PeriodMode) -> Unit,
     modifier: Modifier = Modifier,
-    containerColor: Color = MaterialTheme.accBook.primaryStrong.copy(alpha = 0.16f),
-    selectedColor: Color = MaterialTheme.accBook.primaryStrong,
-    selectedContentColor: Color = MaterialTheme.colorScheme.onPrimary,
+    containerColor: Color = MaterialTheme.eco.blue.copy(alpha = 0.16f),
+    selectedColor: Color = MaterialTheme.eco.blueDeep,
+    selectedContentColor: Color = MaterialTheme.eco.onAccent,
     contentColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
 ) {
     SegmentedSwitch(
@@ -285,7 +286,7 @@ private fun StepButton(icon: ImageVector, desc: String, onClick: () -> Unit, siz
             Icon(
                 icon,
                 contentDescription = desc,
-                tint = MaterialTheme.accBook.primaryStrong,
+                tint = MaterialTheme.eco.blueDeep,
                 modifier = Modifier.size(size * 0.55f),
             )
         }
@@ -482,7 +483,7 @@ private fun RowScope.PickerCell(label: String, selected: Boolean, highlighted: B
             )
             .then(
                 if (highlighted && !selected) {
-                    Modifier.border(1.dp, MaterialTheme.accBook.primaryStrong, RoundedCornerShape(12.dp))
+                    Modifier.border(1.dp, MaterialTheme.eco.blueDeep, RoundedCornerShape(12.dp))
                 } else {
                     Modifier
                 },

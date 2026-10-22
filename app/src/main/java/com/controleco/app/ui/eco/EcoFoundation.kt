@@ -110,7 +110,8 @@ fun EcoBackdrop(modifier: Modifier = Modifier) {
         drawRect(c.paper)
         val w = size.width
         val h = size.height
-        // 右上偏青、左下偏玉：与原型 .screen 的两层 radial-gradient 对应
+        // 右上主光 = 强调色；左下补光 = 强调色的亮端（原来是固定玉绿，
+        // 任何主题下左下都泛绿，这也是「青绿太多」的来源之一）
         drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(c.blue.copy(alpha = if (c.isDark) 0.075f else 0.05f), Color.Transparent),
@@ -120,7 +121,7 @@ fun EcoBackdrop(modifier: Modifier = Modifier) {
         )
         drawRect(
             brush = Brush.radialGradient(
-                colors = listOf(c.jade.copy(alpha = if (c.isDark) 0.055f else 0.04f), Color.Transparent),
+                colors = listOf(c.blueHi.copy(alpha = if (c.isDark) 0.055f else 0.04f), Color.Transparent),
                 center = Offset(w * 0.01f, h * 0.76f),
                 radius = w * 0.78f,
             ),
@@ -251,8 +252,9 @@ fun EcoPane(
                 drawContent()
                 val inset = 21.dp.toPx()
                 drawLine(
+                    // 卡片顶部发丝高光取强调色亮端，跟主题走（原来固定玉绿）
                     brush = Brush.horizontalGradient(
-                        listOf(Color.Transparent, c.jade.copy(alpha = 0.19f), Color.Transparent),
+                        listOf(Color.Transparent, c.blueHi.copy(alpha = 0.19f), Color.Transparent),
                         startX = inset,
                         endX = size.width - inset,
                     ),
@@ -636,8 +638,9 @@ fun EcoHeroCard(
                 elevation = 13.dp,
                 shape = shape,
                 clip = false,
-                ambientColor = Color(0x4012373E),
-                spotColor = Color(0x9E12373E),
+                // 阴影取该 hero 渐变的深端，跟着主题走（原来是固定的青黑）
+                ambientColor = gradient.last().copy(alpha = 0.25f),
+                spotColor = gradient.last().copy(alpha = 0.62f),
             )
             .clip(shape)
             .background(Brush.linearGradient(gradient, start = Offset.Zero, end = Offset.Infinite))

@@ -69,6 +69,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.controleco.app.ui.theme.accBook
 import com.controleco.app.ui.theme.categoryColor
+import com.controleco.app.ui.theme.eco
 import com.controleco.app.util.Money
 import java.time.DayOfWeek
 import java.time.Instant
@@ -325,7 +326,7 @@ fun QuickAddPill(onClick: () -> Unit, modifier: Modifier = Modifier) {
             }
             .shadow(elevation = 8.dp, shape = shape)
             .clip(shape)
-            .background(MaterialTheme.accBook.primaryStrong)
+            .background(MaterialTheme.eco.blueDeep)
             .clickable(interactionSource = interaction, indication = LocalIndication.current, onClick = onClick)
             .padding(horizontal = 22.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,

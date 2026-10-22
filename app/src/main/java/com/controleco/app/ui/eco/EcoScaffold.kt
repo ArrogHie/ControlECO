@@ -58,6 +58,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,6 +70,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.controleco.app.ui.common.EcoIcons
 import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.eco
+import com.controleco.app.ui.theme.onAccentGrad
 import kotlinx.coroutines.delay
 
 // ---------- 顶栏 ----------
@@ -252,7 +254,8 @@ fun EcoBottomNav(
                                 .clip(RoundedCornerShape(15.dp))
                                 .background(
                                     Brush.linearGradient(
-                                        listOf(Color(0xFFD0F2E5), c.blueSoft),
+                                        // 选中胶囊：强调色软底 → 主题浅底（原来起手是写死的浅青）
+                                        listOf(lerp(c.blueSoft, c.surface, 0.35f), c.blueSoft),
                                     ),
                                 ),
                         )
@@ -277,7 +280,8 @@ fun EcoBottomNav(
                             .size(3.dp)
                             .clip(CircleShape)
                             .graphicsLayer { alpha = dotAlpha }
-                            .background(c.jade),
+                            // 选中页指示点：跟随主题（原来固定玉绿，任何主题下都有一点绿）
+                            .background(c.blue),
                     )
                 }
             }
@@ -340,13 +344,14 @@ fun EcoFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 .shadow(
                     elevation = 12.dp,
                     shape = CircleShape,
-                    ambientColor = Color(0x55235F66),
-                    spotColor = Color(0x66134F5B),
+                    // 阴影染上主题色深端，避免固定青色阴影在紫色/珊瑚主题下露馅
+                    ambientColor = c.accentGradC.copy(alpha = 0.33f),
+                    spotColor = c.accentGradC.copy(alpha = 0.40f),
                 )
                 .clip(CircleShape)
                 .background(
                     Brush.linearGradient(
-                        listOf(Color(0xFF2AA79C), Color(0xFF16858A), Color(0xFF0F6472)),
+                        listOf(c.accentGradA, c.accentGradB, c.accentGradC),
                         start = androidx.compose.ui.geometry.Offset.Zero,
                         end = androidx.compose.ui.geometry.Offset(130f, 130f),
                     ),
@@ -355,7 +360,7 @@ fun EcoFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 .ecoPressable(scaleTo = 0.92f, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(EcoIcons.Plus, contentDescription = "记一笔", tint = Color(0xFFF8FAF4), modifier = Modifier.size(21.dp))
+            Icon(EcoIcons.Plus, contentDescription = "记一笔", tint = c.onAccentGrad, modifier = Modifier.size(21.dp))
         }
     }
 }
@@ -363,17 +368,23 @@ fun EcoFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
 /** 账户/分类页的方形次级 FAB（50x50） */
 @Composable
 fun EcoSquareFab(onClick: () -> Unit, modifier: Modifier = Modifier, icon: ImageVector = EcoIcons.Plus) {
+    val c = MaterialTheme.eco
     Box(
         modifier
             .size(50.dp)
-            .shadow(12.dp, RoundedCornerShape(17.dp), ambientColor = Color(0x55103539), spotColor = Color(0x66103539))
+            .shadow(
+                12.dp,
+                RoundedCornerShape(17.dp),
+                ambientColor = c.accentGradC.copy(alpha = 0.33f),
+                spotColor = c.accentGradC.copy(alpha = 0.40f),
+            )
             .clip(RoundedCornerShape(17.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFF269B8C), Color(0xFF16677C))))
+            .background(Brush.linearGradient(listOf(c.accentGradA, c.accentGradB)))
             .border(1.dp, Color.White.copy(alpha = 0.24f), RoundedCornerShape(17.dp))
             .ecoPressable(scaleTo = 0.94f, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+        Icon(icon, contentDescription = null, tint = c.onAccentGrad, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -484,7 +495,13 @@ fun EcoDialog(
                         scaleY = s
                         translationY = (1f - entrance.value) * 8.dp.toPx()
                     }
-                    .shadow(26.dp, RoundedCornerShape(23.dp), ambientColor = Color(0x66103539), spotColor = Color(0x66103539))
+                    .shadow(
+                        26.dp,
+                        RoundedCornerShape(23.dp),
+                        // 中性投影：用墨色的低透明，不再染青
+                        ambientColor = MaterialTheme.eco.ink.copy(alpha = 0.28f),
+                        spotColor = MaterialTheme.eco.ink.copy(alpha = 0.28f),
+                    )
                     .clip(RoundedCornerShape(23.dp))
                     .background(MaterialTheme.eco.surface)
                     .border(1.dp, MaterialTheme.eco.rule, RoundedCornerShape(23.dp))
@@ -579,7 +596,12 @@ fun EcoToastHost(modifier: Modifier = Modifier) {
         Row(
             Modifier
                 .padding(horizontal = 22.dp)
-                .shadow(16.dp, RoundedCornerShape(13.dp), ambientColor = Color(0x66103539), spotColor = Color(0x66103539))
+                .shadow(
+                    16.dp,
+                    RoundedCornerShape(13.dp),
+                    ambientColor = c.ink.copy(alpha = 0.30f),
+                    spotColor = c.ink.copy(alpha = 0.30f),
+                )
                 .clip(RoundedCornerShape(13.dp))
                 .background(c.ink)
                 .padding(horizontal = 16.dp, vertical = 12.dp),
