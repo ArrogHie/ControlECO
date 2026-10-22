@@ -158,6 +158,47 @@ class NotificationRulesTest {
         assertEquals(5000L, r.amountCents)
     }
 
+    @Test
+    fun `wechat auto deduction with grouped count prefix`() {
+        // 真实样本（2026-10-22 用户实测，漏记）：
+        // text=[11条]微信支付: 已扣费¥6.50 —— "扣费"此前不在支出方向词里，整条被判「方向不明」丢掉
+        val r = parse(NotificationRules.WECHAT, "微信支付", "[11条]微信支付: 已扣费¥6.50")!!
+        assertEquals(TxType.EXPENSE, r.type)
+        assertEquals(650L, r.amountCents)
+        assertEquals(false, r.isRefund)
+        assertEquals("com.tencent.mm|EXPENSE|650|${postTime / 60_000}", r.dedupKey)
+    }
+
+    @Test
+    fun `grouped count prefix is optional and the number varies`() {
+        // "[xx条]" 不是固定词：可能不存在、位数可变、全角括号、可带"消息"
+        for (text in listOf(
+            "[1条]微信支付: 已扣费¥6.50",
+            "[11条]微信支付: 已扣费¥6.50",
+            "[128条]微信支付: 已扣费¥6.50",
+            "［11条］微信支付: 已扣费¥6.50",
+            "[11条消息] 微信支付: 已扣费¥6.50",
+            "微信支付: 已扣费¥6.50",
+        )) {
+            val r = parse(NotificationRules.WECHAT, "微信支付", text)
+            assertTrue("未解析: $text", r != null)
+            assertEquals("方向: $text", TxType.EXPENSE, r!!.type)
+            assertEquals("金额: $text", 650L, r.amountCents)
+        }
+        assertEquals("微信支付: 已扣费¥6.50", NotificationRules.normalize("[11条]微信支付: 已扣费¥6.50"))
+    }
+
+    @Test
+    fun `deduction amount before keyword parses too`() {
+        // 同一族写法的另两种形态：金额在"扣费"前 / 关键词后带"元"
+        val before = parse(NotificationRules.WECHAT, "微信支付", "6.50元的自动扣费")!!
+        assertEquals(TxType.EXPENSE, before.type)
+        assertEquals(650L, before.amountCents)
+        val after = parse(NotificationRules.WECHAT, "微信支付", "已扣费6.50元")!!
+        assertEquals(TxType.EXPENSE, after.type)
+        assertEquals(650L, after.amountCents)
+    }
+
     // ---------- 退款（真实样本：2026-10 实测） ----------
 
     @Test

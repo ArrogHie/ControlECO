@@ -60,8 +60,10 @@ import kotlin.coroutines.resume
  * 通道流程一致：原始快照落库（不解析）→ 规则引擎 → 待确认队列。
  * 跨通道去重分两层：
  * - 同源（通知⇄页面，10s 窗口，见 CaptureMerge）：只保留一条，**页面信息优先**；
- * - 异源（支付类⇄银行类，±130s，见 CrossChannelDedup）：同一笔消费被微信通知与银行卡
- *   短信/推送同时捕获时归并成一条，银行侧只补充账户线索。
+ * - 异源（微信/支付宝/云闪付 ⇄ 银行短信/推送，±130s，仅支出，见 CrossChannelDedup）：
+ *   同一笔卡支付被两侧同时捕获时归并成一条。**两个方向都做**——银行侧后到时并入支付条目
+ *   （[findCrossChannelPending]），支付侧后到时回头并入银行条目（[findBankPendingForPayment]）；
+ *   两个支付渠道之间、两家银行之间不归并。
  * 捕获后的处置由三个设置开关决定（见各开关的注释）：
  * - 「入账提醒」：捕获时发横幅通知（也是卡片弹不出时的兜底）；
  * - 「悬浮窗入账」：弹出底部确认卡，关闭卡片/长时间无操作视为入账，点「忽略」才不入账；
@@ -1456,6 +1458,41 @@ object CaptureCenter {
                             "existing=${Money.formatYuan(conflict.amountCents)} #${conflict.id} ${parsed.ruleName}",
                     )
                 }
+                // 银行动账 ⇄ 支付渠道（仅支出）：银行短信/推送先到时，本通知并入银行侧条目，
+                // 不能因为包名不同就记成第二笔。必须有可核对线索（银行名/卡尾号 ⇄ 渠道名）。
+                val bankRelated = findBankPendingForPayment(
+                    packageName = packageName,
+                    type = parsed.type,
+                    amountCents = parsed.amountCents,
+                    isRefund = parsed.isRefund,
+                    paymentText = listOf(title, parsed.note, parsed.ruleName)
+                        .filter { it.isNotBlank() }.joinToString(" "),
+                    eventTime = sourceAt,
+                    incomingIdentity = notificationIdentity,
+                    mergeable = mergeable,
+                )
+                if (bankRelated != null) {
+                    AppLog.i(
+                        "Dedup",
+                        "bank entry wins: ${parsed.ruleName} ${Money.formatYuan(parsed.amountCents)} " +
+                            "-> #${bankRelated.id} ${bankRelated.sourcePackage}",
+                    )
+                    mergeNotificationIntoExisting(bankRelated, parsed, notificationIdentity, sourceAt)
+                    captureDao.updateMatch(rawId, parsed.ruleName + "·并入银行动账", true)
+                    traceCapture(
+                        channel = CaptureChannel.NOTIFICATION,
+                        packageName = packageName,
+                        title = title, text = text, bigText = bigText,
+                        capturedAt = sourceAt,
+                        matchedRule = parsed.ruleName,
+                        type = parsed.type,
+                        amountCents = parsed.amountCents,
+                        note = parsed.note,
+                        dedupKey = bankRelated.dedupKey,
+                        outcome = TraceOutcome.MERGED_CROSS,
+                    )
+                    return@launch
+                }
                 // 跨应用链路（电商/外卖页面 + 微信/支付宝/银行动账）：只有页面披露的支付渠道
                 // 能与通知来源对上时才认作同一笔；证据不足保持独立记录
                 val crossApp = findCrossAppRelatedForNotification(
@@ -1815,8 +1852,9 @@ object CaptureCenter {
      * 跨通道归并候选：只在有**可核对线索**时认作同一笔。
      *
      * - 电商/外卖页面：页面支付方式必须能对上银行名/卡尾号（[CrossAppLinker]）；
-     * - 微信/支付宝条目：条目备注或支付方式里必须出现该银行名/卡尾号；
-     * - 金额相同、时间接近但没有任何银行线索 → 不归并（两笔真实交易并成一笔 = 丢记录）。
+     * - 微信/支付宝/云闪付条目：条目备注或支付方式里出现该银行名/卡尾号，
+     *   或银行侧文本点名了该渠道（"在【财付通-微信支付-微信转账】发生快捷支付扣款"）；
+     * - 金额相同、时间接近但没有任何渠道线索 → 不归并（两笔真实交易并成一笔 = 丢记录）。
      * 多个候选同时命中视为证据不足，保持独立记录。
      */
     private suspend fun findCrossChannelPending(
@@ -1872,14 +1910,116 @@ object CaptureCenter {
         return null
     }
 
-    /** 支付类条目里是否出现了银行侧可核对的线索（银行名或卡尾号） */
+    /**
+     * 支付类条目里是否出现了可核对线索：支付侧写了银行名/卡尾号，
+     * **或**银行侧文本点名了该支付渠道（"在【财付通-微信支付-微信转账】发生快捷支付扣款"）。
+     * 两个方向任一命中即可认定是同一笔卡支付，见 [CrossChannelDedup.payBankLinked]。
+     */
     private fun payEntryLinksBank(
         candidate: PendingTransactionEntity,
         ledger: BankLedgerRules.BankLedger,
     ): Boolean {
-        val text = listOf(candidate.paymentInstrument, candidate.counterparty, candidate.note)
+        if (!CrossChannelDedup.isPayChannelSide(candidate.sourcePackage)) return false
+        val payText = listOf(candidate.paymentInstrument, candidate.counterparty, candidate.note, candidate.ruleName)
             .filter { it.isNotBlank() }.joinToString(" ")
-        return CrossChannelDedup.hasBankEvidence(text, ledger.bankName, ledger.cardTail)
+        val bankText = listOf(ledger.note, ledger.merchant, ledger.ruleName)
+            .filter { it.isNotBlank() }.joinToString(" ")
+        return CrossChannelDedup.payBankLinked(
+            paymentText = payText,
+            bankText = bankText,
+            bankName = ledger.bankName,
+            cardTail = ledger.cardTail,
+            paySource = candidate.sourcePackage,
+        )
+    }
+
+    /**
+     * 既有银行侧条目里用来核对线索的文本（备注/商户/卡信息）。
+     *
+     * **刻意不含 ruleName**：银行条目被页面回填后 ruleName 会改写成页面侧的（如「微信·支付成功页」），
+     * 拿它当"银行侧点名了渠道"的证据就成了自己证明自己；银行名另走 [bankEntryName]。
+     */
+    private fun bankEntryText(entry: PendingTransactionEntity): String =
+        listOf(entry.note, entry.counterparty, entry.paymentInstrument)
+            .filter { it.isNotBlank() }.joinToString(" ")
+
+    /** 既有银行侧条目的银行名：优先来源键/包名，其次规则名与正文里的签名 */
+    private fun bankEntryName(entry: PendingTransactionEntity): String =
+        CrossAppLinker.bankNameOf(pageEvidenceOf(entry))
+            ?: BankLedgerRules.detectBankName(bankEntryText(entry))
+            ?: ""
+
+    /**
+     * 支付渠道侧（微信/支付宝/云闪付）本笔**后到**时，找回先到的银行侧条目。
+     *
+     * [findCrossChannelPending] 只覆盖"银行侧后到"这一个方向；银行推送/短信往往比页面更快，
+     * 那时先落库的是银行条目，后到的支付页/通知若不回头找它，就会记成第二笔
+     * （真实事故：微信转账 ¥200 支付成功页 + 招行「快捷支付扣款 200.00」）。
+     *
+     * 只处理**支出**（收入方向微信/支付宝收的是零钱/余额，不会同时产生银行入账）；
+     * 且必须有可核对线索（[CrossChannelDedup.payBankLinked]）。
+     */
+    private fun findBankPendingForPayment(
+        packageName: String,
+        type: TxType,
+        amountCents: Long,
+        isRefund: Boolean,
+        paymentText: String,
+        eventTime: Long,
+        incomingIdentity: String?,
+        mergeable: List<PendingTransactionEntity>,
+    ): PendingTransactionEntity? {
+        if (type != TxType.EXPENSE || isRefund) return null
+        if (!CrossChannelDedup.isPayChannelSide(packageName)) return null
+        val incoming = CrossChannelDedup.Signature(
+            amountCents = amountCents,
+            type = type,
+            isRefund = isRefund,
+            source = packageName,
+            time = eventTime,
+        )
+        val candidates = mergeable.filter { entry ->
+            CrossChannelDedup.isSameTransaction(
+                CrossChannelDedup.signatureOf(
+                    amountCents = entry.amountCents,
+                    type = entry.type,
+                    refundMark = entry.refundMark,
+                    source = entry.sourcePackage,
+                    time = entry.timestamp,
+                ),
+                incoming,
+            ) &&
+                flowCompatible(entry, incomingIdentity, packageName) &&
+                CrossChannelDedup.payBankLinked(
+                    paymentText = paymentText,
+                    bankText = bankEntryText(entry),
+                    bankName = bankEntryName(entry),
+                    cardTail = com.controleco.app.capture.page.PaymentInstrumentParser
+                        .tailOf(entry.paymentInstrument).takeIf { it.isNotEmpty() },
+                    paySource = packageName,
+                )
+        }
+        if (candidates.size > 1) {
+            AppLog.w(
+                "Dedup",
+                "bank/pay ambiguous (${candidates.size} bank entries), keep separate " +
+                    "$packageName ${Money.formatYuan(amountCents)}",
+            )
+            return null
+        }
+        val hit = candidates.singleOrNull()
+        if (hit == null && mergeable.any {
+                it.type == type && it.amountCents == amountCents &&
+                    CrossChannelDedup.isBankLedgerSide(it.sourcePackage)
+            }
+        ) {
+            AppLog.i(
+                "Dedup",
+                "bank entry kept separate (no channel/card evidence) " +
+                    "$packageName ${Money.formatYuan(amountCents)}",
+            )
+        }
+        return hit
     }
 
     /**
@@ -2353,6 +2493,40 @@ object CaptureCenter {
                 mergePageIntoExisting(sameByTime, candidate, rawId, snapshotText, capturedAt, flowIdentity)
                 return
             }
+        }
+        // 银行动账 ⇄ 支付渠道页面（仅支出）：银行短信/推送先到、本页后到 → 回填既有银行侧条目，
+        // 不另记一笔（页面信息最全：商户/支付工具/时间）。
+        val bankRelated = findBankPendingForPayment(
+            packageName = packageName,
+            type = candidate.type,
+            amountCents = candidate.amountCents,
+            isRefund = candidate.isRefund,
+            paymentText = listOf(
+                candidate.counterparty,
+                candidate.note,
+                candidate.paymentMethod.orEmpty(),
+                candidate.instrument?.label.orEmpty(),
+                candidate.ruleName,
+            ).filter { it.isNotBlank() }.joinToString(" "),
+            eventTime = candidate.txTime ?: capturedAt,
+            incomingIdentity = flowIdentity,
+            mergeable = mergeable,
+        )
+        if (bankRelated != null) {
+            AppLog.i(
+                "Dedup",
+                "cross-channel bank merge: page=${candidate.ruleName} " +
+                    "${Money.formatYuan(candidate.amountCents)} -> #${bankRelated.id} ${bankRelated.sourcePackage}",
+            )
+            // 银行侧条目保留自己的正文（"在【财付通-微信支付-微信转账】…"这类渠道线索就在里面），
+            // 页面信息追加在后面——与反向合并（mergeBankInfoIntoPending 把银行线索追加到支付条目）对称
+            mergePageIntoExisting(
+                RelatedPending(bankRelated, sameAmount = true),
+                candidate.copy(note = combineNotes(candidate.note, bankRelated.note)),
+                rawId, snapshotText, capturedAt, flowIdentity,
+                crossApp = true,
+            )
+            return
         }
         nearbyAmountConflict(
             mergeable, packageName, candidate.type, candidate.amountCents, capturedAt,

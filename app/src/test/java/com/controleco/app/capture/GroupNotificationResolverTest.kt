@@ -62,6 +62,14 @@ class GroupNotificationResolverTest {
     }
 
     @Test
+    fun `deduction summary is already a ledger detail`() {
+        // 真实样本（2026-10-22）：[11条]微信支付: 已扣费¥6.50 自带金额与支出动词，
+        // 不能因为"带计数前缀"就去捞兄弟通知（捞到的那条金额可能属于另一笔）
+        assertFalse(GroupNotificationResolver.needsEnrichment(summary("[11条]微信支付: 已扣费¥6.50")))
+        assertTrue(NotificationRules.looksLikeLedgerDetail("[11条]微信支付: 已扣费¥6.50"))
+    }
+
+    @Test
     fun `plain notification is not a grouped summary`() {
         assertFalse(GroupNotificationResolver.needsEnrichment(summary("已支付")))
     }

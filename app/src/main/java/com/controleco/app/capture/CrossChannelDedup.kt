@@ -7,25 +7,40 @@ import kotlin.math.abs
 /**
  * 跨通道归并判定（纯函数，便于单测）。
  *
- * 场景：同一笔消费常被两个通道同时捕获——微信/支付宝的支付通知（支付类），
- * 外加银行卡的动账短信或银行 App 推送（银行类）。不归并就会变成两条待确认。
+ * 场景：同一笔消费常被两个通道同时捕获——微信/支付宝/云闪付的支付通知（支付渠道侧），
+ * 外加银行卡的动账短信或银行 App 推送（银行侧）。不归并就会变成两条待确认，用户确认后
+ * 就是两条账单（真实样本：微信转账 ¥200 + 招行「快捷支付扣款 200.00」，见 docs/开发日志.md）。
+ *
+ * **配对只认「支付渠道 ⇄ 银行」，且仅支出**（2026-10-22 用户规则）：
+ * - 支付渠道侧 = 微信 / 支付宝 / 云闪付；
+ * - 银行侧 = 银行动账短信（`SMS:` 前缀）/ 银行 App 推送（包名短名单）；
+ * - 两个支付渠道之间（微信 ⇄ 支付宝 ⇄ 云闪付）、两家银行之间（工行短信 ⇄ 建行短信）
+ *   **一律不归并**——同额两笔真实交易与"同一笔的两条线索"在不读卡号的前提下无法区分，
+ *   宁可留两条待确认由用户丢弃，也不冒把两笔真实交易并成一笔的风险（丢记录）；
+ * - 收入方向不归并：微信/支付宝收到的钱进的是零钱/余额，不会同时产生一条银行入账，
+ *   "同额的两条收入"更可能是两笔独立的钱（工资 ⇄ 收款），合并即丢记录。
  *
  * 判定条件（必须全部命中才算同一笔）：
- * ① 金额分完全相同；② 收支方向相同；③ 退款标记相同；④ 时间差 ≤ [WINDOW_MS]；
- * ⑤ **通道类别相异且一边支付类、一边银行类**。
- *
- * 关于 ⑤：不做"同类别内归并"是刻意的保守选择——云闪付通知与银行短信虽然大概率是
- * 同一笔（同卡两通知），但在不读卡号的前提下，无法与"两张卡各刷一笔同额"区分开；
- * 宁可留两条待确认由用户丢弃，也不冒把两笔真实交易并成一笔的风险（丢记录）。
+ * ① 方向都是支出、退款标记相同；② 金额分完全相同；③ 时间差 ≤ [WINDOW_MS]；
+ * ④ 一条属支付渠道侧、另一条属银行侧（见 [isPayChannelSide] / [isBankLedgerSide]）。
  *
  * 130 秒窗口比常规的 60 秒预检略宽，因为银行短信的到达延迟通常大于推送。
+ *
+ * 光有 ①~④ 还不够——还必须有可核对线索才允许合并（见 [payBankLinked]）。
  */
 internal object CrossChannelDedup {
 
     /** 归并窗口：银行短信/推送相对支付通知的到达延迟 */
     const val WINDOW_MS = 130_000L
 
-    /** 通道类别：支付类（微信/支付宝）与银行类（短信 / 银行 App 推送 / 云闪付） */
+    /**
+     * 跨应用链路（`CrossAppLinker`）用的通道分类：支付类（微信/支付宝）与银行类（短信 / 银行 App 推送 / 云闪付）。
+     *
+     * ⚠️ 与银行动账去重（[isPayChannelSide] / [isBankLedgerSide]）**口径不同**，别混用：
+     * 跨应用链路里云闪付是"能提供银行卡线索"的一侧，所以算银行类；
+     * 而银行动账去重里云闪付是**支付渠道**（它扣的是绑定的银行卡），必须与微信/支付宝同侧，
+     * 否则"云闪付 ⇄ 银行短信"永远配不上对。
+     */
     enum class ChannelClass { PAY, BANK, UNKNOWN }
 
     /**
@@ -42,6 +57,17 @@ internal object CrossChannelDedup {
     }
 
     fun isBankChannel(source: String): Boolean = channelClass(source) == ChannelClass.BANK
+
+    /** 银行动账去重的"支付渠道"一侧：微信 / 支付宝 / 云闪付（详见 [channelClass] 的说明） */
+    fun isPayChannelSide(source: String): Boolean =
+        source == NotificationRules.WECHAT ||
+            source == NotificationRules.ALIPAY ||
+            source == NotificationRules.UNIONPAY
+
+    /** 银行动账去重的"银行"一侧：银行动账短信（`SMS:银行名`）/ 银行 App 推送包名。云闪付不算 */
+    fun isBankLedgerSide(source: String): Boolean =
+        source.startsWith(NotificationRules.SMS_SOURCE_PREFIX) ||
+            BankLedgerRules.bankNameOfPackage(source) != null
 
     /** 一条待归并记录的关键特征 */
     data class Signature(
@@ -71,22 +97,23 @@ internal object CrossChannelDedup {
     )
 
     fun isSameTransaction(existing: Signature, incoming: Signature): Boolean {
-        val a = channelClass(existing.source)
-        val b = channelClass(incoming.source)
-        val crossClass = (a == ChannelClass.PAY && b == ChannelClass.BANK) ||
-            (a == ChannelClass.BANK && b == ChannelClass.PAY)
-        return crossClass &&
-            existing.amountCents == incoming.amountCents &&
-            existing.type == incoming.type &&
+        val payBankPair =
+            (isPayChannelSide(existing.source) && isBankLedgerSide(incoming.source)) ||
+                (isBankLedgerSide(existing.source) && isPayChannelSide(incoming.source))
+        return payBankPair &&
+            // 仅支出：收入方向（含退款到账）不参与归并，理由见类注释
+            existing.type == TxType.EXPENSE &&
+            incoming.type == TxType.EXPENSE &&
             existing.isRefund == incoming.isRefund &&
+            existing.amountCents == incoming.amountCents &&
             abs(existing.time - incoming.time) <= WINDOW_MS
     }
 
     /**
      * 支付类条目是否带有可核对的银行线索（银行名/卡尾号）。
      *
-     * [isSameTransaction] 只回答"两笔在金额/方向/时间上是否吻合"；能否合并到银行侧
-     * 还必须有这条线索——只凭金额与时间接近合并，可能把两笔真实交易并成一笔。
+     * [isSameTransaction] 只回答"两笔在金额/方向/时间上是否吻合"；能否合并还必须有这条线索——
+     * 只凭金额与时间接近合并，可能把两笔真实交易并成一笔。
      */
     fun hasBankEvidence(entryText: String, bankName: String, cardTail: String?): Boolean {
         if (entryText.isBlank()) return false
@@ -96,4 +123,39 @@ internal object CrossChannelDedup {
         val tailHit = !cardTail.isNullOrEmpty() && entryText.contains(cardTail)
         return bankHit || tailHit
     }
+
+    /**
+     * 支付渠道 → 银行动账文本里会出现的渠道线索。
+     *
+     * 银行侧的"特约商户/摘要"字段本身就是最强的渠道线索：招行的真实样本
+     * `在【财付通-微信支付-微信转账】发生快捷支付扣款` 明确写着走的是微信支付。
+     * 这条线索的方向与 [hasBankEvidence] 相反（银行文本里有渠道名，而不是支付文本里有银行名），
+     * 两者任一成立都足以认定"这笔是同一笔卡支付"。
+     */
+    private val payChannelKeywords: Map<String, List<String>> = mapOf(
+        NotificationRules.WECHAT to listOf("微信", "财付通"),
+        NotificationRules.ALIPAY to listOf("支付宝"),
+        NotificationRules.UNIONPAY to listOf("云闪付", "银联"),
+    )
+
+    /** 银行动账文本是否点名了该支付渠道（财付通/微信支付、支付宝、云闪付/银联） */
+    fun bankTextMentionsPayChannel(bankText: String, paySource: String): Boolean {
+        if (bankText.isBlank()) return false
+        val keywords = payChannelKeywords[paySource] ?: return false
+        return keywords.any { bankText.contains(it) }
+    }
+
+    /**
+     * 两侧之间是否存在可核对线索：支付侧文本写了银行名/卡尾号，**或**银行侧文本点名了支付渠道。
+     * 两个方向各缺一条线索时都算"证据不足"，保持独立记录（见 docs/通知规则维护指南.md 第六节）。
+     */
+    fun payBankLinked(
+        paymentText: String,
+        bankText: String,
+        bankName: String,
+        cardTail: String?,
+        paySource: String,
+    ): Boolean =
+        hasBankEvidence(paymentText, bankName, cardTail) ||
+            bankTextMentionsPayChannel(bankText, paySource)
 }

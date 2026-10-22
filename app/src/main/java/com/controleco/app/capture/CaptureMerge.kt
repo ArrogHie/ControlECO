@@ -355,6 +355,21 @@ internal fun mergePageInfo(
 }
 
 /**
+ * 备注合并（页面 ⇄ 银行侧是同一笔时，两边的正文都要留着）。
+ *
+ * 为什么不能简单"页面优先"：银行动账正文里的「在【财付通-微信支付-微信转账】…」是**渠道线索**，
+ * 页面备注里的「支付方式 招商银行储蓄卡(2532)」是**真实支付工具**，谁被覆盖掉都会让后续
+ * 同笔判定少一条证据。互相包含时只留长的那份，避免同一句话写两遍。
+ */
+internal fun combineNotes(pageNote: String, bankNote: String): String = when {
+    bankNote.isBlank() -> pageNote
+    pageNote.isBlank() -> bankNote
+    bankNote.contains(pageNote) || pageNote.contains(bankNote) ->
+        if (bankNote.length >= pageNote.length) bankNote else pageNote
+    else -> "$pageNote · $bankNote"
+}
+
+/**
  * 通知 → 页面 方向的补充（页面先到、通知后到）：只补页面缺失的字段，绝不覆盖页面已确认的信息。
  *
  * 目前唯一安全的补充是**时间**：页面没有交易时间时会把捕获时刻当交易时间，

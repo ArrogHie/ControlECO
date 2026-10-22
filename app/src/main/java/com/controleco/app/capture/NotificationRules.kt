@@ -12,6 +12,8 @@ import com.controleco.app.util.Money
  * 真实样本驱动的格式覆盖：
  * - 微信收款：text=微信支付收款0.01元（朋友到账）/ 收款入账：10.00元 / bigText=收款金额¥0.01
  * - 微信支出：text=已支付¥12.80（¥ 前缀、关键词后无数字，走兜底）
+ * - 微信自动扣费：text=[11条]微信支付: 已扣费¥6.50（折叠计数前缀可变/可缺省；
+ *   "扣费"是独立的支出动词，此前只认"扣款"导致整条通知被判「方向不明」直接漏记）
  * - 微信退款：text=[2条]微信支付: 退款到账通知（折叠汇总常无金额，明细行见捕获日志，无金额不入队）
  * - 支付宝支出：text=你有一笔14.90元的支出，点此查看详情。（金额在关键词前，走反向正则）
  * - 支付宝退款：text=你收到一笔14.90元退款，点此查看账单详情！（退款→收入，打退款标记）
@@ -114,7 +116,8 @@ object NotificationRules {
 
     // ---------- 文本归一化与遮罩 ----------
 
-    private val bracketedCount = Regex("""[\[［【(（]\s*\d+\s*条\s*[\]］】)）]""")
+    /** 折叠计数前缀 `[11条]` / `［1条］` / `（11条消息）`：数字与是否存在都不固定，一律按"计数标记"剥掉 */
+    private val bracketedCount = Regex("""[\[［【(（]\s*\d+\s*条(?:消息|通知)?\s*[\]］】)）]""")
     private val countSuffix = Regex("""(?:共|新)\s*\d+\s*条(?:消息|通知)?""")
     private val appCountPrefix = Regex("""(微信支付|微信收款|微信|支付宝|云闪付)\s*[:：]?\s*\d+\s*条""")
     private val whitespace = Regex("""\s+""")
@@ -173,7 +176,7 @@ object NotificationRules {
      */
     private val confirmPhrases = listOf(
         "已支付", "支付成功", "付款成功", "支付完成", "交易成功", "已付款",
-        "扣款成功", "已扣款", "消费成功", "收款成功", "已收款", "收款到账",
+        "扣款成功", "已扣款", "已扣费", "扣费成功", "消费成功", "收款成功", "已收款", "收款到账",
         "入账成功", "成功入账", "转账到账", "收到转账",
         "退款到账", "退款成功", "已退款",
         // 免密/自动扣款类（真实样本："你有一笔2.98元的免密/自动扣款支付，点击领取6个支付宝积分。"）——
@@ -220,7 +223,7 @@ object NotificationRules {
     )
 
     private val ledgerVerbs = listOf(
-        "已支付", "支付成功", "付款", "支出", "消费", "扣款", "收款", "到账", "入账", "退款", "退回", "收入",
+        "已支付", "支付成功", "付款", "支出", "消费", "扣款", "扣费", "收款", "到账", "入账", "退款", "退回", "收入",
     )
 
     /**
@@ -238,7 +241,8 @@ object NotificationRules {
         "收款成功", "已收款", "收款到账", "已到账", "入账成功", "成功入账", "转账到账", "收到转账",
     ) + receivePhrases
     private val expensePhrases = listOf(
-        "已支付", "支付成功", "付款成功", "支付完成", "交易成功", "已付款", "扣款成功", "已扣款", "消费成功",
+        "已支付", "支付成功", "付款成功", "支付完成", "交易成功", "已付款", "扣款成功", "已扣款", "扣费成功",
+        "已扣费", "消费成功",
     )
 
     /** 文本是否像折叠摘要（`[2条]`/`共3条`/`2条新消息`）；摘要自身常不含金额，需要子通知补全 */
@@ -313,7 +317,7 @@ object NotificationRules {
      */
     private val incomeAmount =
         Regex("""(?:收款|到账|入账|收入|向你付款|付款给你|转账给你|收到一笔)[^\d￥¥.]{0,8}${AMT}元""")
-    private val expenseAmount = Regex("""(?:已支付|支付成功|支出|消费|付款|扣款)[^\d￥¥.]{0,8}${AMT}元""")
+    private val expenseAmount = Regex("""(?:已支付|支付成功|支出|消费|付款|扣款|扣费)[^\d￥¥.]{0,8}${AMT}元""")
     private val refundAmount = Regex("""(?:退款|退回)[^\d￥¥.]{0,8}${AMT}元""")
 
     /**
@@ -323,7 +327,7 @@ object NotificationRules {
      * 不会被反向正则跨越（"支出，领1元红包"仍匹配到 0.01 而不是 1）。
      */
     private val reversedAmount =
-        Regex("""$AMT\s*元[^，。\d]{0,8}的?\s*(?:支出|消费|付款|扣款|收款|收入|到账|入账|退款|退回)""")
+        Regex("""$AMT\s*元[^，。\d]{0,8}的?\s*(?:支出|消费|付款|扣款|扣费|收款|收入|到账|入账|退款|退回)""")
 
     /** 兜底：文本里直接出现 ¥ 金额（已支付¥12.80 / 收款金额¥0.01） */
     private val currencyAmount = Regex("""[￥¥]\s*$AMT""")
@@ -372,7 +376,8 @@ object NotificationRules {
         val receiveHit = receivePhrases.any { body.contains(it) }
         val incomeHit = body.contains("收款") || body.contains("到账") || body.contains("入账") || body.contains("收入")
         val expenseHit = body.contains("已支付") || body.contains("支付成功") || body.contains("支出") ||
-            body.contains("消费") || body.contains("付款") || body.contains("扣款") || body.contains("支付凭证")
+            body.contains("消费") || body.contains("付款") || body.contains("扣款") ||
+            body.contains("扣费") || body.contains("支付凭证")
 
         val type: TxType
         val isRefund: Boolean

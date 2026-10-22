@@ -58,6 +58,24 @@ class BankLedgerRulesTest {
     }
 
     @Test
+    fun `real cmb quick payment notice carrying wechat channel hint`() {
+        // 真实样本（2026-10-21 用户实测，与微信转账 ¥200 被记成两笔就是这一条）：
+        // 招行动账通知没有"尾号"，渠道写在【财付通-微信支付-微信转账】里——
+        // 这条线索是「支付渠道 ⇄ 银行」去重的依据（见 CrossChannelDedup.bankTextMentionsPayChannel）
+        val body = "招商银行 您账户2532于10月21日16:54在【财付通-微信支付-微信转账】发生快捷支付扣款，人民币200.00"
+        val r = BankLedgerRules.parse(body, "cmb.pb", "通知", smsTime, "招商银行")!!
+        assertEquals(TxType.EXPENSE, r.type)
+        assertEquals(20_000L, r.amountCents)
+        assertEquals("招商银行", r.bankName)
+        assertEquals("招商银行通知·支出", r.ruleName)
+        assertFalse(r.isRefund)
+        // 卡尾号缺失（样本里是"您账户2532"，不是"尾号2532"）；渠道线索必须留在正文里
+        assertNull(r.cardTail)
+        assertTrue(r.note.contains("微信支付"))
+        assertTrue(CrossChannelDedup.bankTextMentionsPayChannel(r.note, NotificationRules.WECHAT))
+    }
+
+    @Test
     fun `thousand separator is parsed correctly`() {
         // 不支持千分位的实现会在这里解析成 234.56（真实错值）
         val r = parseSms("【招商银行】您尾号1234卡10月8日消费人民币1,234.56元")!!

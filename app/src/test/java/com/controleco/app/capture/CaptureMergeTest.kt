@@ -812,4 +812,26 @@ class CaptureMergeTest {
         assertFalse(hasRecentSameEntry(existing, NotificationRules.WECHAT, TxType.INCOME, 1290, base + 1_000))
         assertFalse(hasRecentSameEntry(existing, NotificationRules.ALIPAY, TxType.EXPENSE, 1290, base + 1_000))
     }
+
+    // ---------- 页面 ⇄ 银行同一笔时的备注合并 ----------
+
+    @Test
+    fun `页面并入银行条目时两边的正文都保留`() {
+        // 银行正文里的"财付通-微信支付"是渠道线索，页面备注里的支付工具是真实扣款卡，谁都不能被覆盖
+        val pageNote = "支付方式 招商银行储蓄卡(2532)"
+        val bankNote = "招商银行 您账户2532于10月21日16:54在【财付通-微信支付-微信转账】发生快捷支付扣款，人民币200.00"
+        val merged = combineNotes(pageNote, bankNote)
+        assertTrue(merged.contains("招商银行储蓄卡(2532)"))
+        assertTrue(merged.contains("财付通-微信支付"))
+        assertEquals("$pageNote · $bankNote", merged)
+    }
+
+    @Test
+    fun `备注合并去重_空值与互相包含`() {
+        assertEquals("页面备注", combineNotes("页面备注", ""))
+        assertEquals("银行备注", combineNotes("", "银行备注"))
+        // 互相包含时只留长的那份（同一句话不写两遍）
+        assertEquals("银行动账 招商银行", combineNotes("招商银行", "银行动账 招商银行"))
+        assertEquals("银行动账 招商银行", combineNotes("银行动账 招商银行", "招商银行"))
+    }
 }
