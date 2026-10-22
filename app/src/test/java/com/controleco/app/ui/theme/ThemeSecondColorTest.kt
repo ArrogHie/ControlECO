@@ -199,65 +199,49 @@ class ThemeSecondColorTest {
         }
     }
 
-    // ---------- 双色相封面 ----------
+    // ---------- 封面渐变 ----------
 
     @Test
-    fun `封面收尾档用的是次要色相`() {
-        // 用 ΔE 而不是色相差：珊瑚的 hero 自己就偏过色相，色相差会偏小，
-        // 但只要两档看起来是两种颜色，渐变就有层次。
+    fun `封面渐变是单色相的明暗过渡`() {
+        // 双色相渐变（主色→次要色）观感太跳，已废弃。
+        // 现在三档必须同色相，只靠明暗做体积感，否则又会出现「两种颜色」的过渡。
         tinted.forEach { accent ->
             val c = ecoColors(false, accent)
-            val d = colorDistance(c.heroSecond, c.heroA)
-            assertTrue(
-                "${accent.label}: heroSecond 与主色封面太接近（ΔE=$d），渐变会退化成单色",
-                d > 20f,
-            )
-        }
-    }
-
-    @Test
-    fun `封面收尾档与主色档同亮度`() {
-        // 同亮度才能保证白字在整条渐变上对比一致
-        all.forEach { accent ->
-            val c = ecoColors(false, accent)
-            val d = abs(relativeLuminance(c.heroSecond) - relativeLuminance(c.heroC))
-            assertTrue("${accent.label}: heroSecond 亮度应贴近 heroC（差 $d）", d < 0.02f)
-        }
-    }
-
-    @Test
-    fun `双色相封面主色占多`() {
-        all.forEach { accent ->
-            val c = ecoColors(false, accent)
-            val g = c.heroDuoGradient
-            if (accent.neutral == Neutral.WHITE) {
-                // 无彩色主题没有第二个色相可转，应退回单色渐变（而不是塞一个假色相）
-                assertEquals("${accent.label}: 无彩色主题应退回单色渐变", c.heroGradient, g)
-                return@forEach
-            }
-            assertEquals("${accent.label}: 双色相封面应是 4 个色标", 4, g.size)
-            // 前 3 个色标都是主色相，只有最后一个才换色相
-            g.take(3).forEach {
+            val base = hue(c.heroB)
+            c.heroGradient.forEach {
                 assertTrue(
-                    "${accent.label}: 前段应为主色相",
-                    colorDistance(it, c.heroA) < 20f,
+                    "${accent.label}: 封面渐变混入了别的色相",
+                    hueDiff(hue(it), base) < 20f,
                 )
             }
+        }
+    }
+
+    @Test
+    fun `封面渐变从左上亮到右下深`() {
+        // 与「顶边白高光 + 底边内阴影」同向，光感才成立
+        all.forEach { accent ->
+            val c = ecoColors(false, accent)
+            val g = c.heroGradient
+            assertEquals("封面渐变应是 3 段", 3, g.size)
             assertTrue(
-                "${accent.label}: 末段应为次要色相",
-                colorDistance(g.last(), c.heroA) > 20f,
+                "${accent.label}: 渐变应从亮到深",
+                relativeLuminance(g[0]) > relativeLuminance(g[1]) &&
+                    relativeLuminance(g[1]) > relativeLuminance(g[2]),
             )
         }
     }
 
     @Test
-    fun `双色相封面上白字仍可读`() {
+    fun `封面渐变的明暗跨度够看出体积但不突兀`() {
         all.forEach { accent ->
             val c = ecoColors(false, accent)
-            c.heroDuoGradient.forEach { stop ->
-                val cr = contrastRatio(c.onHero, stop)
-                assertTrue("${accent.label}: 双色相封面某端对比度不足 $cr", cr >= 4.5f)
-            }
+            val g = c.heroGradient
+            val light = relativeLuminance(g.first())
+            val dark = relativeLuminance(g.last())
+            val ratio = light / dark
+            assertTrue("${accent.label}: 跨度过小（$ratio），会看成纯色", ratio >= 1.4f)
+            assertTrue("${accent.label}: 跨度过大（$ratio），过渡会突兀", ratio <= 1.9f)
         }
     }
 }

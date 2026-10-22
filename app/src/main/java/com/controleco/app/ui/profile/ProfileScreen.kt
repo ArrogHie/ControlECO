@@ -109,7 +109,6 @@ import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.contentColorOn
 import com.controleco.app.ui.theme.eco
 import com.controleco.app.ui.theme.ecoColors
-import com.controleco.app.ui.theme.heroDuoGradient
 import com.controleco.app.ui.theme.heroPlate
 import com.controleco.app.ui.theme.heroProgress
 import com.controleco.app.ui.theme.onHero
@@ -412,9 +411,6 @@ private fun BudgetHero(
                 offsetX = 2.dp, offsetY = 4.2.dp,
             ),
         shape = heroShape,
-        // 主色 → 次要色：主色占前 2/3，右下角过渡到次要色相。
-        // 之前用默认的 heroA/B/C 三档，三者同色相只差亮度，看起来近乎纯色。
-        colors = c.heroDuoGradient,
     ) {
         Column(Modifier.fillMaxSize().padding(17.dp)) {
             // 眉毛 + 右侧两个动作

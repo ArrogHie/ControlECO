@@ -243,13 +243,6 @@ data class EcoColors(
     val heroA: Color,
     val heroB: Color,
     val heroC: Color,
-    /**
-     * 封面渐变的**次要色收尾档**：和 [heroC] 同亮度，但色相来自次要色。
-     *
-     * 用来做「主要色 → 次要色」的双色相封面（主色占多）。
-     * 原来 heroA/B/C 三档都是主色相，只差亮度，所以渐变看起来近乎纯色。
-     */
-    val heroSecond: Color,
     /** 按钮 / FAB / 进度条等「主操作」的强调渐变（比 hero 亮） */
     val accentGradA: Color,
     val accentGradB: Color,
@@ -323,23 +316,20 @@ private const val ACCENT_LIFT_SECOND = 0.06f
  * 所以 `heroC ≤ 0.183`（1.05/4.5 − 0.05）。但 `onHero` 不是纯白（带一点主题色相），
  * 实际只能到 0.172，再高就掉到 4.41:1。
  */
-private const val HERO_LUMA_A = 0.122f
-private const val HERO_LUMA_B = 0.150f
+private const val HERO_LUMA_A = 0.108f
+private const val HERO_LUMA_B = 0.140f
 private const val HERO_LUMA_C = 0.172f
 
 /**
  * 封面的饱和度系数。
  *
- * 明度被顶到 0.17 左右时，如果照原样只抬 V，视觉上仍然偏「灰」——
- * 所以额外把 S 抬 18%，得到同色相的鲜艳版本（深墨绿 -> 明亮青绿，而不是掺白灰青）。
+ * 明度顶到 0.17 左右时如果只抬 V，观感偏灰；但**加太多会太艳**。
+ * 1.0 = 保持作者原色，< 1 = 收敛。取 0.95：比原色略淡一点，柔和耐看。
  */
-private const val HERO_SAT_SCALE = 1.18f
+private const val HERO_SAT_SCALE = 0.95f
 
-/** 主操作渐变的饱和度系数，比封面更收敛一点（按钮面积小、还要压白字）。 */
-private const val GRAD_SAT_SCALE = 1.12f
-
-/** 双色相封面「次要色收尾档」的额外收敛：边角只是色相微移，不该比主色段还艳。 */
-private const val HERO_SECOND_SAT_TRIM = 0.82f
+/** 主操作渐变的饱和度系数（按钮/加号），比封面再收敛一点。 */
+private const val GRAD_SAT_SCALE = 0.98f
 
 /**
  * 纯白主题的封面必须保持无彩色。
@@ -431,23 +421,14 @@ private fun vividTone(color: Color, target: Float, satScale: Float = 1f): Color 
 /** 主操作渐变（按钮/FAB/进度）：三段 stop */
 val EcoColors.accentGradient: List<Color> get() = listOf(accentGradA, accentGradB, accentGradC)
 
-/** hero / 封面渐变：三段 stop，永远偏深，配白系前景 */
-val EcoColors.heroGradient: List<Color> get() = listOf(heroA, heroB, heroC)
-
 /**
- * 「主要色 → 次要色」的双色相封面渐变，**主色占多**。
+ * hero / 封面渐变：**从左上（亮）到右下（深）**。
  *
- * 四个色标等距：0% / 33% / 67% 都是主色，最后 33% 才过渡到次要色
- * （[EcoColors.heroSecond]）。这样大面积是主色，右下角带出一点次要色相。
- *
- * 无彩色主题（纯白）没有第二个色相可转，自动退回单色 [EcoColors.heroGradient]。
+ * 顺序刻意是 `heroC → heroB → heroA`（亮→深），和卡片上已有的
+ * 「顶边 1px 白高光 + 底边内侧压深」同向，光感才成立。
+ * 三档同色相、只差明暗，所以是柔和的体积感，不是两种颜色的过渡。
  */
-val EcoColors.heroDuoGradient: List<Color>
-    get() = if (colorDistance(heroSecond, heroC) < 20f) {
-        heroGradient
-    } else {
-        listOf(heroA, heroB, heroB, heroSecond)
-    }
+val EcoColors.heroGradient: List<Color> get() = listOf(heroC, heroB, heroA)
 
 /**
  * 强调色浅底渐变：卡片「软渐变」面（选中态、分类卡等）。
@@ -649,15 +630,6 @@ fun ecoColors(dark: Boolean, accent: EcoAccent): EcoColors {
         heroA = vividTone(accent.heroA, HERO_LUMA_A, heroSat),
         heroB = vividTone(accent.heroB, HERO_LUMA_B, heroSat),
         heroC = vividTone(accent.heroC, HERO_LUMA_C, heroSat),
-        // 次要色相的收尾档：把 hero 的收尾色**旋转与强调色对相同的角度**，
-        // 亮度与 heroC 一致（白字对比不变），只换色相。
-        // 不能直接拿 second 的色相：hero 本身已经偏过色相，直接取会撞得很近（珊瑚只差 27°）。
-        // 饱和度比主色段收一档：边角是「色相微移」，不能艳到抢主体。
-        heroSecond = vividTone(
-            rotateHue(accent.heroC, accent.secondaryShift),
-            HERO_LUMA_C,
-            heroSat * HERO_SECOND_SAT_TRIM,
-        ),
         accentGradA = vividTone(accent.accentGradA, GRAD_LUMA_A, gradSat),
         accentGradB = vividTone(accent.accentGradB, GRAD_LUMA_B, gradSat),
         accentGradC = vividTone(accent.accentGradC, GRAD_LUMA_C, gradSat),

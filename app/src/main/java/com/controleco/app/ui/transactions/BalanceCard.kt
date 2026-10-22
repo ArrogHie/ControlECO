@@ -51,6 +51,7 @@ import com.controleco.app.ui.eco.EcoAutoMoney
 import com.controleco.app.ui.common.EcoIcons
 import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.eco
+import com.controleco.app.ui.theme.heroGradient
 import com.controleco.app.ui.theme.onHero
 import com.controleco.app.ui.theme.onHeroMuted
 import com.controleco.app.ui.theme.accBook
@@ -254,7 +255,7 @@ fun BalanceCard(
                     // 夜色底：主题 hero 渐变（125° 深色渐变），跟随强调色
                     drawRect(
                         Brush.linearGradient(
-                            colors = listOf(c.heroA, c.heroB, c.heroC),
+                            colors = c.heroGradient,
                             start = Offset(0f, 0f),
                             end = Offset(size.width, size.height),
                         ),

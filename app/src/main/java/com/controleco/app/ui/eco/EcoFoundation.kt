@@ -81,6 +81,7 @@ import kotlin.math.roundToLong
 import com.controleco.app.ui.theme.EcoColors
 import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.eco
+import com.controleco.app.ui.theme.heroGradient
 
 /**
  * 美化动效开关（来自设置里的「显示动画」，默认 true）。
@@ -622,7 +623,7 @@ fun EcoHeroCard(
     content: @Composable () -> Unit,
 ) {
     val c = MaterialTheme.eco
-    val gradient = colors ?: listOf(c.heroA, c.heroB, c.heroC)
+    val gradient = colors ?: c.heroGradient
     val glow = rememberInfiniteTransition(label = "hero-glow")
     val glowPhase by glow.animateFloat(
         initialValue = 0f,
