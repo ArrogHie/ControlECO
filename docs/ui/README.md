@@ -91,7 +91,7 @@ ui/
 5. **四个 tab 的内容互斥替换**：`MainScaffold` 同一时刻只渲染 `tab` 这一页；切 tab 时新页整体上移 10dp / 220ms（`translationY`，单层位移）。不要两页同屏平移或整页 alpha 交叉淡化——每帧重绘两整页会明显掉帧，这是实测帧率最差的写法。
 6. **再次点当前 tab 回到顶部**：通过 `reenterTick` → 页面的 `scrollToTopTick` 参数实现；页面要记 `lastReenterTick`、只在 tick 增大时回顶，否则从别的 tab 切回来会复位滚动位置。新增滚动页照此接入。
 7. **底部栏与 FAB 是 overlay**：内容在它们下面滚动。滚动内容底部 padding 用 `ecoBottomContentPadding(extra)`；FAB 位置用 `ecoFabBottomOffset()`，不要自己算导航栏高度。
-8. **动效克制**：tab 切换 220ms 单页上移、路由 300ms、冷启动开屏 logo 淡入淡出（期间预热首屏）；sheet/dialog 自带入场；金额用 `EcoAutoMoney` / `EcoCountUpMoney` 自适应；**金额/柱状图/进度条/首页环每次进入页面重播**（产品口径），页面切换不叠影、不留空白；尊重 `rememberReducedMotion()`（首页翻转）与设置里的「显示动画」开关（`LocalAnimationsEnabled`，关闭后一切入场动效直接定格终值）。
+8. **动效克制**：tab 切换 220ms 单页上移、路由转场串行（旧页先淡出、新页再淡入，避免两页同时半透明叠加）、冷启动开屏 logo 淡入淡出（期间预热首屏）；sheet/dialog 自带入场；金额用 `EcoAutoMoney` / `EcoCountUpMoney` 自适应；**金额/柱状图/进度条/首页环每次进入页面重播**（产品口径），页面切换不叠影、不留空白；尊重 `rememberReducedMotion()`（首页翻转）与设置里的「显示动画」开关（`LocalAnimationsEnabled`，关闭后一切入场动效直接定格终值）。
 9. **文案短、状态准**：标题/按钮尽量 2–4 字；动态状态（待补、待确认、已退款、未开启）不能省；**真正不可恢复的删除（记录/账户）**保留「删除后不可恢复」，分类删除则说明流水归入「其他」；**页面不预置规则/边界说明**，只在用户触发时提示；导入步骤、权限教程属于功能文案，不要“精简”掉；**任何文字前不加 `·`**，也不用 `·` 分隔字段（用空格、`/` 或中文标点）。
 10. **数据未就绪先不画**：首页/统计/个人页在关键 Flow 为 `null` 时直接 `return`，避免先显示 0 再跳数。新增汇总卡沿用该约定。
 
