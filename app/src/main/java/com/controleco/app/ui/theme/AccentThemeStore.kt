@@ -6,7 +6,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 /**
- * 强调色偏好：6 套主题色只改变"品牌青蓝"与 hero 渐变，收支/警告/危险语义色永远不变。
+ * 强调色偏好：7 套主题色会改变强调色族、hero 渐变、主操作渐变，
+ * 「纯白」还会额外把中性面（背景/卡片/分隔线）换成白与石墨；
+ * 收支/警告/危险语义色永远不变。
  *
  * 用独立 SharedPreferences 保存，启动时在 [com.controleco.app.AccBookApp] 初始化；
  * 不放进 LedgerViewModel，避免为一个纯展示偏好污染账本数据层。
