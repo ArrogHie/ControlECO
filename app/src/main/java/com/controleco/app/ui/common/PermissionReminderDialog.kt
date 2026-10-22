@@ -153,8 +153,6 @@ private fun permissionMeta(permission: CapturePermission): PermissionMeta = when
         PermissionMeta(EcoIcons.Bell, "读取微信/支付宝的付款通知")
     CapturePermission.A11Y ->
         PermissionMeta(EcoIcons.A11y, "读取微信/支付宝页面上的金额")
-    CapturePermission.SCREEN_READER ->
-        PermissionMeta(EcoIcons.Play, "微信 8.0.52+ 须同时开启，否则读不到页面")
     CapturePermission.NOTIFY ->
         PermissionMeta(EcoIcons.Bell, "接收入账与待确认提醒")
     CapturePermission.SMS ->

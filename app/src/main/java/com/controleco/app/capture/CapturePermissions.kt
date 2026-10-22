@@ -4,11 +4,17 @@ import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationManagerCompat
 
-/** 自动记账依赖的权限项（顺序 = 提醒弹窗的展示顺序） */
+/**
+ * 自动记账依赖的权限项（顺序 = 提醒弹窗的展示顺序）。
+ *
+ * 「随选朗读」**不在其中**：页面采集的注册组件改用与系统读屏一致的组件身份后，
+ * 微信在"只授权本应用、系统读屏关闭"的情况下也能读到节点（真机实测见
+ * docs/无障碍页面捕获兼容性.md），因此它不再是必须开启的权限项。
+ * 读不到页面时的备用手段仍保留在设置 → 权限页（见 ScreenReaderAccess）。
+ */
 enum class CapturePermission(val label: String) {
     LISTENER("通知监听"),
     A11Y("无障碍"),
-    SCREEN_READER("随选朗读"),
     NOTIFY("通知权限"),
     SMS("短信权限"),
     OVERLAY("悬浮窗"),
@@ -27,18 +33,12 @@ object CapturePermissions {
     /** 已开启功能所需但缺失的权限；空 = 权限齐全 */
     fun missing(context: Context): List<CapturePermission> {
         val app = context.applicationContext
-        val screenReaderNeeded = screenReaderNeeded(
-            a11yCaptureEnabled = CaptureCenter.isA11yCaptureEnabled(),
-            wechatWatched = CaptureAppCatalog.isWatched(app, NotificationRules.WECHAT),
-        )
         return missingPermissions(
             mapOf(
                 CapturePermission.LISTENER to
                     ready(CaptureCenter.isCaptureEnabled(), hasListenerAccess(app)),
                 CapturePermission.A11Y to
                     ready(CaptureCenter.isA11yCaptureEnabled(), AccBookAccessibilityService.isEnabled(app)),
-                CapturePermission.SCREEN_READER to
-                    ready(screenReaderNeeded, ScreenReaderAccess.isEnabled(app)),
                 CapturePermission.NOTIFY to
                     ready(CaptureCenter.isCaptureNotifyEnabled(), canPostNotifications(app)),
                 CapturePermission.SMS to
@@ -48,13 +48,6 @@ object CapturePermissions {
             ),
         )
     }
-
-    /**
-     * 随选朗读只在“页面采集开启 + 微信在监听范围”时需要：
-     * 用户关掉页面采集或明确不监听微信时，不该被额外权限打扰。
-     */
-    internal fun screenReaderNeeded(a11yCaptureEnabled: Boolean, wechatWatched: Boolean): Boolean =
-        a11yCaptureEnabled && wechatWatched
 
     /** 功能未启用或权限已给 = 无需提醒 */
     private fun ready(needed: Boolean, granted: Boolean) = !needed || granted

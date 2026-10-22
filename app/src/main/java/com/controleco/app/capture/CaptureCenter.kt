@@ -1101,6 +1101,7 @@ object CaptureCenter {
     fun setCaptureEnabled(enabled: Boolean) {
         prefs().edit().putBoolean(KEY_CAPTURE_ENABLED, enabled).apply()
         AppLog.i("Ntf", "captureEnabled=$enabled")
+        AccBookAccessibilityService.refreshServiceInfo()
     }
 
     fun isA11yCaptureEnabled(): Boolean =
@@ -1109,6 +1110,7 @@ object CaptureCenter {
     fun setA11yCaptureEnabled(enabled: Boolean) {
         prefs().edit().putBoolean(KEY_A11Y_CAPTURE_ENABLED, enabled).apply()
         AppLog.i("Page", "a11yCaptureEnabled=$enabled")
+        AccBookAccessibilityService.refreshServiceInfo()
     }
 
     fun isRefundLinkEnabled(): Boolean =
@@ -1212,6 +1214,7 @@ object CaptureCenter {
     fun setDebugCaptureAllPages(enabled: Boolean) {
         prefs().edit().putBoolean(KEY_DEBUG_CAPTURE_ALL_PAGES, enabled).apply()
         AppLog.i("Page", "debugCaptureAllPages=$enabled")
+        AccBookAccessibilityService.refreshServiceInfo()
     }
 
     /**

@@ -1,19 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  无障碍采集配置：不限包名（「捕获所有页面（调试）」需要采样其他应用），
-  服务内按运行时开关过滤——只收已知交易来源（见 PageParserRegistry）与用户监听的目录应用，
-  调试开关开启时放行全部应用。
+  无障碍采集配置。这里**不写 android:packageNames**：监听范围由服务在运行时按用户选择写入
+  serviceInfo.packageNames（见 AccBookAccessibilityService.applyServiceInfo），
+  XML 写死一份、运行时再写一份会变成两套口径。
+
+  事件类型（三种都要，缺一会漏采集时机）：
+  - typeWindowStateChanged：页面切换（更新前台应用与活动名，启动该应用的采集）；
+  - typeWindowContentChanged：页面内容变化（支付结果页"结果先出来、明细后渲染"靠它补采）；
+  - typeWindowsChanged：窗口集合变化——独立弹窗（红包窗口/转账确认/收款详情弹层）
+    只发这个事件，不订阅就会漏掉"窗口换了但活动窗口没换"的情况。
 
   采集标志（缺一不可，服务启动时还会再确认一次）：
   - flagRetrieveInteractiveWindows：多窗口读取——支付成功页可能是 dialog/非焦点窗口；
   - flagIncludeNotImportantViews：部分支付页把金额/商户节点标为"不重要视图"，不开读不到；
   - flagReportViewIds：保留控件 id，作为文本定位的补充证据。
 
-  只订阅窗口变化事件、只读窗口内容；刻意不申请手势/按键/截图能力（最小化权限，不做截图识别）；
+  只读窗口内容；刻意不申请手势/按键/截图能力（最小化权限，不做截图识别）；
   notificationTimeout 做系统级事件节流第一道闸（服务内另有事件合并与稳定性补采）。
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeWindowsChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews|flagReportViewIds"
     android:canRetrieveWindowContent="true"

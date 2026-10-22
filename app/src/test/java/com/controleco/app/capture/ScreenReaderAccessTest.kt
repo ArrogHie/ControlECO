@@ -47,6 +47,28 @@ class ScreenReaderAccessTest {
     }
 
     @Test
+    fun `本应用注册入口用了随选朗读类名也不算读屏`() {
+        // 页面采集的注册入口类名与系统随选朗读相同（页面捕获兼容性，见
+        // docs/无障碍页面捕获兼容性.md）。判定必须先看包名，否则应用会把自己的
+        // 采集服务当成系统读屏，权限页就不再提示用户去开随选朗读。
+        assertFalse(
+            ScreenReaderAccess.isScreenReaderComponent(
+                "com.controleco.app/" + AccBookAccessibilityService.SERVICE_CLASS_NAME,
+            ),
+        )
+        assertFalse(
+            ScreenReaderAccess.isScreenReaderComponent(
+                "com.controleco.app/com.google.android.accessibility.selecttospeak.SelectToSpeakService",
+            ),
+        )
+        assertFalse(
+            ScreenReaderAccess.enabledFromSetting(
+                "com.controleco.app/" + AccBookAccessibilityService.SERVICE_CLASS_NAME,
+            ),
+        )
+    }
+
+    @Test
     fun `启用列表按冒号分隔识别`() {
         val enabled = "com.controleco.app/.capture.AccBookAccessibilityService:" +
             "com.google.android.marvin.talkback/" +

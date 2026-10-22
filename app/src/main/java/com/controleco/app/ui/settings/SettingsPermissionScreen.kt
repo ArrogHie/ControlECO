@@ -100,9 +100,11 @@ private fun PermissionSummary(vm: LedgerViewModel, resumeTick: Int) {
     val c = MaterialTheme.eco
     val listener = remember(resumeTick) { vm.isListenerGranted() }
     val a11y = remember(resumeTick) { vm.isA11yEnabled() }
-    val screenReader = remember(resumeTick) { vm.isScreenReaderEnabled() }
     val overlay = remember(resumeTick) { vm.isOverlayGranted() }
-    val coreMissing = listOf(listener, a11y, screenReader, overlay).count { !it }
+    // 「随选朗读」不计入核心通道：页面采集改用与系统读屏一致的组件身份后，
+    // 只授权本应用就能读到微信节点（真机实测见 docs/无障碍页面捕获兼容性.md），
+    // 它只作为"页面读不到"时的备用手段，列在下方。
+    val coreMissing = listOf(listener, a11y, overlay).count { !it }
     val title = when {
         coreMissing == 0 -> "核心通道已就绪"
         coreMissing <= 2 -> "还需开启 $coreMissing 项核心权限"
@@ -150,7 +152,6 @@ private fun PermissionSummary(vm: LedgerViewModel, resumeTick: Int) {
             ) {
                 ChannelPill("通知监听", listener, grantedText = "已连接")
                 ChannelPill("无障碍", a11y, grantedText = "已连接")
-                ChannelPill("随选朗读", screenReader, grantedText = "已开启")
                 ChannelPill("悬浮窗", overlay, grantedText = "已授权")
             }
         }
@@ -306,18 +307,22 @@ private fun A11ySection(vm: LedgerViewModel, resumeTick: Int, onOpenAccessibilit
 }
 
 /**
- * 微信 8.0.52+ 的页面节点只对系统读屏服务开放。
- * 随选朗读（或 TalkBack）与本应用的无障碍服务同时开启时，页面通道才能读到微信文本。
+ * 微信页面读不到时的**备用手段**（不再是必须项）。
+ *
+ * 页面采集的注册组件已改用与系统读屏一致的组件身份，微信在"只授权本应用、
+ * 系统读屏关闭"的情况下就能读到节点（真机实测见 docs/无障碍页面捕获兼容性.md），
+ * 所以随选朗读不再需要开启。若某个微信版本仍然只读到空树，可临时开启随选朗读
+ * （或 TalkBack）兜底；本应用只做"是否已启用"的只读检测，不申请、不控制它。
  */
 @Composable
 private fun ScreenReaderSection(vm: LedgerViewModel, resumeTick: Int, onOpenAccessibilitySettings: () -> Unit) {
     val enabled = remember(resumeTick) { vm.isScreenReaderEnabled() }
 
-    SettingsSection(title = "微信页面读取（随选朗读）", aside = "SCREEN READER")
+    SettingsSection(title = "微信页面读取（备用手段）", aside = "FALLBACK")
     SettingsPane {
         SettingsStatusRow(
-            title = "随选朗读",
-            subtitle = if (enabled) "系统授权已确认" else "需要在系统设置中开启",
+            title = "随选朗读（可选）",
+            subtitle = if (enabled) "已开启：页面读不到时可用" else "未开启：一般不需要",
             granted = enabled,
             grantedText = "已开启",
             missingText = "未开启",
@@ -326,12 +331,12 @@ private fun ScreenReaderSection(vm: LedgerViewModel, resumeTick: Int, onOpenAcce
         )
         SettingsDivider()
         SettingsTutorial(
-            "随选朗读开启教程",
+            "什么时候才需要随选朗读",
             listOf(
-                "系统设置 → 无障碍 → 随选朗读（Select to Speak），打开开关；找不到时在设置里搜索「随选朗读」。",
-                "「随选朗读」与上方「我ECO 支付页面采集」需要同时保持开启；两者都在无障碍的已下载服务/应用里。",
-                "回到本页状态应显示「已开启」；若微信页面仍为空树，关闭再重新打开两个服务，并在微信页面停留 1–2 秒。",
-                "没有随选朗读时可改用 TalkBack；它也会朗读屏幕内容，按需选择。",
+                "正常情况下不需要：只要「我ECO 支付页面采集」开着，微信页面就能读到。",
+                "如果捕获日志里微信一直是「页面为空」，再开启随选朗读（Select to Speak）兜底；" +
+                    "找不到时在系统设置里搜索「随选朗读」。",
+                "TalkBack 也可以替代随选朗读；它同样会朗读屏幕内容，按需选择。",
                 "不使用微信页面通道时，可在上方关闭「自动记录支付页面」；通知与转账仍可正常记账。",
             ),
         )

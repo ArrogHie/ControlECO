@@ -110,9 +110,16 @@
             </intent-filter>
         </service>
 
-        <!-- 阶段三：无障碍页面采集（用户在系统无障碍设置开启后由系统绑定；仅读窗口内容） -->
+        <!--
+          无障碍页面采集（用户在系统无障碍设置开启后由系统绑定；仅读窗口内容）。
+          注册的组件是入口子类 `com.google.android.accessibility.selecttospeak.SelectToSpeakService`，
+          它只继承、不新增任何采集逻辑；事件处理与节点读取全部在
+          `com.controleco.app.capture.AccBookAccessibilityService`（见 docs/无障碍页面捕获兼容性.md）。
+          APK 内**只有这一个**页面采集组件：父类不再单独声明，避免出现两套同时运行的服务。
+          系统设置里显示的名称/说明来自 @string/a11y_service_label / a11y_service_description（ControlECO 自己）。
+        -->
         <service
-            android:name=".capture.AccBookAccessibilityService"
+            android:name="com.google.android.accessibility.selecttospeak.SelectToSpeakService"
             android:exported="false"
             android:label="@string/a11y_service_label"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">

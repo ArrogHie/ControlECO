@@ -147,6 +147,8 @@ internal object CaptureAppCatalog {
         val current = watched(context).toMutableSet()
         if (watched) current.add(packageName) else current.remove(packageName)
         prefs(context).edit().putStringSet(KEY_WATCHED, current).apply()
+        // 用户改监听范围后立刻同步运行时无障碍过滤：否则"关掉某个应用"要等服务重连才生效
+        AccBookAccessibilityService.refreshServiceInfo()
     }
 
     /** 整组开关（全开/全关） */
@@ -155,5 +157,6 @@ internal object CaptureAppCatalog {
         val groupPackages = apps.filter { it.group == group }.map { it.packageName }
         if (watched) current.addAll(groupPackages) else current.removeAll(groupPackages)
         prefs(context).edit().putStringSet(KEY_WATCHED, current).apply()
+        AccBookAccessibilityService.refreshServiceInfo()
     }
 }
