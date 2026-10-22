@@ -1074,7 +1074,8 @@ private fun ModeDots(current: Int, onSelect: (Int) -> Unit) {
                     .clip(CircleShape)
                     .background(
                         if (selected) {
-                            Brush.horizontalGradient(listOf(c.jade, c.blue))
+                            // 选中页点：纯强调色渐变（原来玉绿→青蓝，换主题后一半还是绿的）
+                            Brush.horizontalGradient(listOf(c.blueHi, c.blue))
                         } else {
                             Brush.horizontalGradient(listOf(c.ruleStrong, c.ruleStrong))
                         },
