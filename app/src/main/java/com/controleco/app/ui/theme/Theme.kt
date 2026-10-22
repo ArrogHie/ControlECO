@@ -13,6 +13,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -44,8 +45,11 @@ import kotlin.math.pow
  * - [onAccent]：压在 `blue` 实心块上的前景色（选中 chip、实心按钮）。
  * - `heroA/B/C`：hero / 封面深色渐变（永远偏深，配白系前景）。
  * - `accentGradA/B/C`：按钮 / FAB 的强调渐变（比 hero 亮，是「主操作」的颜色）。
- * - [neutral]/[neutralDark]：中性面（纸面/卡片/轨道）的色调。默认都偏冷，
- *   而 `White` 主题用纯白 + 灰阶中性，让大面积背景变白。
+ * - [secondaryShift]：**次要色**的色相偏移。主色按这个角度旋转就得到次要色族
+ *   （`second*`），让页面能有两个色相做区分，而不是所有卡片一个颜色；
+ *   但两个色相都来自主题，所以不会出现「固定青绿」。
+ * - [neutral]/[neutralDark]：中性面（纸面/卡片/轨道）的色调。
+ *   默认是「近白 + 一点主题色」，`White` 主题则是纯白 + 灰阶中性。
  */
 enum class EcoAccent(
     val id: String,
@@ -61,6 +65,11 @@ enum class EcoAccent(
     val accentGradC: Color,
     val neutral: Neutral = Neutral.TINTED,
     val neutralDark: Neutral = Neutral.TINTED,
+    /**
+     * 次要色的色相偏移（度）。主色整族按这个角度旋转 = 次要色族，
+     * 明度/饱和度关系保持不变，所以对比度和层次都是可预期的。
+     */
+    val secondaryShift: Float = 0f,
 ) {
     Tide(
         "default", "潮汐", "青蓝",
@@ -70,6 +79,8 @@ enum class EcoAccent(
         // 但亮端也要压住，否则白系前景在最亮的 heroC 上对比度不够。
         heroA = Color(0xFF0B3A40), heroB = Color(0xFF104A50), heroC = Color(0xFF14595B),
         accentGradA = Color(0xFF1F8B80), accentGradB = Color(0xFF15707A), accentGradC = Color(0xFF0C4F5A),
+        // 青蓝 -> 暮紫：冷调双色相，卡片之间靠蓝/紫区分
+        secondaryShift = 75f,
     ),
     Meadow(
         "meadow", "松林", "玉绿",
@@ -77,6 +88,8 @@ enum class EcoAccent(
         Family(0xFF94D8B5, 0xFFC5F0D8, 0xFF78BD9B, 0xFFB7E7CB, 0xFF29443B, 0xFF213A32),
         heroA = Color(0xFF0E2E26), heroB = Color(0xFF14453A), heroC = Color(0xFF1A5644),
         accentGradA = Color(0xFF35926E), accentGradB = Color(0xFF237058), accentGradC = Color(0xFF174F3E),
+        // 玉绿 -> 柠檬/橄榄：同属自然系，和语义绿(jade)仍能区分
+        secondaryShift = -62f,
     ),
     Iris(
         "iris", "鸢尾", "暮紫",
@@ -84,6 +97,8 @@ enum class EcoAccent(
         Family(0xFFC5B1E8, 0xFFE4D9FA, 0xFFAC94DA, 0xFFDCCDF4, 0xFF383147, 0xFF2D2939),
         heroA = Color(0xFF211F35), heroB = Color(0xFF3A3357), heroC = Color(0xFF4D4272),
         accentGradA = Color(0xFF7A62B0), accentGradB = Color(0xFF5B468F), accentGradC = Color(0xFF413270),
+        // 暮紫 -> 玫红：紫系内的邻近色，层次拉开但不打架
+        secondaryShift = 75f,
     ),
     Coral(
         "coral", "珊瑚", "陶红",
@@ -91,6 +106,8 @@ enum class EcoAccent(
         Family(0xFFF0ADBB, 0xFFFFD5DB, 0xFFD78EA5, 0xFFF6C6D1, 0xFF47333B, 0xFF382A32),
         heroA = Color(0xFF331F2B), heroB = Color(0xFF5D3044), heroC = Color(0xFF7A3D53),
         accentGradA = Color(0xFFB5677B), accentGradB = Color(0xFF96485E), accentGradC = Color(0xFF77344A),
+        // 陶红 -> 品红/紫：避免退回青色，红紫配也更暖
+        secondaryShift = -63f,
     ),
     Amber(
         "amber", "暖金", "琥珀",
@@ -98,6 +115,8 @@ enum class EcoAccent(
         Family(0xFFEAC38E, 0xFFFFE3AF, 0xFFCEA66A, 0xFFF4DBAB, 0xFF43392B, 0xFF352F27),
         heroA = Color(0xFF2E2418), heroB = Color(0xFF4A3821), heroC = Color(0xFF634829),
         accentGradA = Color(0xFFA9793A), accentGradB = Color(0xFF8A6128), accentGradC = Color(0xFF6B4A1C),
+        // 琥珀 -> 橄榄绿：暖色系里的第二色相，别和语义金(amber)混
+        secondaryShift = 60f,
     ),
     Sky(
         "sky", "晴海", "天青",
@@ -105,6 +124,8 @@ enum class EcoAccent(
         Family(0xFFA4D8F3, 0xFFD0EEFC, 0xFF84B8D9, 0xFFC1E3F5, 0xFF294353, 0xFF233947),
         heroA = Color(0xFF0D2A3B), heroB = Color(0xFF133D57), heroC = Color(0xFF19506F),
         accentGradA = Color(0xFF3D86B4), accentGradB = Color(0xFF28678F), accentGradC = Color(0xFF1A4D6E),
+        // 天青 -> 草绿：不能转到 160° 附近，那正是语义「收入绿 jade」的色相
+        secondaryShift = -86f,
     ),
 
     /**
@@ -119,6 +140,8 @@ enum class EcoAccent(
         // hero 压得更深，主按钮用中灰：按钮必须比 hero 亮，才像「可点的操作」
         heroA = Color(0xFF0D1012), heroB = Color(0xFF171A1D), heroC = Color(0xFF262B30),
         accentGradA = Color(0xFF4E555C), accentGradB = Color(0xFF3A4046), accentGradC = Color(0xFF272C31),
+        // 纯白主题的主色是中性灰，旋转后仍是灰（饱和度极低），不会破掉黑白调性
+        secondaryShift = 60f,
         neutral = Neutral.WHITE,
         neutralDark = Neutral.GRAPHITE,
     ),
@@ -143,6 +166,25 @@ data class Family(
     val hi: Long,
     val soft: Long,
     val wash: Long,
+)
+
+/** 色相旋转：只改色相，饱和度/明度原样保留（层次关系因此不变）。 */
+private fun rotateHue(color: Color, degrees: Float): Color {
+    val hsv = rgbToHsv(color.red, color.green, color.blue)
+    val rgb = hsvToRgb(hsv[0] + degrees, hsv[1], hsv[2])
+    return Color(rgb[0], rgb[1], rgb[2])
+}
+
+private fun Long.rotatedBy(degrees: Float): Long =
+    rotateHue(Color(this), degrees).toArgb().toLong() and 0xFFFFFFFFL
+
+private fun Family.rotated(degrees: Float): Family = Family(
+    blue = blue.rotatedBy(degrees),
+    deep = deep.rotatedBy(degrees),
+    mid = mid.rotatedBy(degrees),
+    hi = hi.rotatedBy(degrees),
+    soft = soft.rotatedBy(degrees),
+    wash = wash.rotatedBy(degrees),
 )
 
 // ---------- 扩展色 ----------
@@ -172,6 +214,19 @@ data class EcoColors(
     val blueWash: Color,
     /** 压在 [blue]/[blueDeep] 实心块上的前景色（选中 chip、实心按钮文字） */
     val onAccent: Color,
+    /**
+     * **次要色**（主色按 [EcoAccent.secondaryShift] 旋转得到）。
+     * 用来给卡片/装饰块换一个色相，让页面有层次，但依然由主题派生。
+     * 主操作（按钮/FAB/选中态）不要用它，用 [blue]。
+     */
+    val second: Color,
+    val secondDeep: Color,
+    val second2: Color,
+    val secondHi: Color,
+    val secondSoft: Color,
+    val secondWash: Color,
+    /** 压在 [second]/[secondDeep] 实心块上的前景色 */
+    val onSecond: Color,
     val jade: Color,
     val jadeHi: Color,
     val jadeSoft: Color,
@@ -290,18 +345,59 @@ private data class Neutrals(
     val rule: Long, val ruleStrong: Long, val track: Long,
 )
 
-/** 冷调（默认 6 套主题）：保留原设计的青灰纸面，但偏中性、降低青味 */
-private val COOL_LIGHT = Neutrals(
-    0xFFF7F8F7, 0xFFEBF0EE, 0xFFFFFEFC, 0xFFF1F5F3, 0xFFE6EDEA, 0xFFEBF1EF,
-    0xFF182B2E, 0xFF3B5154, 0xFF617674, 0xFF8A9B99,
-    0xFFDEE7E4, 0xFFC9D8D3, 0xFFE1E9E6,
-)
+/** 近白面色：白与强调色按极小比例混合——大面积仍是白，只留一点主题色相。 */
+private fun nearWhite(tint: Color, mix: Float): Long =
+    lerp(Color.White, tint, mix).toArgb().toLong() and 0xFFFFFFFFL
 
-private val COOL_DARK = Neutrals(
-    0xFF12262B, 0xFF163034, 0xFF1C373C, 0xFF234147, 0xFF2E4C51, 0xFF1B383C,
-    0xFFF2F7F6, 0xFFDAE5E3, 0xFFB3C6C4, 0xFF8DA6A5,
-    0xFF365459, 0xFF4A6A6E, 0xFF365358,
-)
+/** 在给定底色上叠一点主题色相。 */
+private fun tinted(base: Long, tint: Color, mix: Float): Long =
+    lerp(Color(base), tint, mix).toArgb().toLong() and 0xFFFFFFFFL
+
+/**
+ * 浅色中性面：**近乎白色 + 一点主题色**。
+ *
+ * 原来是固定的青灰纸面（`#F7F8F7` 一类），所以无论换什么主题，背景都是一片青味。
+ * 现在整组都由强调色派生：纸面 3% 着色、卡片面 1%（几乎是纯白）、
+ * 分隔线/轨道 12–25%。面积越大越白，只有线条和次级面才看得出色相。
+ */
+private fun tintedLightNeutrals(accent: EcoAccent): Neutrals {
+    val t = Color(accent.light.blue)
+    return Neutrals(
+        paper = nearWhite(t, 0.030f),
+        paperDeep = nearWhite(t, 0.070f),
+        surface = nearWhite(t, 0.010f),
+        surface2 = nearWhite(t, 0.050f),
+        surface3 = nearWhite(t, 0.090f),
+        surfaceInset = nearWhite(t, 0.060f),
+        ink = tinted(0xFF101617, t, 0.10f),
+        ink2 = tinted(0xFF36403F, t, 0.13f),
+        muted = tinted(0xFF586866, t, 0.16f),
+        quiet = tinted(0xFF82938F, t, 0.16f),
+        rule = nearWhite(t, 0.150f),
+        ruleStrong = nearWhite(t, 0.250f),
+        track = nearWhite(t, 0.120f),
+    )
+}
+
+/** 深色中性面：同样随主题偏色，避免任何主题下都是一片深青。 */
+private fun tintedDarkNeutrals(accent: EcoAccent): Neutrals {
+    val t = Color(accent.light.blue)
+    return Neutrals(
+        paper = tinted(0xFF0A0F10, t, 0.10f),
+        paperDeep = tinted(0xFF0D1416, t, 0.12f),
+        surface = tinted(0xFF121A1C, t, 0.13f),
+        surface2 = tinted(0xFF182225, t, 0.15f),
+        surface3 = tinted(0xFF1F2B2E, t, 0.17f),
+        surfaceInset = tinted(0xFF111A1C, t, 0.13f),
+        ink = tinted(0xFFF3F7F6, t, 0.03f),
+        ink2 = tinted(0xFFDCE5E4, t, 0.05f),
+        muted = tinted(0xFFB0C2C1, t, 0.07f),
+        quiet = tinted(0xFF8AA0A0, t, 0.07f),
+        rule = tinted(0xFF2B3A3E, t, 0.22f),
+        ruleStrong = tinted(0xFF3E5256, t, 0.24f),
+        track = tinted(0xFF2A3A3D, t, 0.20f),
+    )
+}
 
 /** 白主题浅色：大面积纯白，分隔线/轨道走中性灰，text 走中性黑 */
 private val WHITE_LIGHT = Neutrals(
@@ -321,17 +417,18 @@ private val GRAPHITE_DARK = Neutrals(
 private fun neutralsFor(dark: Boolean, accent: EcoAccent): Neutrals = if (dark) {
     when (accent.neutralDark) {
         Neutral.GRAPHITE -> GRAPHITE_DARK
-        else -> COOL_DARK
+        else -> tintedDarkNeutrals(accent)
     }
 } else {
     when (accent.neutral) {
         Neutral.WHITE -> WHITE_LIGHT
-        else -> COOL_LIGHT
+        else -> tintedLightNeutrals(accent)
     }
 }
 
 fun ecoColors(dark: Boolean, accent: EcoAccent): EcoColors {
     val b = if (dark) accent.dark else accent.light
+    val s = b.rotated(accent.secondaryShift)
     val n = neutralsFor(dark, accent)
     return EcoColors(
         isDark = dark,
@@ -356,6 +453,13 @@ fun ecoColors(dark: Boolean, accent: EcoAccent): EcoColors {
         blueSoft = Color(b.soft),
         blueWash = Color(b.wash),
         onAccent = contentColorOn(Color(b.deep)),
+        second = Color(s.blue),
+        secondDeep = Color(s.deep),
+        second2 = Color(s.mid),
+        secondHi = Color(s.hi),
+        secondSoft = Color(s.soft),
+        secondWash = Color(s.wash),
+        onSecond = contentColorOn(Color(s.deep)),
         // 语义色：收入/警告/危险永远不变，只有深浅两套
         jade = if (dark) Color(0xFF88DBB0) else Color(0xFF268E70),
         jadeHi = if (dark) Color(0xFFBBE9C9) else Color(0xFF98DDB1),
