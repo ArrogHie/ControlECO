@@ -321,6 +321,24 @@ private const val HERO_LUMA_B = 0.150f
 private const val HERO_LUMA_C = 0.172f
 
 /**
+ * 封面的饱和度系数。
+ *
+ * 明度被顶到 0.17 左右时，如果照原样只抬 V，视觉上仍然偏「灰」——
+ * 所以额外把 S 抬 18%，得到同色相的鲜艳版本（深墨绿 -> 明亮青绿，而不是掺白灰青）。
+ */
+private const val HERO_SAT_SCALE = 1.18f
+
+/** 主操作渐变的饱和度系数，比封面更收敛一点（按钮面积小、还要压白字）。 */
+private const val GRAD_SAT_SCALE = 1.12f
+
+/**
+ * 纯白主题的封面必须保持无彩色。
+ * 它的 hero 原始色带一点点蓝（S≈0.21），按 1.18 加饱和后会变成明显蓝灰，
+ * 与「纯白 = 无彩色」的定位冲突，所以这里反而要压掉。
+ */
+private const val NEUTRAL_SAT_SCALE = 0.15f
+
+/**
  * 主操作渐变（按钮 / FAB / 加号）三档的目标亮度。
  * 上面压的是图标和白字，底线 3:1 → `gradA ≤ 0.30`，取 0.285。
  */
@@ -336,6 +354,8 @@ private fun lift(color: Color, amount: Float): Color =
  *
  * 用二分找混合比例，因为 Oklab 混合后的亮度不是线性的，直接算比例不准。
  * 只用于 hero / 主操作渐变这类「亮度优先」的色，其它 token 不要用。
+ *
+ * 注意：**向白混合会冲淡彩度**，所以彩色封面不要直接用它，用 [vividTone]。
  */
 private fun toneTo(color: Color, target: Float): Color {
     val current = relativeLuminance(color)
@@ -351,6 +371,51 @@ private fun toneTo(color: Color, target: Float): Color {
         if (stillTooDark) low = mid else high = mid
     }
     return lerp(color, anchor, (low + high) / 2f)
+}
+
+/** HSV -> Color（H 为 0..360，S/V 为 0..1） */
+private fun hsvToColor(h: Float, s: Float, v: Float): Color {
+    val hh = ((h % 360f) + 360f) % 360f / 60f
+    val i = hh.toInt()
+    val f = hh - i
+    val p = v * (1 - s)
+    val q = v * (1 - s * f)
+    val t = v * (1 - s * (1 - f))
+    return when (i % 6) {
+        0 -> Color(v, t, p)
+        1 -> Color(q, v, p)
+        2 -> Color(p, v, t)
+        3 -> Color(p, q, v)
+        4 -> Color(t, p, v)
+        else -> Color(v, p, q)
+    }
+}
+
+/**
+ * 彩色封面的提亮：**抬明度、保住彩度**。
+ *
+ * 之前的做法是向白色混合，结果亮度上去了、彩度也被冲掉，
+ * 深绿封面变成灰青（`#4C7377`），看着「太灰」。
+ * 这里改成在 HSV 里二分抬 V，S 按 [satScale] 缩放，
+ * 得到的是同色相的**鲜艳**版本，而不是掺白的灰版本。
+ *
+ * [satScale] > 1 加饱和，< 1 减饱和（纯白主题用它压成无彩色）。
+ * 只有彩度拉满（V=1）仍达不到目标亮度时，才退回向白冲淡。
+ */
+private fun vividTone(color: Color, target: Float, satScale: Float = 1f): Color {
+    val hsv = rgbToHsv(color.red, color.green, color.blue)
+    val hue = hsv[0]
+    val sat = (hsv[1] * satScale).coerceIn(0f, 1f)
+    if (relativeLuminance(hsvToColor(hue, sat, 1f)) < target) {
+        return toneTo(color, target)
+    }
+    var low = 0f
+    var high = 1f
+    repeat(20) {
+        val mid = (low + high) / 2f
+        if (relativeLuminance(hsvToColor(hue, sat, mid)) < target) low = mid else high = mid
+    }
+    return hsvToColor(hue, sat, (low + high) / 2f)
 }
 
 /** 主操作渐变（按钮/FAB/进度）：三段 stop */
@@ -510,6 +575,10 @@ fun ecoColors(dark: Boolean, accent: EcoAccent): EcoColors {
     val b = if (dark) accent.dark else accent.light
     val s = b.rotated(accent.secondaryShift)
     val n = neutralsFor(dark, accent)
+    // 纯白主题是无彩色定位，封面/按钮不跟着加饱和，反而要压掉原始那点蓝味
+    val monochrome = accent.neutral == Neutral.WHITE && accent.neutralDark == Neutral.GRAPHITE
+    val heroSat = if (monochrome) NEUTRAL_SAT_SCALE else HERO_SAT_SCALE
+    val gradSat = if (monochrome) NEUTRAL_SAT_SCALE else GRAD_SAT_SCALE
     return EcoColors(
         isDark = dark,
         accent = accent,
@@ -552,12 +621,12 @@ fun ecoColors(dark: Boolean, accent: EcoAccent): EcoColors {
         claySoft = if (dark) Color(0xFF503C3B) else Color(0xFFFCEAE4),
         violet = if (dark) Color(0xFFC4B3DF) else Color(0xFF907BA8),
         violetSoft = if (dark) Color(0xFF3C354B) else Color(0xFFF1EAF5),
-        heroA = toneTo(accent.heroA, HERO_LUMA_A),
-        heroB = toneTo(accent.heroB, HERO_LUMA_B),
-        heroC = toneTo(accent.heroC, HERO_LUMA_C),
-        accentGradA = toneTo(accent.accentGradA, GRAD_LUMA_A),
-        accentGradB = toneTo(accent.accentGradB, GRAD_LUMA_B),
-        accentGradC = toneTo(accent.accentGradC, GRAD_LUMA_C),
+        heroA = vividTone(accent.heroA, HERO_LUMA_A, heroSat),
+        heroB = vividTone(accent.heroB, HERO_LUMA_B, heroSat),
+        heroC = vividTone(accent.heroC, HERO_LUMA_C, heroSat),
+        accentGradA = vividTone(accent.accentGradA, GRAD_LUMA_A, gradSat),
+        accentGradB = vividTone(accent.accentGradB, GRAD_LUMA_B, gradSat),
+        accentGradC = vividTone(accent.accentGradC, GRAD_LUMA_C, gradSat),
     )
 }
 
