@@ -1,5 +1,8 @@
 package com.controleco.app.ui.stats
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -64,6 +67,7 @@ import com.controleco.app.ui.eco.EcoPane
 import com.controleco.app.ui.eco.EcoSectionHead
 import com.controleco.app.ui.eco.EcoSegmented
 import com.controleco.app.ui.eco.EcoTopBar
+import com.controleco.app.ui.eco.LocalAnimationsEnabled
 import com.controleco.app.ui.eco.ecoBottomContentPadding
 import com.controleco.app.ui.eco.ecoPressable
 import com.controleco.app.ui.transactions.BalanceCard
@@ -129,6 +133,22 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
             ChartMath.yearBars(rowsReady, month)
         }
     }
+    // 柱状图入场进度**由页面持有**：`ExpenseBarChart` 是 LazyColumn 的一个 item，滑出屏幕就被销毁，
+    // 进度若 remember 在 item 内部，滑回来会从 0 重播（用户反馈的 bug：下滑再上滑动画重播）。
+    // 提到页面级后：上下滑动时无论柱状图可不可见都不重播；只有切页（本页离开组合、重新进入时重建）
+    // 或换周期（bars 变）才重播。读进度在 Canvas 的绘制阶段，每帧只重画、不重组。
+    val barGrow = remember { Animatable(0f) }
+    val animationsEnabled = LocalAnimationsEnabled.current
+    LaunchedEffect(bars, animationsEnabled) {
+        if (!animationsEnabled) {
+            // 关闭美化动效：柱子直接到位
+            barGrow.snapTo(1f)
+            return@LaunchedEffect
+        }
+        barGrow.snapTo(0f)
+        barGrow.animateTo(1f, tween(820, easing = FastOutSlowInEasing))
+    }
+
     // 选中柱由页面持有：卡片头部的 readout 要跟着它走。
     // 原型默认选中"今天"对应的柱；看历史周期时默认选中支出最高的一天。
     val defaultBarIndex = remember(bars, isCurrentPeriod, mode, monthStartDay) {
@@ -261,6 +281,7 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
                     expenseCents = expense,
                     selected = selectedBar,
                     onSelect = { selectedBar = it },
+                    grow = { barGrow.value },
                 )
             }
 
@@ -673,6 +694,8 @@ private fun TrendCard(
     expenseCents: Long,
     selected: Int,
     onSelect: (Int) -> Unit,
+    /** 柱状图入场进度 0..1，由页面持有（滑出屏幕不重播），见 `StatsScreen` 顶部注释 */
+    grow: () -> Float,
 ) {
     val c = MaterialTheme.eco
     val selectedBar = bars.getOrNull(selected)
@@ -749,6 +772,7 @@ private fun TrendCard(
                         bars = bars,
                         selected = selected,
                         onSelect = onSelect,
+                        grow = grow,
                         height = 200.dp,
                     )
                 }
@@ -956,8 +980,13 @@ private fun RatioListRow(
 // ---------- 小工具 ----------
 
 /**
- * 预算对比的行数据：只取设了预算的**支出**分类，年视角预算 ×12，
- * 实际金额按分类名从本期分类合计里取（与圆环同一份数据），按实际降序。
+ * 预算对比的行数据 = **设了预算的支出分类** ∪ **本期有账单记录的支出分类**（按分类名去重）。
+ *
+ * - 只设了预算、本期没花的分也保留（预算 0 实际，点名"预算没用上"）；
+ * - 本期有支出但**没设预算**的分类同样要出现（预算记 0、占比 0%），否则用户看不到这笔钱花在哪
+ *   （用户反馈：清单原来只列了设过预算的分类）；
+ * - 预算/实际都取支出侧：收入分类即便设了预算也不进清单；年视角预算 ×12；
+ * - 排序：实际降序 → 预算降序 → 分类名升序（同额时有稳定顺序，不会随查询顺序抖动）。
  */
 internal fun buildRatioRows(
     categoryBudgets: Map<Long, Long>,
@@ -965,21 +994,37 @@ internal fun buildRatioRows(
     byCategory: List<CategorySumRow>,
     mode: PeriodMode,
 ): List<BudgetRatioRow> {
-    if (categoryBudgets.isEmpty()) return emptyList()
-    val actualByName = byCategory.associate { it.categoryName to it.totalCents }
     val byId = categories.associateBy { it.id }
+    val actualByName = byCategory.associate { it.categoryName to it.totalCents }
     val multiplier = if (mode == PeriodMode.YEAR) 12L else 1L
-    return categoryBudgets.entries
-        .mapNotNull { (id, cents) ->
-            val category = byId[id] ?: return@mapNotNull null
-            if (category.type != TxType.EXPENSE || cents <= 0L) return@mapNotNull null
-            BudgetRatioRow(
-                name = category.name,
-                actualCents = actualByName[category.name] ?: 0L,
-                budgetCents = cents * multiplier,
-            )
-        }
-        .sortedByDescending { it.actualCents }
+    val rows = LinkedHashMap<String, BudgetRatioRow>()
+    // 1) 设了预算的支出分类（本期没花也要列出来）
+    categoryBudgets.forEach { (id, cents) ->
+        val category = byId[id] ?: return@forEach
+        if (category.type != TxType.EXPENSE || cents <= 0L) return@forEach
+        rows[category.name] = BudgetRatioRow(
+            name = category.name,
+            actualCents = actualByName[category.name] ?: 0L,
+            budgetCents = cents * multiplier,
+        )
+    }
+    // 2) 本期有账单记录的支出分类（可能没设预算 → 预算 0）
+    byCategory.forEach { sum ->
+        if (sum.totalCents <= 0L || sum.categoryName.isBlank()) return@forEach
+        if (rows.containsKey(sum.categoryName)) return@forEach
+        val category = byId[sum.categoryId]
+        if (category != null && category.type != TxType.EXPENSE) return@forEach
+        rows[sum.categoryName] = BudgetRatioRow(
+            name = sum.categoryName,
+            actualCents = sum.totalCents,
+            budgetCents = 0L,
+        )
+    }
+    return rows.values.sortedWith(
+        compareByDescending<BudgetRatioRow> { it.actualCents }
+            .thenByDescending { it.budgetCents }
+            .thenBy { it.name },
+    )
 }
 
 /** 占比（0..100）；分母 ≤ 0 时返回 0 */

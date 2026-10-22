@@ -1,8 +1,5 @@
 package com.controleco.app.ui.stats
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,7 +23,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,7 +50,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.controleco.app.ui.common.AutoScaledText
-import com.controleco.app.ui.eco.LocalAnimationsEnabled
 import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.accBook
 import com.controleco.app.ui.theme.categoryColor
@@ -117,12 +112,17 @@ private fun barPath(
  * 可交互柱状图：点按选中一柱，横向拖动时读数跟手（纵向滑动不拦截，页面照常滚动）。
  * 选中态由调用方持有（卡片头部要显示"日期 + 金额"），这里只负责画和上报。
  * [selected] = -1 表示未选中：柱子全亮；选中后其余柱降透明，选中柱带玉色点和投影。
+ *
+ * [grow] = 入场进度 0..1，**由调用方持有**（不要在这里 remember）：
+ * 本组件是 LazyColumn 的一个 item，滑出屏幕就会被销毁，进度存在组件内部的话滑回来会从 0 重播。
+ * 放在页面级后，"滑出再滑回"不再重播，只有切页 / 换周期才重播（见 `StatsScreen`）。
  */
 @Composable
 fun ExpenseBarChart(
     bars: List<BarPoint>,
     selected: Int,
     onSelect: (Int) -> Unit,
+    grow: () -> Float,
     modifier: Modifier = Modifier,
     height: Dp = 155.dp,
 ) {
@@ -133,19 +133,6 @@ fun ExpenseBarChart(
     }
     // 文字量测缓存：拖动手势每帧都会重画，避免重复量同一串数字
     val labelCache = remember(measurer, labelStyle) { mutableMapOf<String, TextLayoutResult>() }
-
-    // 柱子从轴线向上生长，31 根柱子依次错开 6ms（原型 .chart-bar 的 scaleY 入场，每次进入重播）
-    val grow = remember { Animatable(0f) }
-    val animationsEnabled = LocalAnimationsEnabled.current
-    LaunchedEffect(bars, animationsEnabled) {
-        if (!animationsEnabled) {
-            // 关闭美化动效：柱子直接到位
-            grow.snapTo(1f)
-            return@LaunchedEffect
-        }
-        grow.snapTo(0f)
-        grow.animateTo(1f, tween(820, easing = FastOutSlowInEasing))
-    }
 
     Canvas(
         modifier
@@ -172,6 +159,8 @@ fun ExpenseBarChart(
             },
     ) {
         if (bars.isEmpty()) return@Canvas
+        // 在绘制阶段读一次入场进度：状态读取落在 draw scope 里 → 每帧只重画、不重组
+        val growValue = grow()
         val count = bars.size
         val pitch = barPitch(size.width, count)
         // 柱间距固定 2dp、柱宽上限 13dp（原型 .chart-bar：flex + gap 2 + max-width 13）
@@ -203,7 +192,8 @@ fun ExpenseBarChart(
             val isSelected = index == selected
             val dimmed = selected >= 0 && !isSelected
             if (bar.cents > 0L) {
-                val progress = ((grow.value - index * 0.006f) / 0.82f).coerceIn(0f, 1f)
+                // 柱子从轴线向上生长，31 根柱子依次错开 6ms（原型 .chart-bar 的 scaleY 入场）
+                val progress = ((growValue - index * 0.006f) / 0.82f).coerceIn(0f, 1f)
                 val fullTop = yAt(bar.cents)
                 val top = axisY - (axisY - fullTop) * progress
                 val barHeight = (axisY - top).coerceAtLeast(2.dp.toPx())
