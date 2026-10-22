@@ -13,17 +13,17 @@ android {
         applicationId = "com.controleco.app"
         minSdk = 26
         targetSdk = 35
-        // 每次带修改的构建把第三位 +1；beta 阶段版本名带 -beta 后缀
-        versionCode = 34
-        versionName = "0.6.3-beta"
+        // 每次带修改的构建把第三位 +1；1.0.0 起为正式版本，版本名不再带 -beta 后缀
+        versionCode = 35
+        versionName = "1.0.0"
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // beta 分发用 debug 密钥签名：与侧载的 debug 包同一签名，可以直接覆盖安装、
-            // 不清数据（换成正式密钥时要先卸载，用户账本会一起没，等正式发布再换）
+            // 正式版仍沿用 debug 密钥签名：与既有侧载包同一签名，可直接覆盖安装、不清数据。
+            // 换成独立发布密钥需要用户先卸载（账本会一起没），1.0.0 不做。
             signingConfig = signingConfigs.getByName("debug")
         }
     }
