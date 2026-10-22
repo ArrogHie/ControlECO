@@ -360,7 +360,10 @@ fun EcoFab(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 .ecoPressable(scaleTo = 0.92f, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(EcoIcons.Plus, contentDescription = "记一笔", tint = c.onAccentGrad, modifier = Modifier.size(21.dp))
+            // 加号固定纯白：渐变提亮后（gradB 亮度 0.234）contentColorOn 会自动选成深墨色，
+            // 但 FAB 上的加号是图形不是正文，白色在整条渐变上仍有 3.1:1（图标底线 3:1），
+            // 而且白加号在这套「彩色渐变 + 白描边」的观感里才对。
+            Icon(EcoIcons.Plus, contentDescription = "记一笔", tint = Color.White, modifier = Modifier.size(21.dp))
         }
     }
 }
@@ -384,7 +387,8 @@ fun EcoSquareFab(onClick: () -> Unit, modifier: Modifier = Modifier, icon: Image
             .ecoPressable(scaleTo = 0.94f, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription = null, tint = c.onAccentGrad, modifier = Modifier.size(20.dp))
+        // 与 EcoFab 一致：方形 FAB 上的图标也用纯白，避免两个 FAB 的加号一黑一白
+        Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
     }
 }
 
