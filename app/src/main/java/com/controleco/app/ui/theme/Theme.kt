@@ -97,8 +97,9 @@ enum class EcoAccent(
         Family(0xFFC5B1E8, 0xFFE4D9FA, 0xFFAC94DA, 0xFFDCCDF4, 0xFF383147, 0xFF2D2939),
         heroA = Color(0xFF211F35), heroB = Color(0xFF3A3357), heroC = Color(0xFF4D4272),
         accentGradA = Color(0xFF7A62B0), accentGradB = Color(0xFF5B468F), accentGradC = Color(0xFF413270),
-        // 暮紫 -> 玫红：紫系内的邻近色，层次拉开但不打架
-        secondaryShift = 75f,
+        // 暮紫 -> 玫红：紫系内的邻近色，层次拉开但不打架。
+        // +90 落在 346°（玫瑰），比原来的 +75(331°) 离语义紫更远（ΔE 22.0 -> 26.6）
+        secondaryShift = 90f,
     ),
     Coral(
         "coral", "珊瑚", "陶红",
@@ -106,8 +107,9 @@ enum class EcoAccent(
         Family(0xFFF0ADBB, 0xFFFFD5DB, 0xFFD78EA5, 0xFFF6C6D1, 0xFF47333B, 0xFF382A32),
         heroA = Color(0xFF331F2B), heroB = Color(0xFF5D3044), heroC = Color(0xFF7A3D53),
         accentGradA = Color(0xFFB5677B), accentGradB = Color(0xFF96485E), accentGradC = Color(0xFF77344A),
-        // 陶红 -> 品红/紫：避免退回青色，红紫配也更暖
-        secondaryShift = -63f,
+        // 陶红 -> 梅子紫：避免退回青色，红紫配也更暖。
+        // -50 落在 296°，比原来的 -63(283°) 明显离开语义紫（ΔE 21.5 -> 24.0）
+        secondaryShift = -50f,
     ),
     Amber(
         "amber", "暖金", "琥珀",
@@ -275,6 +277,42 @@ fun contrastRatio(a: Color, b: Color): Float {
  */
 fun contentColorOn(background: Color): Color =
     if (relativeLuminance(background) > 0.179f) Color(0xFF14181B) else Color(0xFFFFFFFF)
+
+// ---------- 主题色整体提亮 ----------
+
+/**
+ * 主题色提亮系数。
+ *
+ * 第一轮为了修对比度，把 hero 渐变、按钮渐变、主色深档压得偏黑，整套主题看起来发闷。
+ * 这里把**强调色**统一向白色混合一点：
+ * `0f` = 原始设计色，值越大越亮。
+ *
+ * 只作用于 `blue*` / `second*` / `hero*` / `accentGrad*`，
+ * **不动**纸面、卡片面、分隔线和文字，所以不会把已有的层次冲淡。
+ * 派生色（`onHero*`、`heroProgress`、`heroPlate`、`accentBorder`）都读提亮后的值，
+ * 因此对比关系自动跟着走。
+ */
+private const val ACCENT_LIFT = 0.12f
+
+/** 深档是实心块底色（白字压在上面），提亮要保守一点，别把对比吃掉。 */
+private const val ACCENT_LIFT_DEEP = 0.08f
+
+/** 已经很亮的高光档只做轻微提亮，避免糊成白色。 */
+private const val ACCENT_LIFT_HI = 0.05f
+
+/**
+ * 按钮渐变必须**分档提亮**：最亮端直接顶到白字 3:1 的边界，
+ * 提 12% 会掉到 2.6:1；暗端可以多提，那里正是看着发闷的地方。
+ */
+private const val ACCENT_LIFT_GRAD_A = 0.05f
+private const val ACCENT_LIFT_GRAD_B = 0.09f
+private const val ACCENT_LIFT_GRAD_C = 0.13f
+
+/** 次要色是装饰色，不承担白字对比，提亮少一点以免被冲淡、撞上语义紫。 */
+private const val ACCENT_LIFT_SECOND = 0.06f
+
+private fun lift(color: Color, amount: Float): Color =
+    if (amount <= 0f) color else lerp(color, Color.White, amount)
 
 /** 主操作渐变（按钮/FAB/进度）：三段 stop */
 val EcoColors.accentGradient: List<Color> get() = listOf(accentGradA, accentGradB, accentGradC)
@@ -446,20 +484,20 @@ fun ecoColors(dark: Boolean, accent: EcoAccent): EcoColors {
         rule = Color(n.rule),
         ruleStrong = Color(n.ruleStrong),
         track = Color(n.track),
-        blue = Color(b.blue),
-        blueDeep = Color(b.deep),
-        blue2 = Color(b.mid),
-        blueHi = Color(b.hi),
+        blue = lift(Color(b.blue), ACCENT_LIFT),
+        blueDeep = lift(Color(b.deep), ACCENT_LIFT_DEEP),
+        blue2 = lift(Color(b.mid), ACCENT_LIFT),
+        blueHi = lift(Color(b.hi), ACCENT_LIFT_HI),
         blueSoft = Color(b.soft),
         blueWash = Color(b.wash),
-        onAccent = contentColorOn(Color(b.deep)),
-        second = Color(s.blue),
-        secondDeep = Color(s.deep),
-        second2 = Color(s.mid),
-        secondHi = Color(s.hi),
+        onAccent = contentColorOn(lift(Color(b.deep), ACCENT_LIFT_DEEP)),
+        second = lift(Color(s.blue), ACCENT_LIFT_SECOND),
+        secondDeep = lift(Color(s.deep), ACCENT_LIFT_DEEP),
+        second2 = lift(Color(s.mid), ACCENT_LIFT_SECOND),
+        secondHi = lift(Color(s.hi), ACCENT_LIFT_HI),
         secondSoft = Color(s.soft),
         secondWash = Color(s.wash),
-        onSecond = contentColorOn(Color(s.deep)),
+        onSecond = contentColorOn(lift(Color(s.deep), ACCENT_LIFT_DEEP)),
         // 语义色：收入/警告/危险永远不变，只有深浅两套
         jade = if (dark) Color(0xFF88DBB0) else Color(0xFF268E70),
         jadeHi = if (dark) Color(0xFFBBE9C9) else Color(0xFF98DDB1),
@@ -472,12 +510,12 @@ fun ecoColors(dark: Boolean, accent: EcoAccent): EcoColors {
         claySoft = if (dark) Color(0xFF503C3B) else Color(0xFFFCEAE4),
         violet = if (dark) Color(0xFFC4B3DF) else Color(0xFF907BA8),
         violetSoft = if (dark) Color(0xFF3C354B) else Color(0xFFF1EAF5),
-        heroA = accent.heroA,
-        heroB = accent.heroB,
-        heroC = accent.heroC,
-        accentGradA = accent.accentGradA,
-        accentGradB = accent.accentGradB,
-        accentGradC = accent.accentGradC,
+        heroA = lift(accent.heroA, ACCENT_LIFT),
+        heroB = lift(accent.heroB, ACCENT_LIFT),
+        heroC = lift(accent.heroC, ACCENT_LIFT),
+        accentGradA = lift(accent.accentGradA, ACCENT_LIFT_GRAD_A),
+        accentGradB = lift(accent.accentGradB, ACCENT_LIFT_GRAD_B),
+        accentGradC = lift(accent.accentGradC, ACCENT_LIFT_GRAD_C),
     )
 }
 

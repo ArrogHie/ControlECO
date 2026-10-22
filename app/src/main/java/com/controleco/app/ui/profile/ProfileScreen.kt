@@ -108,6 +108,7 @@ import com.controleco.app.ui.theme.EcoColors
 import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.contentColorOn
 import com.controleco.app.ui.theme.eco
+import com.controleco.app.ui.theme.ecoColors
 import com.controleco.app.ui.theme.heroPlate
 import com.controleco.app.ui.theme.heroProgress
 import com.controleco.app.ui.theme.onHero
@@ -1638,7 +1639,8 @@ private fun ThemeRow(selected: EcoAccent, onPick: (EcoAccent) -> Unit) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 rowEntries.forEach { entry ->
                     val on = entry == selected
-                    val dot = Color(if (c.isDark) entry.dark.blue else entry.light.blue)
+                    // 色点要显示「实际生效」的主色（eco 里做过整体提亮），不能用原始 Family 值
+                    val dot = ecoColors(c.isDark, entry).blue
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
