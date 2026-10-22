@@ -198,4 +198,66 @@ class ThemeSecondColorTest {
             }
         }
     }
+
+    // ---------- 双色相封面 ----------
+
+    @Test
+    fun `封面收尾档用的是次要色相`() {
+        // 用 ΔE 而不是色相差：珊瑚的 hero 自己就偏过色相，色相差会偏小，
+        // 但只要两档看起来是两种颜色，渐变就有层次。
+        tinted.forEach { accent ->
+            val c = ecoColors(false, accent)
+            val d = colorDistance(c.heroSecond, c.heroA)
+            assertTrue(
+                "${accent.label}: heroSecond 与主色封面太接近（ΔE=$d），渐变会退化成单色",
+                d > 20f,
+            )
+        }
+    }
+
+    @Test
+    fun `封面收尾档与主色档同亮度`() {
+        // 同亮度才能保证白字在整条渐变上对比一致
+        all.forEach { accent ->
+            val c = ecoColors(false, accent)
+            val d = abs(relativeLuminance(c.heroSecond) - relativeLuminance(c.heroC))
+            assertTrue("${accent.label}: heroSecond 亮度应贴近 heroC（差 $d）", d < 0.02f)
+        }
+    }
+
+    @Test
+    fun `双色相封面主色占多`() {
+        all.forEach { accent ->
+            val c = ecoColors(false, accent)
+            val g = c.heroDuoGradient
+            if (accent.neutral == Neutral.WHITE) {
+                // 无彩色主题没有第二个色相可转，应退回单色渐变（而不是塞一个假色相）
+                assertEquals("${accent.label}: 无彩色主题应退回单色渐变", c.heroGradient, g)
+                return@forEach
+            }
+            assertEquals("${accent.label}: 双色相封面应是 4 个色标", 4, g.size)
+            // 前 3 个色标都是主色相，只有最后一个才换色相
+            g.take(3).forEach {
+                assertTrue(
+                    "${accent.label}: 前段应为主色相",
+                    colorDistance(it, c.heroA) < 20f,
+                )
+            }
+            assertTrue(
+                "${accent.label}: 末段应为次要色相",
+                colorDistance(g.last(), c.heroA) > 20f,
+            )
+        }
+    }
+
+    @Test
+    fun `双色相封面上白字仍可读`() {
+        all.forEach { accent ->
+            val c = ecoColors(false, accent)
+            c.heroDuoGradient.forEach { stop ->
+                val cr = contrastRatio(c.onHero, stop)
+                assertTrue("${accent.label}: 双色相封面某端对比度不足 $cr", cr >= 4.5f)
+            }
+        }
+    }
 }
