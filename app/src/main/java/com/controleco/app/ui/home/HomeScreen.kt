@@ -401,9 +401,9 @@ private fun ModeRemaining(s: Budget.Snapshot, period: MonthPeriod, today: LocalD
             // 环在「顶部」与「本日剩余」之间居中：上下留白相等
             Spacer(Modifier.weight(1f))
             BudgetRing(s = s, period = period, today = today, size = ringSize)
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.weight(0.35f))
             TodayCard(s = s)
-            Spacer(Modifier.weight(0.28f))
+            Spacer(Modifier.weight(0.93f))
         }
     }
 }
@@ -469,25 +469,6 @@ private fun BudgetRing(s: Budget.Snapshot, period: MonthPeriod, today: LocalDate
                 radius = r,
                 center = Offset(cx, cy),
                 style = Stroke(stroke),
-            )
-            // 凹槽：内壁压暗、外壁提亮，没被填充的部分看起来是凹下去的
-            drawCircle(
-                color = Color.Black.copy(alpha = if (c.isDark) 0.30f else 0.13f),
-                radius = r - stroke * 0.22f,
-                center = Offset(cx, cy - 0.8f * u),
-                style = Stroke(stroke * 0.44f),
-            )
-            drawCircle(
-                color = Color.Black.copy(alpha = if (c.isDark) 0.18f else 0.07f),
-                radius = r - stroke * 0.40f,
-                center = Offset(cx, cy - 1.4f * u),
-                style = Stroke(stroke * 0.20f),
-            )
-            drawCircle(
-                color = Color.White.copy(alpha = if (c.isDark) 0.10f else 0.22f),
-                radius = r + stroke * 0.24f,
-                center = Offset(cx, cy + 0.8f * u),
-                style = Stroke(stroke * 0.42f),
             )
             // 外描边 + 内亮线
             drawCircle(
