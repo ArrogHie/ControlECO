@@ -233,7 +233,8 @@ fun ExpenseBarChart(
                     ),
                     brush = Brush.verticalGradient(
                         colors = if (isSelected) {
-                            listOf(c.blueDeep, c.jade)
+                            // 选中柱：强调色深→亮（原来深蓝→玉绿，会让柱子下半截永远发绿）
+                            listOf(c.blueDeep, c.blueHi)
                         } else {
                             listOf(
                                 c.blue.copy(alpha = 0.67f * alpha),
@@ -245,10 +246,11 @@ fun ExpenseBarChart(
                     ),
                 )
                 if (isSelected && progress > 0.92f) {
+                    // 柱顶指示点用强调色，不掺语义绿
                     val dotX = left + barWidth / 2f
                     val dotY = (fullTop - 9.dp.toPx()).coerceAtLeast(4.dp.toPx())
-                    drawCircle(c.jadeSoft, radius = 5.dp.toPx(), center = Offset(dotX, dotY))
-                    drawCircle(c.jade, radius = 2.5.dp.toPx(), center = Offset(dotX, dotY))
+                    drawCircle(c.blueSoft, radius = 5.dp.toPx(), center = Offset(dotX, dotY))
+                    drawCircle(c.blue, radius = 2.5.dp.toPx(), center = Offset(dotX, dotY))
                 }
             } else {
                 drawLine(

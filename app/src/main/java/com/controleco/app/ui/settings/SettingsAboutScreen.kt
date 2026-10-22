@@ -52,18 +52,22 @@ import com.controleco.app.ui.eco.EcoSheet
 import com.controleco.app.ui.eco.EcoToast
 import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.eco
+import com.controleco.app.ui.theme.onHero
+import com.controleco.app.ui.theme.onHeroChip
+import com.controleco.app.ui.theme.onHeroMuted
 import com.controleco.app.update.AppUpdate
 
 /** 开源仓库（与个人页「更多」里的仓库行保持一致） */
 private const val GITHUB_REPO_PATH = "ArrogHie/ControlECO"
 private const val GITHUB_REPO_URL = "https://github.com/$GITHUB_REPO_PATH"
 
-/** 深色 hero 上的固定前景色（hero 永远是深色，不随深浅主题变） */
-private val HERO_INK = Color(0xFFF7FFFA)
-private val HERO_SUB = Color(0xFFB9D4CD)
-private val HERO_PILL_INK = Color(0xFFE7F5EF)
-private val LOGO_A = Color(0xFF52A47B)
-private val LOGO_B = Color(0xFF2E7358)
+// 深色 hero 上的前景色：由主题推导（hero 渐变永远偏深，色相跟主题走）
+private val HERO_INK: Color
+    @Composable get() = MaterialTheme.eco.onHero
+private val HERO_SUB: Color
+    @Composable get() = MaterialTheme.eco.onHeroMuted
+private val HERO_PILL_INK: Color
+    @Composable get() = MaterialTheme.eco.onHeroChip
 
 private data class LicenseEntry(val name: String, val license: String, val note: String)
 
@@ -232,6 +236,7 @@ fun SettingsAboutScreen(onBack: () -> Unit) {
 
 @Composable
 private fun AboutHero() {
+    val c = MaterialTheme.eco
     EcoHeroCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -248,14 +253,14 @@ private fun AboutHero() {
                 Modifier
                     .size(48.dp)
                     .clip(RoundedCornerShape(15.dp))
-                    .background(Brush.linearGradient(listOf(LOGO_A, LOGO_B)))
+                    .background(Brush.linearGradient(listOf(c.accentGradA, c.accentGradC)))
                     .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(15.dp)),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     EcoIcons.Leaf,
                     contentDescription = "我ECO",
-                    tint = Color(0xFFF7FBF2),
+                    tint = c.onAccent,
                     modifier = Modifier.size(26.dp),
                 )
             }

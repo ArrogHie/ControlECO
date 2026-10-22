@@ -106,7 +106,14 @@ import com.controleco.app.ui.theme.AccentThemeStore
 import com.controleco.app.ui.theme.EcoAccent
 import com.controleco.app.ui.theme.EcoColors
 import com.controleco.app.ui.theme.EcoType
+import com.controleco.app.ui.theme.contentColorOn
 import com.controleco.app.ui.theme.eco
+import com.controleco.app.ui.theme.heroPlate
+import com.controleco.app.ui.theme.heroProgress
+import com.controleco.app.ui.theme.onHero
+import com.controleco.app.ui.theme.onHeroBorder
+import com.controleco.app.ui.theme.onHeroChip
+import com.controleco.app.ui.theme.onHeroMuted
 import com.controleco.app.util.Money
 import java.time.LocalDate
 import kotlin.math.roundToInt
@@ -206,11 +213,17 @@ private fun Modifier.cardInset(
     }
     drawContent()
 }
-// 深色 hero 上的前景色（hero 渐变永远是深色，这组色不随深浅主题变）
-private val HERO_MINT = Color(0xFFBDE9DA)
-private val HERO_MINT_SOFT = Color(0xFFD0F6D5)
-private val HERO_INK = Color(0xFFEAFBF2)
-private val HERO_BTN_INK = Color(0xFFD8F7E8)
+// 深色 hero 上的前景色：**由主题推导**（见 Theme.kt 的 onHero* 扩展），
+// 原来是固定的青绿常量，换紫色/珊瑚主题后会出现「紫底绿字」。
+// 保留常量名以兼容既有调用点，但值改为读当前主题。
+private val HERO_MINT: Color
+    @Composable get() = MaterialTheme.eco.onHeroMuted
+private val HERO_MINT_SOFT: Color
+    @Composable get() = MaterialTheme.eco.onHero
+private val HERO_INK: Color
+    @Composable get() = MaterialTheme.eco.onHero
+private val HERO_BTN_INK: Color
+    @Composable get() = MaterialTheme.eco.onHeroChip
 
 /**
  * 个人页：预算 hero + 月/日预算双列（待确认椭圆）+ 分类/每月首日/设置三卡 + 底排（导入/打赏/关于）+ 更多。
@@ -393,7 +406,7 @@ private fun BudgetHero(
             // hero 的厚度：同形状底盘下移 4dp
             .cardPlate(
                 heroShape,
-                (if (c.isDark) Color(0xFF07171C) else Color(0xFF0B2A33)).copy(alpha = 0.55f),
+                c.heroPlate.copy(alpha = 0.55f),
                 offsetX = 2.dp, offsetY = 4.2.dp,
             ),
         shape = heroShape,
@@ -418,7 +431,7 @@ private fun BudgetHero(
                         .widthIn(min = 30.dp)
                         .clip(RoundedCornerShape(15.dp))
                         .background(Color.White.copy(alpha = 0.09f))
-                        .border(1.dp, Color(0xFFE2FFF1).copy(alpha = 0.22f), RoundedCornerShape(15.dp))
+                        .border(1.dp, c.onHeroBorder, RoundedCornerShape(15.dp))
                         .clickable(onClick = onCurrency)
                         .padding(horizontal = 8.dp),
                     contentAlignment = Alignment.Center,
@@ -436,7 +449,7 @@ private fun BudgetHero(
                         .width(77.dp)
                         .height(32.dp)
                         .clip(RoundedCornerShape(11.dp, 16.dp, 11.dp, 16.dp))
-                        .background(Color(0xFFF4FFF9).copy(alpha = 0.13f))
+                        .background(c.onHeroBorder.copy(alpha = 0.40f))
                         .clickable(onClick = onOpenAccount),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
@@ -465,7 +478,7 @@ private fun BudgetHero(
                     EcoCountUpMoney(
                         cents = budgetCents,
                         style = EcoType.HeroAmount,
-                        color = Color(0xFFF7FFFA),
+                        color = c.onHero,
                         modifier = Modifier.weight(1f).clickable(onClick = onManageBudget),
                         textAlign = TextAlign.Start,
                         minSize = 21.sp,
@@ -474,7 +487,7 @@ private fun BudgetHero(
                     Text(
                         amountText,
                         style = EcoType.HeroAmount,
-                        color = Color(0xFFF7FFFA),
+                        color = c.onHero,
                         modifier = Modifier.weight(1f).clickable(onClick = onManageBudget),
                         maxLines = 1,
                     )
@@ -513,7 +526,7 @@ private fun BudgetHero(
                         .fillMaxHeight()
                         .clip(CircleShape)
                         .background(
-                            Brush.horizontalGradient(listOf(Color(0xFFC3F1CB), Color(0xFF57DBAA))),
+                            Brush.horizontalGradient(c.heroProgress),
                         ),
                 )
             }
@@ -742,19 +755,21 @@ private fun PendingPill(count: Int, onClick: () -> Unit, modifier: Modifier = Mo
     val plate: Color
     val innerShade: Color
     if (alert) {
-        bgTop = if (c.isDark) lerp(c.claySoft, Color.White, 0.10f) else Color(0xFFFFF8ED)
-        bgBottom = if (c.isDark) lerp(c.claySoft, c.surface, 0.18f) else Color(0xFFF9DED0)
-        borderColor = if (c.isDark) c.clay.copy(alpha = 0.42f) else Color(0xFFF0CEBC)
-        fg = if (c.isDark) c.clayHi else Color(0xFFA74E42)
-        plate = Color(0xFFD9A28F)
-        innerShade = Color(0xFFB4785F)
+        // 待确认：陶土语义色（永远不变），浅色下从语义色提亮，不再写死米/橙
+        bgTop = if (c.isDark) lerp(c.claySoft, Color.White, 0.10f) else lerp(c.claySoft, Color.White, 0.45f)
+        bgBottom = if (c.isDark) lerp(c.claySoft, c.surface, 0.18f) else lerp(c.claySoft, c.surface, 0.30f)
+        borderColor = if (c.isDark) c.clay.copy(alpha = 0.42f) else lerp(c.clay, c.surface, 0.62f)
+        fg = if (c.isDark) c.clayHi else lerp(c.clay, Color.Black, 0.22f)
+        plate = lerp(c.clay, Color.Black, 0.05f)
+        innerShade = lerp(c.clay, Color.Black, 0.30f)
     } else {
-        bgTop = if (c.isDark) lerp(c.jadeSoft, Color.White, 0.05f) else Color(0xFFF2FAF1)
-        bgBottom = if (c.isDark) lerp(c.jadeSoft, c.surface, 0.16f) else Color(0xFFDCEFE1)
-        borderColor = if (c.isDark) c.jade.copy(alpha = 0.36f) else Color(0xFFCBE4D2)
-        fg = if (c.isDark) c.jade else Color(0xFF356B4E)
-        plate = Color(0xFFA9C7B2)
-        innerShade = Color(0xFF7FA88C)
+        // 无待确认：玉绿语义色（永远不变），浅色下同样从语义色提亮
+        bgTop = if (c.isDark) lerp(c.jadeSoft, Color.White, 0.05f) else lerp(c.jadeSoft, Color.White, 0.55f)
+        bgBottom = if (c.isDark) lerp(c.jadeSoft, c.surface, 0.16f) else lerp(c.jadeSoft, c.surface, 0.40f)
+        borderColor = if (c.isDark) c.jade.copy(alpha = 0.36f) else lerp(c.jade, c.surface, 0.66f)
+        fg = if (c.isDark) c.jade else lerp(c.jade, Color.Black, 0.30f)
+        plate = lerp(c.jade, c.surface, 0.45f)
+        innerShade = lerp(c.jade, Color.Black, 0.36f)
     }
 
     Box(
@@ -1227,12 +1242,15 @@ private fun BottomRow(
 /** 开源仓库：深墨圆钮（原型 github-orb），点击直接开系统浏览器。 */
 @Composable
 private fun GitHubOrb(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val c = MaterialTheme.eco
+    // 深墨圆钮：用中性墨色（白主题下是石墨，冷调主题下是深青墨），不再写死深青
+    val orbBg = lerp(c.ink, Color.Black, 0.55f)
     Box(
         modifier
-            .shadow(1.5.dp, CircleShape, ambientColor = Color.Transparent, spotColor = Color(0x4010242A))
-            .cardPlate(CircleShape, Color(0xFF050F14).copy(alpha = 0.85f), offsetX = 1.5.dp, offsetY = 3.4.dp)
+            .shadow(1.5.dp, CircleShape, ambientColor = Color.Transparent, spotColor = c.ink.copy(alpha = 0.25f))
+            .cardPlate(CircleShape, lerp(orbBg, Color.Black, 0.55f).copy(alpha = 0.85f), offsetX = 1.5.dp, offsetY = 3.4.dp)
             .clip(CircleShape)
-            .background(Color(0xFF18282D))
+            .background(orbBg)
             .cardInset(
                 shape = CircleShape,
                 topColor = Color.White.copy(alpha = 0.18f),
@@ -1254,16 +1272,19 @@ private fun GitHubOrb(onClick: () -> Unit, modifier: Modifier = Modifier) {
  */
 @Composable
 private fun AccentTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val c = MaterialTheme.eco
     Box(
         modifier
-            .shadow(1.5.dp, CircleShape, ambientColor = Color.Transparent, spotColor = Color(0x404C6F6B))
-            .cardPlate(CircleShape, Color(0xFF5A6F6B).copy(alpha = 0.55f), offsetX = 1.5.dp, offsetY = 3.4.dp)
+            .shadow(1.5.dp, CircleShape, ambientColor = Color.Transparent, spotColor = c.ink.copy(alpha = 0.24f))
+            .cardPlate(CircleShape, c.ink.copy(alpha = 0.45f), offsetX = 1.5.dp, offsetY = 3.4.dp)
             .clip(CircleShape)
             .background(
+                // 彩虹是「主题色」这个功能本身的语义（表示多套配色可选），
+                // 但色相顺序改成与 EcoAccent 一致，避免固定青绿那一段抢眼
                 Brush.linearGradient(
                     listOf(
                         Color(0xFFD977AB), Color(0xFFEC9C77), Color(0xFFEFCE76),
-                        Color(0xFF7BC8AA), Color(0xFF6A9DD2), Color(0xFFA582C9),
+                        Color(0xFF6A9DD2), Color(0xFFA582C9), Color(0xFF7BC8AA),
                     ),
                     start = Offset.Zero,
                     end = Offset.Infinite,
@@ -1273,7 +1294,7 @@ private fun AccentTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 shape = CircleShape,
                 topColor = Color.White.copy(alpha = 0.40f),
                 topHeight = 2.dp,
-                bottomColor = Color(0xFF122A26).copy(alpha = 0.22f),
+                bottomColor = c.ink.copy(alpha = 0.22f),
                 band = 14.dp,
             )
             .border(1.dp, Color.White.copy(alpha = 0.65f), CircleShape)
@@ -1309,12 +1330,12 @@ private fun ImportTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(EcoIcons.Download, contentDescription = null, tint = Color(0xFFEAFBF2), modifier = Modifier.size(15.dp))
+            Icon(EcoIcons.Download, contentDescription = null, tint = c.onHero, modifier = Modifier.size(15.dp))
             Spacer(Modifier.width(6.dp))
             Text(
                 "导入账单",
                 style = EcoType.Chip.copy(fontSize = 12.5.sp, fontWeight = FontWeight(800), letterSpacing = 0.sp),
-                color = Color(0xFFEAFBF2),
+                color = c.onHero,
                 maxLines = 1,
             )
         }
@@ -1344,14 +1365,14 @@ private fun ImportOrb(onClick: () -> Unit, modifier: Modifier = Modifier) {
             Icon(
                 EcoIcons.File,
                 contentDescription = "账单导入",
-                tint = Color(0xFFF2FCF6),
+                tint = c.onHero,
                 modifier = Modifier.size(19.dp),
             )
             Spacer(Modifier.height(3.dp))
             Text(
                 "导入账单",
                 style = EcoType.Micro.copy(fontSize = 8.5.sp, fontWeight = FontWeight(800), letterSpacing = 0.sp),
-                color = Color(0xFFEAFBF2),
+                color = c.onHero,
                 maxLines = 1,
             )
         }
@@ -1369,13 +1390,14 @@ private fun RewardTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 shape = CircleShape,
                 clip = false,
                 ambientColor = Color.Transparent,
-                spotColor = Color(0xFFC45854).copy(alpha = 0.30f),
+                spotColor = c.clay.copy(alpha = 0.30f),
             )
-            .cardPlate(CircleShape, Color(0xFF8E3A31).copy(alpha = 0.70f), offsetX = 1.5.dp, offsetY = 3.4.dp)
+            .cardPlate(CircleShape, lerp(c.clay, Color.Black, 0.42f).copy(alpha = 0.70f), offsetX = 1.5.dp, offsetY = 3.4.dp)
             .clip(CircleShape)
             .background(
+                // 打赏：陶土语义色渐变（永远不变，与收支/危险同族）
                 Brush.linearGradient(
-                    listOf(Color(0xFFE78C74), Color(0xFFC45854)),
+                    listOf(lerp(c.clay, Color.White, 0.18f), c.clay),
                     start = Offset.Zero,
                     end = Offset.Infinite,
                 ),
@@ -1384,7 +1406,7 @@ private fun RewardTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 shape = CircleShape,
                 topColor = Color.White.copy(alpha = 0.42f),
                 topHeight = 2.dp,
-                bottomColor = Color(0xFF6E2A22).copy(alpha = 0.24f),
+                bottomColor = lerp(c.clay, Color.Black, 0.42f).copy(alpha = 0.24f),
                 band = 14.dp,
             )
             .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
@@ -1395,14 +1417,14 @@ private fun RewardTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
             Icon(
                 EcoIcons.Coffee,
                 contentDescription = null,
-                tint = Color(0xFFFFF4EE),
+                tint = lerp(c.clay, Color.White, 0.90f),
                 modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.height(1.dp))
             Text(
                 "打赏",
                 style = EcoType.Chip.copy(fontSize = 10.5.sp, fontWeight = FontWeight(800), letterSpacing = 0.sp),
-                color = Color(0xFFFFF6F1),
+                color = lerp(c.clay, Color.White, 0.92f),
                 maxLines = 1,
             )
         }
@@ -1432,14 +1454,14 @@ private fun AboutTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
             Icon(
                 EcoIcons.Info,
                 contentDescription = null,
-                tint = Color(0xFFF2FCF6),
+                tint = c.onHero,
                 modifier = Modifier.size(17.dp),
             )
             Spacer(Modifier.width(6.dp))
             Text(
                 "关于",
                 style = EcoType.Chip.copy(fontSize = 15.sp, fontWeight = FontWeight(800), letterSpacing = 0.sp),
-                color = Color(0xFFF2FCF6),
+                color = c.onHero,
                 maxLines = 1,
             )
         }
@@ -1597,53 +1619,63 @@ private fun ThemeSheet(
     }
 }
 
-/** 主题色：6 个圆形色板（EcoAccent 六套），选中项描环，点一下即时生效。 */
+/**
+ * 主题色：7 个圆形色板（EcoAccent 七套，含「纯白」），选中项描环，点一下即时生效。
+ *
+ * 7 个一行在 390dp 下会把标签挤断，所以按 4 列分两行；色点直径随列宽自适应。
+ */
 @Composable
 private fun ThemeRow(selected: EcoAccent, onPick: (EcoAccent) -> Unit) {
     val c = MaterialTheme.eco
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            EcoAccent.entries.forEach { entry ->
-                val dot = Color(if (c.isDark) entry.dark.blue else entry.light.blue)
-                val on = entry == selected
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onPick(entry) }
-                        .padding(horizontal = 2.dp, vertical = 2.dp),
-                ) {
-                    Box(
-                        Modifier
-                            .size(if (on) 46.dp else 44.dp)
-                            .clip(CircleShape)
-                            .background(dot)
-                            .then(
-                                if (on) {
-                                    Modifier.border(2.dp, c.ink, CircleShape)
-                                } else {
-                                    Modifier.border(1.dp, c.rule, CircleShape)
-                                },
-                            ),
-                        contentAlignment = Alignment.Center,
+        EcoAccent.entries.chunked(4).forEach { rowEntries ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                rowEntries.forEach { entry ->
+                    val on = entry == selected
+                    val dot = Color(if (c.isDark) entry.dark.blue else entry.light.blue)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onPick(entry) }
+                            .padding(vertical = 4.dp),
                     ) {
-                        if (on) {
-                            Icon(
-                                EcoIcons.Check,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp),
-                            )
+                        Box(
+                            Modifier
+                                .size(if (on) 44.dp else 40.dp)
+                                .clip(CircleShape)
+                                .background(dot)
+                                .then(
+                                    if (on) {
+                                        Modifier.border(2.dp, c.blue, CircleShape)
+                                    } else {
+                                        Modifier.border(1.dp, c.rule, CircleShape)
+                                    },
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (on) {
+                                Icon(
+                                    EcoIcons.Check,
+                                    contentDescription = null,
+                                    // 浅底主题（白/暖金）用深色勾，深底用白勾
+                                    tint = contentColorOn(dot),
+                                    modifier = Modifier.size(17.dp),
+                                )
+                            }
                         }
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            entry.label,
+                            style = EcoType.Pill.copy(fontSize = 10.5.sp),
+                            color = if (on) c.ink else c.muted,
+                            maxLines = 1,
+                        )
                     }
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        entry.label,
-                        style = EcoType.Pill.copy(fontSize = 10.5.sp),
-                        color = if (on) c.ink else c.muted,
-                        maxLines = 1,
-                    )
                 }
+                // 末行不足 4 个时补占位，保持列宽一致
+                repeat(4 - rowEntries.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -1784,7 +1816,8 @@ private fun AboutDialog(onOpenRepo: () -> Unit, onDismiss: () -> Unit) {
                         .clip(RoundedCornerShape(15.dp))
                         .background(
                             Brush.linearGradient(
-                                listOf(Color(0xFF52A47B), Color(0xFF2E7358)),
+                                // 品牌块跟随主题（原来是固定的青绿，任何主题下都是绿的）
+                                listOf(c.accentGradA, c.accentGradC),
                                 start = Offset.Zero,
                                 end = Offset.Infinite,
                             ),
@@ -1794,7 +1827,7 @@ private fun AboutDialog(onOpenRepo: () -> Unit, onDismiss: () -> Unit) {
                     Icon(
                         EcoIcons.Leaf,
                         contentDescription = null,
-                        tint = Color(0xFFF7FBF2),
+                        tint = c.onAccent,
                         modifier = Modifier.size(24.dp),
                     )
                 }

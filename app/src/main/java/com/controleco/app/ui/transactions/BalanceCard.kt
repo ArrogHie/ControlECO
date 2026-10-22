@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -49,6 +50,9 @@ import com.controleco.app.ui.common.scrimAlphaFor
 import com.controleco.app.ui.eco.EcoAutoMoney
 import com.controleco.app.ui.common.EcoIcons
 import com.controleco.app.ui.theme.EcoType
+import com.controleco.app.ui.theme.eco
+import com.controleco.app.ui.theme.onHero
+import com.controleco.app.ui.theme.onHeroMuted
 import com.controleco.app.ui.theme.accBook
 import com.controleco.app.util.Money
 import kotlin.math.max
@@ -78,6 +82,7 @@ fun BalanceCard(
     /** 统计页复用同一张封面，但不在这里改背景图（入口仍在账单页） */
     showEdit: Boolean = true,
 ) {
+    val c = MaterialTheme.eco
     val drawable = remember(image?.full, image?.preview) { image?.asImage() }
     val customImage = image != null || !imagePath.isNullOrBlank()
     val placeholder = if (drawable == null && customImage) placeholderColor?.let { Color(it) } else null
@@ -85,25 +90,32 @@ fun BalanceCard(
     val mist = !customImage && style == CoverStyleStore.MIST
     val clay = !customImage && style == CoverStyleStore.CLAY
     val lightText = if (!customImage) !mist else effectiveLuminance < 0.34f
+    // 「夜色」底由主题驱动：结余卡的主色跟随强调色（原来写死青绿，换主题不变）。
+    // 薄雾/陶土是用户可选的两套独立风格，保持各自固定配色。
+    val nightInk = c.onHero
+    val nightSub = c.onHeroMuted
     val ink = when {
         mist -> Color(0xFF183740)
-        lightText -> Color(0xFFF1FAF5)
-        else -> Color(0xFF152F36)
+        customImage && !lightText -> Color(0xFF152F36)
+        customImage -> Color(0xFFF1FAF5)
+        else -> nightInk
     }
     val sub = when {
         mist -> Color(0xFF4D6A6D)
-        lightText -> Color(0xFFB6D8D1)
-        else -> Color(0xFF4D6A6D)
+        customImage && !lightText -> Color(0xFF4D6A6D)
+        customImage -> Color(0xFFB6D8D1)
+        else -> nightSub
     }
+    // 收支色：语义色（永远不变），但在深色「夜色」底上要用浅档才可读
     val income = when {
-        mist -> Color(0xFF1C7B62)
-        lightText -> Color(0xFF93E3C2)
-        else -> Color(0xFF1C7B62)
+        mist -> c.jade
+        customImage && !lightText -> c.jade
+        else -> if (customImage) Color(0xFF93E3C2) else lerp(c.jade, Color.White, 0.42f)
     }
     val expense = when {
-        mist -> Color(0xFFB7503F)
-        lightText -> Color(0xFFF0A18F)
-        else -> Color(0xFFB7503F)
+        mist -> c.clay
+        customImage && !lightText -> c.clay
+        else -> if (customImage) Color(0xFFF0A18F) else lerp(c.clay, Color.White, 0.42f)
     }
     val scrimAlpha = if (!customImage || (drawable == null && placeholder == null)) {
         0f
@@ -123,8 +135,8 @@ fun BalanceCard(
             .shadow(
                 elevation = 18.dp,
                 shape = shape,
-                ambientColor = Color(0x33103539),
-                spotColor = Color(0x4D103539),
+                ambientColor = c.heroA.copy(alpha = 0.20f),
+                spotColor = c.heroA.copy(alpha = 0.30f),
             )
             .clip(shape),
     ) {
@@ -239,17 +251,17 @@ fun BalanceCard(
                             cap = StrokeCap.Round,
                         )
                     } else {
-                    // 夜色底：125° 深青渐变
+                    // 夜色底：主题 hero 渐变（125° 深色渐变），跟随强调色
                     drawRect(
                         Brush.linearGradient(
-                            colors = listOf(Color(0xFF102F3B), Color(0xFF135565), Color(0xFF225867)),
+                            colors = listOf(c.heroA, c.heroB, c.heroC),
                             start = Offset(0f, 0f),
                             end = Offset(size.width, size.height),
                         ),
                     )
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0x33A9D9D0), Color.Transparent),
+                            colors = listOf(c.onHeroMuted.copy(alpha = 0.20f), Color.Transparent),
                             center = Offset(size.width * 0.80f, size.height * 0.05f),
                             radius = size.width * 0.55f,
                         ),
@@ -258,7 +270,7 @@ fun BalanceCard(
                     )
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0x26F2C9A0), Color.Transparent),
+                            colors = listOf(c.amber.copy(alpha = 0.15f), Color.Transparent),
                             center = Offset(size.width * 0.12f, size.height * 0.95f),
                             radius = size.width * 0.42f,
                         ),
@@ -277,10 +289,14 @@ fun BalanceCard(
                     ).forEachIndexed { i, p ->
                         drawCircle(star, radius = if (i % 2 == 0) 1.2f else 2f, center = p)
                     }
-                    // 光球
+                    // 光球：用主题强调色亮端做高光，不再固定青绿光斑
                     drawCircle(
                         brush = Brush.radialGradient(
-                            colors = listOf(Color(0xCC9BE0D4), Color(0x223F8E88), Color.Transparent),
+                            colors = listOf(
+                                c.blueHi.copy(alpha = 0.80f),
+                                c.blue.copy(alpha = 0.14f),
+                                Color.Transparent,
+                            ),
                             center = Offset(size.width * 0.88f, size.height * 0.08f),
                             radius = size.height * 0.78f,
                         ),

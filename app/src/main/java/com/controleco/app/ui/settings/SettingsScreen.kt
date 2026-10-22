@@ -56,13 +56,21 @@ import com.controleco.app.ui.eco.EcoPillTone
 import com.controleco.app.ui.eco.EcoToast
 import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.eco
+import com.controleco.app.ui.theme.onHero
+import com.controleco.app.ui.theme.onHeroChip
+import com.controleco.app.ui.theme.onHeroMuted
 import com.controleco.app.util.AppLog
 
-/** 深色状态卡上的固定前景色（hero 永远是深色，不随深浅主题变） */
-private val HERO_TITLE_INK = Color(0xFFF4FFFA)
-private val HERO_MICRO_INK = Color(0xFFA9CBC7)
-private val HERO_SUB_INK = Color(0xFFB9D2CD)
-private val HERO_SIGNAL = Color(0xFFA8D5BE)
+// 深色状态卡上的前景色：由主题推导（hero 渐变永远偏深，但色相跟主题走），
+// 原来是固定的青绿常量，换主题后会出现「紫底绿字」。
+private val HERO_TITLE_INK: Color
+    @Composable get() = MaterialTheme.eco.onHero
+private val HERO_MICRO_INK: Color
+    @Composable get() = MaterialTheme.eco.onHeroMuted
+private val HERO_SUB_INK: Color
+    @Composable get() = MaterialTheme.eco.onHeroMuted
+private val HERO_SIGNAL: Color
+    @Composable get() = MaterialTheme.eco.onHeroChip
 
 /**
  * 设置（一级页）：视觉与原型 5.12 对齐——深色运行状态卡 + 三组卡片

@@ -689,7 +689,8 @@ private fun CoverSheet(
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(
-                Triple(CoverStyleStore.NIGHT, "夜色", listOf(Color(0xFF102F3B), Color(0xFF135565))),
+                // 「夜色」预览跟随当前主题的 hero 渐变，与真实卡片一致
+                Triple(CoverStyleStore.NIGHT, "夜色", listOf(c.heroA, c.heroC)),
                 Triple(CoverStyleStore.MIST, "薄雾", listOf(Color(0xFFE7ECE5), Color(0xFFF1F0E7))),
                 Triple(CoverStyleStore.CLAY, "陶土", listOf(Color(0xFF5E2F2A), Color(0xFF8E5241))),
             ).forEach { (id, label, colors) ->
