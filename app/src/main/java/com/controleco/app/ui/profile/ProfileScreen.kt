@@ -1088,7 +1088,12 @@ private fun MonthStartCard(
     }
 }
 
-/** 「设置」卡：圆角 28/12/28/12、surface→主色浅底渐变，齿轮 + 设置。 */
+/**
+ * 「设置」卡：圆角 28/12/28/12、surface→暖金浅底渐变，齿轮 + 设置。
+ *
+ * 暖金是**产品口径指定的固定色**，不随主题变（与打赏的陶红同理）。
+ * 注意阴影/图标也要用 amber 同一族——之前阴影用 jade、卡面用 amber，看着是两张卡拼的。
+ */
 @Composable
 private fun SettingsCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = MaterialTheme.eco
@@ -1101,16 +1106,16 @@ private fun SettingsCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 shape = shape,
                 clip = false,
                 ambientColor = Color.Transparent,
-                spotColor = c.blue.copy(alpha = if (c.isDark) 0.34f else 0.16f),
+                spotColor = c.amber.copy(alpha = if (c.isDark) 0.34f else 0.16f),
             )
-            .cardPlate(shape, c.blue.copy(alpha = if (c.isDark) 0.34f else 0.26f), offsetX = 1.5.dp, offsetY = 3.4.dp)
+            .cardPlate(shape, c.amber.copy(alpha = if (c.isDark) 0.34f else 0.26f), offsetX = 1.5.dp, offsetY = 3.4.dp)
             .clip(shape)
-            .background(softGradient(c, c.blueSoft, 0.5f, 0.42f))
+            .background(softGradient(c, c.amberSoft, 0.5f, 0.42f))
             .cardInset(
                 shape = shape,
                 topColor = Color.White.copy(alpha = if (c.isDark) 0.14f else 0.78f),
                 topHeight = 1.5.dp,
-                bottomColor = c.blue.copy(alpha = if (c.isDark) 0.20f else 0.13f),
+                bottomColor = c.amber.copy(alpha = if (c.isDark) 0.20f else 0.13f),
                 band = 12.dp,
             )
             .border(1.dp, c.rule, shape)
@@ -1123,7 +1128,7 @@ private fun SettingsCard(onClick: () -> Unit, modifier: Modifier = Modifier) {
             Icon(
                 imageVector = EcoIcons.Gear,
                 contentDescription = null,
-                tint = c.blue,
+                tint = c.amber,
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .size(18.dp)
@@ -1391,14 +1396,14 @@ private fun RewardTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 shape = CircleShape,
                 clip = false,
                 ambientColor = Color.Transparent,
-                spotColor = c.second.copy(alpha = 0.30f),
+                spotColor = c.clay.copy(alpha = 0.30f),
             )
-            .cardPlate(CircleShape, lerp(c.second, Color.Black, 0.42f).copy(alpha = 0.70f), offsetX = 1.5.dp, offsetY = 3.4.dp)
+            .cardPlate(CircleShape, lerp(c.clay, Color.Black, 0.42f).copy(alpha = 0.70f), offsetX = 1.5.dp, offsetY = 3.4.dp)
             .clip(CircleShape)
             .background(
-                // 打赏没有颜色语义，用次要色：与导入/关于的 hero 深绿区分，又随主题变
+                // 打赏固定陶红：产品口径指定，不随主题变（与设置卡的暖金同理）
                 Brush.linearGradient(
-                    listOf(lerp(c.second, Color.White, 0.18f), c.second),
+                    listOf(lerp(c.clay, Color.White, 0.18f), c.clay),
                     start = Offset.Zero,
                     end = Offset.Infinite,
                 ),
@@ -1407,7 +1412,7 @@ private fun RewardTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
                 shape = CircleShape,
                 topColor = Color.White.copy(alpha = 0.42f),
                 topHeight = 2.dp,
-                bottomColor = lerp(c.second, Color.Black, 0.42f).copy(alpha = 0.24f),
+                bottomColor = lerp(c.clay, Color.Black, 0.42f).copy(alpha = 0.24f),
                 band = 14.dp,
             )
             .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape)
@@ -1418,14 +1423,14 @@ private fun RewardTile(onClick: () -> Unit, modifier: Modifier = Modifier) {
             Icon(
                 EcoIcons.Coffee,
                 contentDescription = null,
-                tint = c.onSecond,
+                tint = lerp(c.clay, Color.White, 0.90f),
                 modifier = Modifier.size(16.dp),
             )
             Spacer(Modifier.height(1.dp))
             Text(
                 "打赏",
                 style = EcoType.Chip.copy(fontSize = 10.5.sp, fontWeight = FontWeight(800), letterSpacing = 0.sp),
-                color = c.onSecond,
+                color = lerp(c.clay, Color.White, 0.92f),
                 maxLines = 1,
             )
         }
