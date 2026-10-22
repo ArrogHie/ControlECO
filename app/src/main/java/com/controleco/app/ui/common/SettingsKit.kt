@@ -587,17 +587,17 @@ fun SettingsSoftAction(text: String, onClick: () -> Unit, modifier: Modifier = M
 
 /** 分品牌的系统无障碍设置路径 */
 fun a11yPathFor(brand: Brand): String = when (brand) {
-    Brand.XIAOMI -> "或：设置 → 更多设置 → 无障碍 → 已下载的应用 → 我ECO 支付页面采集"
-    Brand.HUAWEI, Brand.HONOR -> "或：设置 → 辅助功能 → 无障碍 → 已下载的服务 → 我ECO 支付页面采集"
+    Brand.XIAOMI -> "或：设置 → 更多设置 → 无障碍 → 已下载的应用 → 易控钱包 支付页面采集"
+    Brand.HUAWEI, Brand.HONOR -> "或：设置 → 辅助功能 → 无障碍 → 已下载的服务 → 易控钱包 支付页面采集"
     Brand.OPPO, Brand.ONEPLUS, Brand.REALME ->
         "或：设置 → 其他设置 → 无障碍 → 已下载的应用（版本间路径有差异，可在设置中搜索「无障碍」）"
-    else -> "或：系统设置中搜索「无障碍」→ 已下载的服务/应用 → 我ECO 支付页面采集"
+    else -> "或：系统设置中搜索「无障碍」→ 已下载的服务/应用 → 易控钱包 支付页面采集"
 }
 
 /** 分品牌的悬浮窗权限路径（悬浮确认卡的前提） */
 fun overlayPathFor(brand: Brand): String = when (brand) {
-    Brand.XIAOMI -> "或：设置 → 应用设置 → 应用管理 → 我ECO → 权限管理 → 「显示悬浮窗」允许"
-    Brand.HUAWEI, Brand.HONOR -> "或：设置 → 应用和服务 → 应用管理 → 我ECO → 权限 → 「悬浮窗」允许"
-    Brand.OPPO, Brand.ONEPLUS, Brand.REALME -> "或：手机管家 → 权限与隐私 → 悬浮窗管理，允许 我ECO"
-    else -> "或：系统设置 → 应用 → 我ECO → 权限 → 「显示在其他应用上层」允许"
+    Brand.XIAOMI -> "或：设置 → 应用设置 → 应用管理 → 易控钱包 → 权限管理 → 「显示悬浮窗」允许"
+    Brand.HUAWEI, Brand.HONOR -> "或：设置 → 应用和服务 → 应用管理 → 易控钱包 → 权限 → 「悬浮窗」允许"
+    Brand.OPPO, Brand.ONEPLUS, Brand.REALME -> "或：手机管家 → 权限与隐私 → 悬浮窗管理，允许 易控钱包"
+    else -> "或：系统设置 → 应用 → 易控钱包 → 权限 → 「显示在其他应用上层」允许"
 }

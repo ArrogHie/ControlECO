@@ -477,5 +477,5 @@ private fun copyTrace(context: Context, row: CaptureTraceRow) {
         if (t.bigText.isNotBlank()) appendLine("bigText=${t.bigText}")
     }
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    cm.setPrimaryClip(ClipData.newPlainText("我ECO 溯源记录", text))
+    cm.setPrimaryClip(ClipData.newPlainText("易控钱包 溯源记录", text))
 }

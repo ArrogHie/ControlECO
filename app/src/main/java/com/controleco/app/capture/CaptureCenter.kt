@@ -3006,7 +3006,7 @@ object CaptureCenter {
             return
         }
         mainHandler.postDelayed({
-            postCaptureNotification("测试通知（我ECO）", "这是一条样例动账提醒 · 点击应进入待确认队列", ROUTE_PENDING)
+            postCaptureNotification("测试通知（易控钱包）", "这是一条样例动账提醒 · 点击应进入待确认队列", ROUTE_PENDING)
             toast("延迟测试：通知已发送")
         }, 20_000L)
         onResult("已安排：20 秒后发送测试通知（可切到任意界面等待）")

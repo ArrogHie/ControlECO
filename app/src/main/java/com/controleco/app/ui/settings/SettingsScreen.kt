@@ -223,7 +223,7 @@ fun SettingsScreen(
         SettingsSection(title = "关于", aside = "ABOUT / 关于")
         SettingsPane {
             SettingsRow(
-                title = "关于 我ECO",
+                title = "关于易控钱包",
                 icon = EcoIcons.Info,
                 iconTint = MaterialTheme.eco.jade,
                 trail = "v${BuildConfig.VERSION_NAME}",

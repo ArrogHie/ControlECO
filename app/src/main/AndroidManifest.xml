@@ -57,7 +57,7 @@
             android:name="android.app.shortcuts"
             android:resource="@xml/shortcuts" />
 
-        <!-- 分享入口：把账单文件（csv/xlsx）分享到 我ECO → 落盘缓存 → 跳账单导入并预解析 -->
+        <!-- 分享入口：把账单文件（csv/xlsx）分享到 易控钱包 → 落盘缓存 → 跳账单导入并预解析 -->
         <activity
             android:name=".ShareImportActivity"
             android:exported="true"

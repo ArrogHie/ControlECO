@@ -1514,7 +1514,7 @@ private fun MoreSection(
                 )
                 EcoRowDivider()
                 EcoRow(
-                    title = "关于 我ECO",
+                    title = "关于易控钱包",
                     icon = EcoIcons.Info,
                     onClick = onAbout,
                     showChevron = true,
@@ -1565,7 +1565,7 @@ private fun MoreSheet(
             )
             EcoRowDivider()
             EcoRow(
-                title = "关于 我ECO",
+                title = "关于易控钱包",
                 icon = EcoIcons.Info,
                 onClick = onAbout,
                 showChevron = true,
@@ -1749,7 +1749,7 @@ private fun RewardDialog(onDismiss: () -> Unit) {
             Text("打赏一杯咖啡", style = EcoType.ModalTitle, color = c.ink)
             Spacer(Modifier.height(5.dp))
             Text(
-                "我ECO 完全本地运行、没有广告，也没有云端账号。如果它帮你省下了对账的时间，可以请作者喝一杯咖啡。",
+                "易控钱包完全本地运行、没有广告，也没有云端账号。如果它帮你省下了对账的时间，可以请作者喝一杯咖啡。",
                 style = EcoType.ModalBody,
                 color = c.muted,
             )
@@ -1841,7 +1841,7 @@ private fun AboutDialog(onOpenRepo: () -> Unit, onDismiss: () -> Unit) {
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("我ECO 账本", style = EcoType.ModalTitle, color = c.ink, maxLines = 1)
+                    Text("易控钱包", style = EcoType.ModalTitle, color = c.ink, maxLines = 1)
                     Spacer(Modifier.height(1.dp))
                     Text(
                         "本地记账 / 账单导入 / 自动捕获",

@@ -209,8 +209,8 @@ fun KeepAliveScreen(
             WarnCard(
                 title = "安卓 13+ 侧载解锁（重要，需最先做）",
                 body = "安卓 13 起侧载应用默认被禁止开启无障碍与通知使用权：先到 应用信息 → 右上角「⋯」→ " +
-                    "「允许受限制的设置」，然后才能在系统设置里开启 我ECO 的通知监听与无障碍。" +
-                    "若系统设置列表里找不到 我ECO，通常就是缺这一步。",
+                    "「允许受限制的设置」，然后才能在系统设置里开启 易控钱包 的通知监听与无障碍。" +
+                    "若系统设置列表里找不到 易控钱包，通常就是缺这一步。",
                 actionLabel = "打开应用信息",
                 onAction = { KeepAliveIntents.launchAppDetails(context) },
                 modifier = Modifier.padding(top = 10.dp),

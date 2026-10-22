@@ -534,5 +534,5 @@ private fun snapshotText(row: CapturedNotificationEntity): String = buildString 
 
 private fun copyToClipboard(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    cm.setPrimaryClip(ClipData.newPlainText("我ECO 捕获通知", text))
+    cm.setPrimaryClip(ClipData.newPlainText("易控钱包 捕获通知", text))
 }

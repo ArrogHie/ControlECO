@@ -82,7 +82,7 @@ private val LICENSES = listOf(
 )
 
 /**
- * 设置 → 关于 我ECO：品牌 hero + 隐私承诺 + 版本/构建/仓库 + 独立仓库入口。
+ * 设置 → 关于易控钱包：品牌 hero + 隐私承诺 + 版本/构建/仓库 + 独立仓库入口。
  *
  * 「检查更新」沿用全局更新流程：AppUpdate 发现新版本后写入 updateAvailable，
  * 由 Activity 级的更新对话框负责下载进度与「安装未知应用」授权闸（installGate），
@@ -103,7 +103,7 @@ fun SettingsAboutScreen(onBack: () -> Unit) {
         Unit
     }
 
-    SettingsPage(micro = "ABOUT", title = "关于 我ECO", onBack = onBack) {
+    SettingsPage(micro = "ABOUT", title = "关于易控钱包", onBack = onBack) {
         AboutHero()
 
         SettingsSection(title = "隐私与安全", aside = "LOCAL ONLY")
@@ -259,7 +259,7 @@ private fun AboutHero() {
             ) {
                 Icon(
                     EcoIcons.Leaf,
-                    contentDescription = "我ECO",
+                    contentDescription = "易控钱包",
                     tint = c.onAccent,
                     modifier = Modifier.size(26.dp),
                 )
@@ -267,7 +267,7 @@ private fun AboutHero() {
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(
-                    "我ECO 账本",
+                    "易控钱包",
                     style = EcoType.RowTitle.copy(
                         fontSize = 17.sp,
                         lineHeight = 22.sp,

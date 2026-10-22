@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 英文名：ControlECO（中文环境显示默认资源「我ECO」） -->
+<!-- 英文名：ControlECO（中文环境显示默认资源「易控钱包」） -->
 <resources>
     <string name="app_name">ControlECO</string>
     <string name="a11y_service_label">ControlECO 支付页面采集</string>
