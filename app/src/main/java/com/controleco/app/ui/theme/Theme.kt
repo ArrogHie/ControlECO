@@ -300,19 +300,58 @@ private const val ACCENT_LIFT_DEEP = 0.08f
 /** 已经很亮的高光档只做轻微提亮，避免糊成白色。 */
 private const val ACCENT_LIFT_HI = 0.05f
 
-/**
- * 按钮渐变必须**分档提亮**：最亮端直接顶到白字 3:1 的边界，
- * 提 12% 会掉到 2.6:1；暗端可以多提，那里正是看着发闷的地方。
- */
-private const val ACCENT_LIFT_GRAD_A = 0.05f
-private const val ACCENT_LIFT_GRAD_B = 0.09f
-private const val ACCENT_LIFT_GRAD_C = 0.13f
-
 /** 次要色是装饰色，不承担白字对比，提亮少一点以免被冲淡、撞上语义紫。 */
 private const val ACCENT_LIFT_SECOND = 0.06f
 
+// ---------- 封面 / 主操作：按「目标亮度」定，不按混合比例 ----------
+
+/**
+ * hero（结余卡、导入卡、个人页预算卡）三档的目标相对亮度。
+ *
+ * 为什么用目标亮度而不是混合比例：各主题作者的 hero 本来深浅不一
+ * （潮汐 0.035、鸢尾 0.016），用同一个比例提亮后仍然「有的很黑、有的还行」。
+ * 定死亮度之后，7 套主题只差色相，明暗完全一致。
+ *
+ * 上限是硬的：`heroC` 是渐变最亮端，白字压上去要 4.5:1，
+ * 所以 `heroC ≤ 0.183`（1.05/4.5 − 0.05）。但 `onHero` 不是纯白（带一点主题色相），
+ * 实际只能到 0.172，再高就掉到 4.41:1。
+ */
+private const val HERO_LUMA_A = 0.122f
+private const val HERO_LUMA_B = 0.150f
+private const val HERO_LUMA_C = 0.172f
+
+/**
+ * 主操作渐变（按钮 / FAB / 加号）三档的目标亮度。
+ * 上面压的是图标和白字，底线 3:1 → `gradA ≤ 0.30`，取 0.285。
+ */
+private const val GRAD_LUMA_A = 0.285f
+private const val GRAD_LUMA_B = 0.235f
+private const val GRAD_LUMA_C = 0.185f
+
 private fun lift(color: Color, amount: Float): Color =
     if (amount <= 0f) color else lerp(color, Color.White, amount)
+
+/**
+ * 把颜色沿「向白 / 向黑」推到目标相对亮度，色相和彩度关系尽量保留。
+ *
+ * 用二分找混合比例，因为 Oklab 混合后的亮度不是线性的，直接算比例不准。
+ * 只用于 hero / 主操作渐变这类「亮度优先」的色，其它 token 不要用。
+ */
+private fun toneTo(color: Color, target: Float): Color {
+    val current = relativeLuminance(color)
+    if (kotlin.math.abs(current - target) < 0.003f) return color
+    val toWhite = current < target
+    val anchor = if (toWhite) Color.White else Color.Black
+    var low = 0f
+    var high = 1f
+    repeat(20) {
+        val mid = (low + high) / 2f
+        val lum = relativeLuminance(lerp(color, anchor, mid))
+        val stillTooDark = if (toWhite) lum < target else lum > target
+        if (stillTooDark) low = mid else high = mid
+    }
+    return lerp(color, anchor, (low + high) / 2f)
+}
 
 /** 主操作渐变（按钮/FAB/进度）：三段 stop */
 val EcoColors.accentGradient: List<Color> get() = listOf(accentGradA, accentGradB, accentGradC)
@@ -342,18 +381,21 @@ val EcoColors.onAccentGrad: Color get() = contentColorOn(accentGradB)
 // 原来的 `HERO_MINT #BDE9DA` / `HERO_INK #EAFBF2` 都是青绿系常量，
 // 换到鸢尾/珊瑚主题后 hero 变成紫底绿字，很脏。
 // 这里改成从 hero 中段色向白色提亮——既保证对比度，又带上主题的色相。
+//
+// 提亮后 hero 变浅了（heroC 0.180），前景必须更白才守得住 4.5:1，
+// 所以这组系数整体比原来高。
 
-/** hero 主前景（大金额、正文）：接近白，带一点主题色相 */
-val EcoColors.onHero: Color get() = lerp(heroB, Color.White, 0.90f)
+/** hero 主前景（大金额、正文）：接近纯白，带一点主题色相 */
+val EcoColors.onHero: Color get() = lerp(heroB, Color.White, 0.97f)
 
-/** hero 次级前景（眉标、单位）：比 [onHero] 淡一档，但仍可读 */
-val EcoColors.onHeroMuted: Color get() = lerp(heroB, Color.White, 0.68f)
+/** hero 次级前景（眉标、单位）：比 [onHero] 淡一档，但仍守住 3:1 */
+val EcoColors.onHeroMuted: Color get() = lerp(heroB, Color.White, 0.82f)
 
 /** hero 上的小控件前景（胶囊文字、图标） */
-val EcoColors.onHeroChip: Color get() = lerp(heroB, Color.White, 0.82f)
+val EcoColors.onHeroChip: Color get() = lerp(heroB, Color.White, 0.92f)
 
 /** hero 上的白色描边/分隔（低透明，不抢主体） */
-val EcoColors.onHeroBorder: Color get() = lerp(heroB, Color.White, 0.72f).copy(alpha = 0.22f)
+val EcoColors.onHeroBorder: Color get() = lerp(heroB, Color.White, 0.88f).copy(alpha = 0.26f)
 
 /** hero 上进度条等装饰的填充渐变：主题亮端 → 主题高亮端 */
 val EcoColors.heroProgress: List<Color> get() = listOf(lerp(heroB, Color.White, 0.45f), lerp(heroC, Color.White, 0.30f))
@@ -510,12 +552,12 @@ fun ecoColors(dark: Boolean, accent: EcoAccent): EcoColors {
         claySoft = if (dark) Color(0xFF503C3B) else Color(0xFFFCEAE4),
         violet = if (dark) Color(0xFFC4B3DF) else Color(0xFF907BA8),
         violetSoft = if (dark) Color(0xFF3C354B) else Color(0xFFF1EAF5),
-        heroA = lift(accent.heroA, ACCENT_LIFT),
-        heroB = lift(accent.heroB, ACCENT_LIFT),
-        heroC = lift(accent.heroC, ACCENT_LIFT),
-        accentGradA = lift(accent.accentGradA, ACCENT_LIFT_GRAD_A),
-        accentGradB = lift(accent.accentGradB, ACCENT_LIFT_GRAD_B),
-        accentGradC = lift(accent.accentGradC, ACCENT_LIFT_GRAD_C),
+        heroA = toneTo(accent.heroA, HERO_LUMA_A),
+        heroB = toneTo(accent.heroB, HERO_LUMA_B),
+        heroC = toneTo(accent.heroC, HERO_LUMA_C),
+        accentGradA = toneTo(accent.accentGradA, GRAD_LUMA_A),
+        accentGradB = toneTo(accent.accentGradB, GRAD_LUMA_B),
+        accentGradC = toneTo(accent.accentGradC, GRAD_LUMA_C),
     )
 }
 
