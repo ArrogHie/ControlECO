@@ -148,7 +148,8 @@ fun AccBookNav(
             }
         }
     }
-    // 转场：旧页保持不透明到新页淡入过半后再退场（200ms 就退场会露出纸面，看起来“闪一下”）
+    // 转场：旧页先淡出、退干净后新页再淡入。两页都有透明区域，同时处在中途 alpha 会互相透出
+    // （“上一页还在、下一页已经出现”），所以改成串行：exit 结束后 enter 才启动。
     Box(Modifier.fillMaxSize()) {
         EcoBackdrop()
         NavHost(
@@ -157,25 +158,25 @@ fun AccBookNav(
         modifier = Modifier.fillMaxSize(),
         // 原型 .page-enter：淡入 + 8px 下移；返回走横向位移
         enterTransition = {
-            fadeIn(tween(300, easing = FastOutSlowInEasing)) +
+            fadeIn(tween(260, delayMillis = 150, easing = FastOutSlowInEasing)) +
                 slideInVertically(
-                    animationSpec = tween(300, easing = FastOutSlowInEasing),
+                    animationSpec = tween(260, delayMillis = 150, easing = FastOutSlowInEasing),
                     initialOffsetY = { (it * 0.0095f).roundToInt() },
                 )
         },
-        // 延迟退场：新页先淡入覆盖，旧页再退，避免中间露出背景纸面
-        exitTransition = { fadeOut(tween(180, delayMillis = 170)) },
+        // 旧页先走完（150ms）再让新页入场，避免两页同时可见
+        exitTransition = { fadeOut(tween(150, easing = FastOutSlowInEasing)) },
         popEnterTransition = {
-            fadeIn(tween(280, easing = FastOutSlowInEasing)) +
+            fadeIn(tween(240, delayMillis = 140, easing = FastOutSlowInEasing)) +
                 slideInHorizontally(
-                    animationSpec = tween(280, easing = FastOutSlowInEasing),
+                    animationSpec = tween(240, delayMillis = 140, easing = FastOutSlowInEasing),
                     initialOffsetX = { it / 32 },
                 )
         },
         popExitTransition = {
-            fadeOut(tween(180, delayMillis = 150)) +
+            fadeOut(tween(140, easing = FastOutSlowInEasing)) +
                 slideOutHorizontally(
-                    animationSpec = tween(300, easing = FastOutSlowInEasing),
+                    animationSpec = tween(140, easing = FastOutSlowInEasing),
                     targetOffsetX = { it / 32 },
                 )
         },
