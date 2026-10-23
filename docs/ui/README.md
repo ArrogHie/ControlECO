@@ -108,7 +108,7 @@ ui/
    $env:Path="D:\Java\jdk-17.0.20.1+1\bin;$env:Path"
    & 'D:\gradle\gradle-8.10.2\bin\gradle.bat' :app:assembleDebug --console=plain -q
    ```
-6. 单测：`:app:testDebugUnitTest`（当前基线 577 passed）。
+6. 单测：`:app:testDebugUnitTest`（当前基线 686 passed / 61 suites）。
 7. 真机截图核对：设备 `UWW4RCGUKVJFDYWC`，1280×2772 / density 520 / font_scale 1.25；截图放 `tmp/device/`（已 gitignore）。
 8. 至少检查：1.25 字体、深色模式、空态、长文案、底部栏遮挡、返回栈。
 9. 更新对应页面文档和 `docs/开发日志.md`，再提交。
