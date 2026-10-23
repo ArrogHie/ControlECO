@@ -10,6 +10,11 @@
     <!-- 银行动账短信：只收新到短信（不读历史、非默认短信应用）；设置里默认关，开启时运行时申请 -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
 
+    <!-- 打赏页把收款码保存到相册：Android 8/9 写公共 Pictures 需要该权限；10+ 走 MediaStore，不需要 -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
     <!-- 悬浮确认卡：在支付页上方弹出预填确认卡片（底部卡，用户在设置里单独授权；未授权自动回落通知） -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 

@@ -8,7 +8,6 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,7 +17,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -62,9 +60,7 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -76,7 +72,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.controleco.app.BuildConfig
-import com.controleco.app.R
 import com.controleco.app.data.LedgerViewModel
 import com.controleco.app.data.budget.Budget
 import com.controleco.app.data.budget.MonthPeriod
@@ -242,6 +237,7 @@ fun ProfileScreen(
     onOpenPending: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenCategories: () -> Unit,
+    onOpenReward: () -> Unit,
 ) {
     val context = LocalContext.current
     val budget by vm.monthlyBudgetCents.collectAsStateWithLifecycle()
@@ -261,7 +257,6 @@ fun ProfileScreen(
 
     var showBudgetSheet by remember { mutableStateOf(false) }
     var showCurrencySheet by remember { mutableStateOf(false) }
-    var showReward by remember { mutableStateOf(false) }
     var showAbout by remember { mutableStateOf(false) }
     var showTheme by remember { mutableStateOf(false) }
     var showMonthStart by remember { mutableStateOf(false) }
@@ -321,7 +316,7 @@ fun ProfileScreen(
 
             BottomRow(
                 onOpenImport = onOpenImport,
-                onReward = { showReward = true },
+                onReward = onOpenReward,
                 onOpenRepo = openRepo,
                 onTheme = { showTheme = true },
             )
@@ -347,10 +342,6 @@ fun ProfileScreen(
             onPick = { vm.setCurrencySymbol(it); showCurrencySheet = false },
             onDismiss = { showCurrencySheet = false },
         )
-    }
-
-    if (showReward) {
-        RewardDialog(onDismiss = { showReward = false })
     }
 
     if (showAbout) {
@@ -1740,76 +1731,7 @@ private fun CurrencySheet(current: String, onPick: (String) -> Unit, onDismiss: 
     }
 }
 
-/** 打赏：两张收款码并排（微信 / 支付宝），标题 + 说明 + 小注。 */
-@Composable
-private fun RewardDialog(onDismiss: () -> Unit) {
-    val c = MaterialTheme.eco
-    EcoDialog(onDismiss = onDismiss) {
-        Column {
-            Text("打赏一杯咖啡", style = EcoType.ModalTitle, color = c.ink)
-            Spacer(Modifier.height(5.dp))
-            Text(
-                "易控钱包完全本地运行、没有广告，也没有云端账号。如果它帮你省下了对账的时间，可以请作者喝一杯咖啡。",
-                style = EcoType.ModalBody,
-                color = c.muted,
-            )
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                RewardQr(
-                    resId = R.drawable.reward_wechat,
-                    label = "微信",
-                    tint = Color(0xFF2E9E5B),
-                    modifier = Modifier.weight(1f),
-                )
-                RewardQr(
-                    resId = R.drawable.reward_alipay,
-                    label = "支付宝",
-                    tint = Color(0xFF2E6FBF),
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "长按识别二维码，或截图后用对应 App 扫一扫。打赏纯属自愿，不影响任何功能。",
-                style = EcoType.PageNote,
-                color = c.quiet,
-            )
-            Spacer(Modifier.height(16.dp))
-            EcoGhostButton(text = "关闭", onClick = onDismiss, height = 40.dp)
-        }
-    }
-}
-
-@Composable
-private fun RewardQr(resId: Int, label: String, tint: Color, modifier: Modifier = Modifier) {
-    val c = MaterialTheme.eco
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color.White)
-                .border(1.dp, c.rule, RoundedCornerShape(12.dp))
-                .padding(6.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Image(
-                painter = painterResource(resId),
-                contentDescription = "$label 收款码",
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            label,
-            style = EcoType.Pill.copy(fontWeight = FontWeight(800), fontSize = 10.sp),
-            color = tint,
-            maxLines = 1,
-        )
-    }
-}
+/** 打赏：独立页（路由 `reward`），见 `ui/profile/RewardScreen.kt`。 */
 
 /** 关于：品牌块 + 版本/构建/仓库三行 + 隐私一行 + 打开仓库。 */
 @Composable

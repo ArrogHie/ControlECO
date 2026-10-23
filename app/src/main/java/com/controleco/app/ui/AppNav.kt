@@ -51,6 +51,7 @@ import com.controleco.app.ui.imports.ImportScreen
 import com.controleco.app.ui.keepalive.KeepAliveScreen
 import com.controleco.app.ui.pending.PendingScreen
 import com.controleco.app.ui.profile.ProfileScreen
+import com.controleco.app.ui.profile.RewardScreen
 import com.controleco.app.ui.refund.RefundLinkScreen
 import com.controleco.app.ui.settings.SettingsAboutScreen
 import com.controleco.app.ui.settings.SettingsAccountScreen
@@ -191,6 +192,7 @@ fun AccBookNav(
                 onOpenImport = { navController.navigate("settings/import") },
                 onOpenSettings = { navController.navigate("settings") },
                 onOpenCategories = { navController.navigate("categories") },
+                onOpenReward = { navController.navigate("reward") },
             )
         }
         composable("quickAdd") { QuickAddScreen(vm = vm, onBack = { navController.popBackStack() }) }
@@ -211,6 +213,9 @@ fun AccBookNav(
                 onOpenTransaction = { id -> navController.navigate("edit/$id") },
             )
         }
+
+        // ---- 个人页 → 打赏：收款码独立页（全屏预览 / 保存到相册） ----
+        composable("reward") { RewardScreen(onBack = { navController.popBackStack() }) }
 
         // ---- 设置体系：设置 →（权限 / 开发者功能 / 关于）；账户/账单导入在个人页 ----
         composable("settings") {
@@ -311,6 +316,7 @@ private fun MainScaffold(
     onOpenImport: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenCategories: () -> Unit,
+    onOpenReward: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     // 再次点击当前标签 → 计数 +1，由页面自己"回到顶部"（列表/滚动页通用）
@@ -351,6 +357,7 @@ private fun MainScaffold(
                     onOpenPending = onOpenPending,
                     onOpenSettings = onOpenSettings,
                     onOpenCategories = onOpenCategories,
+                    onOpenReward = onOpenReward,
                 )
             }
         }
@@ -394,6 +401,7 @@ private fun TabPage(
     onOpenPending: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenCategories: () -> Unit,
+    onOpenReward: () -> Unit,
 ) {
     when (tab) {
         0 -> HomeScreen(
@@ -415,6 +423,7 @@ private fun TabPage(
             onOpenPending = onOpenPending,
             onOpenSettings = onOpenSettings,
             onOpenCategories = onOpenCategories,
+            onOpenReward = onOpenReward,
         )
     }
 }
