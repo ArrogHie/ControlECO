@@ -139,6 +139,9 @@ fun RewardScreen(onBack: () -> Unit) {
                 }
             }
             savingKey = null
+            // 预览是独立窗口，全局 Toast 画在它后面。保存完先收起预览，用户才看得到结果；
+            // 失败也收起——重试重新点开即可，比闷在黑底里没反馈好。
+            if (previewing?.key == code.key) previewing = null
             result.onSuccess { name ->
                 AppLog.i("Reward", "收款码已保存到相册：${AlbumSaver.albumRelativePath}/$name")
                 EcoToast.show("已保存到相册", EcoPillTone.Good)
