@@ -6,7 +6,7 @@
 ## 一、范围与硬约束
 
 - **一比一复刻**：颜色、字号、间距、圆角、层级、浅色/深色两套、动效节奏均以原型最终级联值为准。
-- **不丢功能**：19 个路由、`LedgerViewModel` 契约、通知/悬浮卡契约、`capture_alert` 通道、深链、
+- **不丢功能**：20 个路由、`LedgerViewModel` 契约、通知/悬浮卡契约、`capture_alert` 通道、深链、
   既有单测全部保留。
 - **图标**：优先用项目现成的分类图标体系（`CategoryLogo` / `CategoryGlyph` / 26 个字形 + 自定义
   emoji/图片）；通用线性图标用按原型 ICONS 生成的 `EcoIcons`（60 个，24×24、1.7 描边、圆头）。
@@ -16,7 +16,8 @@
   不改成普通字段或底部 sheet。
 - **通知中心**：不新建页面，只调整系统通知标题/正文文案。
 - **打赏**：使用用户提供的微信/支付宝收款码图片（`drawable-nodpi/reward_wechat.png`、
-  `reward_alipay.jpg`）做弹窗。
+  `reward_alipay.jpg`）做**独立页**（`reward` 路由，`ui/profile/RewardScreen.kt`）：
+  点图全屏预览、可保存原图到系统相册（见 `docs/ui/24-打赏.md`）；不是弹窗。
 - **不改行为**：只改 UI 层；数据/VM/解析/捕获逻辑不动。
 
 ## 二、设计系统落地
@@ -65,7 +66,7 @@
 | main / 首页 | `ui/home/HomeScreen.kt` | 三视图翻转（预算环 / 分类剩余 / 资产）；150ms 两段式 rotationY；45° 阈值 + 甩动；三圆点；真实 VM 数据；资产视图按原型 `homeAssets()` 固定折线（viewBox 390×330）绘制，不按真实数据拟合 |
 | 账单 | `ui/transactions/TransactionListScreen.kt` | 结余封面 150（夜色/薄雾/陶土/相册图 + 裁剪）、月/年、筛选、日期分组、跳日期、分页、多选批删、范围删除；分类 logo 用 `EcoCategoryTile(bare = true)`，无底色无描边 |
 | 统计 | `ui/stats/StatsScreen.kt` + `StatsCharts.kt` | 顶部复用账单 `BalanceCard`（同一背景图，随列表滚动）、删除汇总行、可交互柱状图、**单环无中心数字**分类、分类清单、期间切换/选择；圆环 `stickyHeader` 吸顶 |
-| 个人 | `ui/profile/ProfileScreen.kt` | 197/161/150/66 版式；日预算瓦片常显日预算、整卡进入日预算管理；主题按钮无白底、只开主题层；待确认胶囊、分类卡、常驻「每月首日」滚轮、打赏二维码、导入/设置/关于 |
+| 个人 | `ui/profile/ProfileScreen.kt` | 197/161/150/66 版式；日预算瓦片常显日预算、整卡进入日预算管理；主题按钮无白底、只开主题层；待确认胶囊、分类卡、常驻「每月首日」滚轮、打赏入口（跳 `reward` 独立页）、导入/设置/关于 |
 | 快速记账 / 编辑 | `ui/transactions/QuickAddScreen.kt` / `EditTransactionScreen.kt` | 自定义键盘、分类/账户/日期/商户/备注、编辑删除 |
 | 待确认 / 导入 / 退款 | `ui/pending` / `ui/imports` / `ui/refund` | 全部流程与状态保留 |
 | 设置体系 | `ui/settings/*` + `ui/common/SettingsKit.kt` | 设置、权限、监听 App、商户规则、开发者、关于、保活、账户/分类入口、导入设置 |
@@ -86,7 +87,7 @@
 **新增（原型有）**
 - 6 套强调色主题（真实可切换、持久化、全局生效）。
 - 结余封面 3 套预设底色 + 相册图。
-- 打赏弹窗（微信/支付宝收款码）。
+- 打赏页（微信/支付宝收款码，全屏预览 + 保存到相册；`reward` 路由）。
 - 首页资产视图（总存款 + 本月已花趋势）。
 - 账户总资产卡（若原型要求）。
 - 通知中心（按用户确认：**不做**）。

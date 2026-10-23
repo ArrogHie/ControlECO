@@ -52,6 +52,7 @@
 | 设置 → 开发者功能 | `settings/developer` | `ui/settings/SettingsDeveloperScreen.kt` | [21-设置-开发者功能](21-设置-开发者功能.md) |
 | 设置 → 关于 | `settings/about` | `ui/settings/SettingsAboutScreen.kt` | [22-设置-关于](22-设置-关于.md) |
 | 保活与自启动 | `keepAlive` | `ui/keepalive/KeepAliveScreen.kt` | [23-保活引导](23-保活引导.md) |
+| 打赏 | `reward` | `ui/profile/RewardScreen.kt`、`util/AlbumSaver.kt` | [24-打赏](24-打赏.md) |
 
 补充入口：
 
