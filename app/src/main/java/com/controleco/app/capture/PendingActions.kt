@@ -5,6 +5,7 @@ import com.controleco.app.data.db.AccBookDatabase
 import com.controleco.app.data.db.MerchantRuleDao
 import com.controleco.app.data.db.PendingDao
 import com.controleco.app.data.db.PendingTransactionEntity
+import com.controleco.app.data.db.RefundMark
 import com.controleco.app.data.db.TransactionDao
 import com.controleco.app.data.db.TransactionEntity
 import com.controleco.app.util.AppLog
@@ -51,6 +52,8 @@ internal object PendingActions {
                         source = CaptureDefaults.txSource(item.sourcePackage),
                         externalId = externalId,
                         refundMark = item.refundMark,
+                        // 捕获来的退款收入同样要用户指认原支出（进「待确认账单」）
+                        refundPending = item.refundMark == RefundMark.REFUND_INCOME,
                         flowId = item.flowId,
                     ),
                 )

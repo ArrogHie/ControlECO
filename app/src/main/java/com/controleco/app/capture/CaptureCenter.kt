@@ -2942,6 +2942,8 @@ object CaptureCenter {
                         source = source,
                         externalId = "NTF:$dedupKey",
                         refundMark = if (isRefund) RefundMark.REFUND_INCOME else RefundMark.NONE,
+                        // 退款收入还不知道退的是哪一笔支出 → 进「待确认账单」等用户指认
+                        refundPending = isRefund,
                         flowId = flowId,
                     ),
                 )

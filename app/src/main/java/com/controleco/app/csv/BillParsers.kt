@@ -98,12 +98,17 @@ object BillParsers {
             // - 原支出行：状态"已全额退款" → 标记已退款；状态"已退款(¥8.54)"为部分退款 → 保持普通支出
             var mark = RefundMark.NONE
             val status = cell(iStatus)
+            var refundedCents: Long? = null
             if (status.contains("退款")) {
                 refundCount++
                 mark = when {
                     type == TxType.INCOME -> RefundMark.REFUND_INCOME
                     extractRefundAmount(status)?.let { it < amount } == true -> RefundMark.NONE
                     else -> RefundMark.REFUNDED_EXPENSE
+                }
+                // 部分退款：状态里写明退了多少钱（已退款(¥8.54)）；配对退款收入时用它
+                if (type == TxType.EXPENSE && mark == RefundMark.NONE) {
+                    refundedCents = extractRefundAmount(status)
                 }
             }
 
@@ -126,9 +131,13 @@ object BillParsers {
                 externalId = cell(iTxnId).ifEmpty { null },
                 guessedCategoryName = CategoryGuesser.guess("$counterparty $goods"),
                 refundMark = mark,
+                refundedCents = refundedCents,
             )
         }
-        return ParsedBill(BillSource.WECHAT, parsed, skipType, skipStatus, refundCount)
+        return ParsedBill(
+            BillSource.WECHAT, parsed, skipType, skipStatus, refundCount,
+            refundPairs = RefundPairing.pair(parsed, BillSource.WECHAT),
+        )
     }
 
     /**
@@ -233,7 +242,10 @@ object BillParsers {
                 refundMark = mark,
             )
         }
-        return ParsedBill(BillSource.ALIPAY, parsed, skipType, skipStatus, refundCount)
+        return ParsedBill(
+            BillSource.ALIPAY, parsed, skipType, skipStatus, refundCount,
+            refundPairs = RefundPairing.pair(parsed, BillSource.ALIPAY),
+        )
     }
 
     // ---------- 公共 ----------

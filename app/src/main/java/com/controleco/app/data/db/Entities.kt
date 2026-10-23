@@ -17,10 +17,10 @@ enum class TxSource { MANUAL, WECHAT, ALIPAY, NOTIFICATION, BANK }
 
 /**
  * 退款标记：
- * - NONE：普通记录
+ * - NONE：普通记录（用户把待处理的退款「记为收入」后也回到 NONE）
  * - REFUNDED_EXPENSE：被全额退款的支出（钱已退回，另有对应的退款收入记录）
  * - REFUND_INCOME：退款到账收入（微信"XXX-退款"收入行 / 支付宝"退款成功"行）
- * 是否显示与计入汇总由设置"显示退款记录"控制；记录始终入库。
+ * 退款记录始终入库、始终显示、始终计入汇总。
  */
 enum class RefundMark { NONE, REFUNDED_EXPENSE, REFUND_INCOME }
 
@@ -78,6 +78,21 @@ data class TransactionEntity(
     /** 外部单号（微信交易单号/支付宝交易号/捕获去重键），用于账单重复导入与捕获去重；手动记录为 null */
     val externalId: String? = null,
     val refundMark: RefundMark = RefundMark.NONE,
+    /**
+     * 退款收入 → 被退款的原支出 id（只有 `refundMark = REFUND_INCOME` 的行可能有值）。
+     *
+     * 用途只有一个：**分类预算按 支出 − 退款 计算**时，知道这笔退款该从哪个分类里扣。
+     * 普通收支、被退款的原支出本身恒为 null。
+     */
+    val refundLinkId: Long? = null,
+    /**
+     * 退款收入是否仍在等用户指定原支出（出现在「待确认账单」里）。
+     *
+     * - 新导入/新捕获的退款收入 = true，直到用户选中原支出或选择「记为收入」；
+     * - 本次升级前已入库的历史退款 = false（不打扰用户，见迁移 v12）。
+     */
+    @ColumnInfo(defaultValue = "0")
+    val refundPending: Boolean = false,
     /**
      * 页面捕获的支付流程标识（仅自动捕获的账单有值）：同一笔交易从结果页到详情页共享同一个值，
      * 便于事后追踪"这笔账属于哪一次支付流程"。通知/短信/手动记录为空串。

@@ -23,6 +23,12 @@ data class TransactionRow(
     val accountId: Long,
     val accountName: String,
     val refundMark: RefundMark,
+    /** 退款收入所指名的原支出（null = 未指定；普通收支恒为 null） */
+    val refundLinkId: Long? = null,
+    /** 退款收入是否还在等用户指定原支出（决定是否出现在「待确认账单」） */
+    val refundPending: Boolean = false,
+    /** 入库时间：待确认列表把捕获条目与退款条目按这个排（而不是业务时间） */
+    val createdAt: Long = 0,
 )
 
 data class TypeTotalRow(
@@ -55,7 +61,8 @@ interface TransactionDao {
            t.note AS note, t.counterparty AS counterparty, t.source AS source,
            c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon,
            a.id AS accountId, a.name AS accountName,
-           t.refundMark AS refundMark
+           t.refundMark AS refundMark, t.refundLinkId AS refundLinkId, t.refundPending AS refundPending,
+           t.createdAt AS createdAt
            FROM transactions t
            JOIN categories c ON t.categoryId = c.id
            JOIN accounts a ON t.accountId = a.id
@@ -71,13 +78,32 @@ interface TransactionDao {
     )
     fun observeTypeTotals(startMillis: Long, endMillis: Long): Flow<List<TypeTotalRow>>
 
+    /**
+     * 本期分类**净支出**：每个分类的「支出 − 已关联的退款」。
+     *
+     * 退款按**到账时间**归属本期（与首页「本月已花 = 支出 − 退款到账」同口径），
+     * 但扣到**原支出所属分类**上——这正是退款关联（[TransactionEntity.refundLinkId]）存在的理由。
+     * 因此各分类净额之和 == 总支出 − 退款合计，圆环与清单不会互相对不上。
+     *
+     * 只有 `refundLinkId` 指向存在的支出时才参与扣减；未关联的退款只在总额里扣（见
+     * [observePendingRefundTotal]），不进分类。分类净额可能为负（本期退款大于本期支出）。
+     */
     @Query(
-        """SELECT c.id AS categoryId, c.name AS categoryName, SUM(t.amountCents) AS totalCents
-           FROM transactions t JOIN categories c ON t.categoryId = c.id
-           WHERE t.timestamp >= :startMillis AND t.timestamp < :endMillis AND t.type = :type
-           GROUP BY c.id, c.name ORDER BY totalCents DESC"""
+        """SELECT c.id AS categoryId, c.name AS categoryName, SUM(v.cents) AS totalCents
+           FROM (
+             SELECT t.categoryId AS categoryId, t.amountCents AS cents, t.timestamp AS timestamp
+             FROM transactions t WHERE t.type = 'EXPENSE'
+             UNION ALL
+             SELECT e.categoryId AS categoryId, -r.amountCents AS cents, r.timestamp AS timestamp
+             FROM transactions r JOIN transactions e ON e.id = r.refundLinkId
+             WHERE r.type = 'INCOME' AND r.refundLinkId IS NOT NULL
+           ) v
+           JOIN categories c ON v.categoryId = c.id
+           WHERE v.timestamp >= :startMillis AND v.timestamp < :endMillis
+           GROUP BY c.id, c.name
+           ORDER BY totalCents DESC"""
     )
-    fun observeCategorySums(startMillis: Long, endMillis: Long, type: TxType): Flow<List<CategorySumRow>>
+    fun observeNetCategorySums(startMillis: Long, endMillis: Long): Flow<List<CategorySumRow>>
 
     /** 退款到账金额合计（预算/统计口径：支出合计 − 本合计 = 现金净流出） */
     @Query(
@@ -137,7 +163,8 @@ interface TransactionDao {
            t.note AS note, t.counterparty AS counterparty, t.source AS source,
            c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon,
            a.id AS accountId, a.name AS accountName,
-           t.refundMark AS refundMark
+           t.refundMark AS refundMark, t.refundLinkId AS refundLinkId, t.refundPending AS refundPending,
+           t.createdAt AS createdAt
            FROM transactions t
            JOIN categories c ON t.categoryId = c.id
            JOIN accounts a ON t.accountId = a.id
@@ -145,6 +172,89 @@ interface TransactionDao {
            ORDER BY t.timestamp DESC LIMIT 50"""
     )
     suspend fun recentUnrefundedExpenses(since: Long): List<TransactionRow>
+
+    // ---------- 退款关联（待处理的退款收入 → 被退款的原支出） ----------
+
+    /**
+     * 「待确认账单」里的退款：新导入/新捕获、还没指定原支出的退款收入。
+     * 升级前的历史退款 `refundPending = 0`，不会出现在这里。
+     */
+    @Query(
+        """SELECT t.id AS id, t.type AS type, t.amountCents AS amountCents, t.timestamp AS timestamp,
+           t.note AS note, t.counterparty AS counterparty, t.source AS source,
+           c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon,
+           a.id AS accountId, a.name AS accountName,
+           t.refundMark AS refundMark, t.refundLinkId AS refundLinkId, t.refundPending AS refundPending,
+           t.createdAt AS createdAt
+           FROM transactions t
+           JOIN categories c ON t.categoryId = c.id
+           JOIN accounts a ON t.accountId = a.id
+           WHERE t.refundPending = 1 AND t.refundLinkId IS NULL
+           ORDER BY t.timestamp DESC, t.id DESC"""
+    )
+    fun observePendingRefunds(): Flow<List<TransactionRow>>
+
+    /** 待处理退款条数（个人页「待确认」胶囊与「全部确认」计数用） */
+    @Query("SELECT COUNT(*) FROM transactions WHERE refundPending = 1 AND refundLinkId IS NULL")
+    fun observePendingRefundCount(): Flow<Int>
+
+    /** 本期**未关联**的待处理退款合计：统计页提示「X 元退款待关联，未计入分类」 */
+    @Query(
+        """SELECT COALESCE(SUM(amountCents), 0) FROM transactions
+           WHERE timestamp >= :startMillis AND timestamp < :endMillis
+             AND refundMark = 'REFUND_INCOME' AND refundPending = 1 AND refundLinkId IS NULL"""
+    )
+    fun observePendingRefundTotal(startMillis: Long, endMillis: Long): Flow<Long>
+
+    /**
+     * 同金额的支出候选（待处理退款 sheet 用）：只列**金额相同**的支出，新的在前。
+     * 已经被另一笔退款指名的支出不再列出（一笔支出只允许被一笔退款关联）。
+     */
+    @Query(
+        """SELECT t.id AS id, t.type AS type, t.amountCents AS amountCents, t.timestamp AS timestamp,
+           t.note AS note, t.counterparty AS counterparty, t.source AS source,
+           c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon,
+           a.id AS accountId, a.name AS accountName,
+           t.refundMark AS refundMark, t.refundLinkId AS refundLinkId, t.refundPending AS refundPending,
+           t.createdAt AS createdAt
+           FROM transactions t
+           JOIN categories c ON t.categoryId = c.id
+           JOIN accounts a ON t.accountId = a.id
+           WHERE t.type = 'EXPENSE' AND t.amountCents = :amountCents
+             AND NOT EXISTS (SELECT 1 FROM transactions r WHERE r.refundLinkId = t.id)
+           ORDER BY t.timestamp DESC LIMIT 50"""
+    )
+    suspend fun expenseCandidatesByAmount(amountCents: Long): List<TransactionRow>
+
+    /** 是否已有别的退款指到这笔支出（一笔支出只允许被一笔退款关联） */
+    @Query("SELECT COUNT(*) FROM transactions WHERE refundLinkId = :expenseId")
+    suspend fun countRefundsLinkedTo(expenseId: Long): Int
+
+    /** 退款收入指名原支出（只对还没关联的退款生效，重复点击/并发不会覆盖） */
+    @Query(
+        """UPDATE transactions SET refundLinkId = :expenseId, refundPending = 0
+           WHERE id = :refundId AND refundLinkId IS NULL"""
+    )
+    suspend fun linkRefundToExpense(refundId: Long, expenseId: Long)
+
+    /** 原支出补「已退」标记（部分退款时调用方不调；已有标记不覆盖） */
+    @Query("UPDATE transactions SET refundMark = 'REFUNDED_EXPENSE' WHERE id = :expenseId AND refundMark = 'NONE'")
+    suspend fun markExpenseRefunded(expenseId: Long)
+
+    /** 「记为收入」：去掉退款标记与关联，当成普通收入——预算不再减它 */
+    @Query(
+        """UPDATE transactions SET refundMark = 'NONE', refundLinkId = NULL, refundPending = 0
+           WHERE id = :refundId"""
+    )
+    suspend fun markRefundAsIncome(refundId: Long)
+
+    /** 删除账单后清理指向已删支出的退款关联（否则那些退款会变成“已关联但没有分类”） */
+    @Query(
+        """UPDATE transactions SET refundLinkId = NULL
+           WHERE refundLinkId IS NOT NULL
+             AND refundLinkId NOT IN (SELECT id FROM transactions)"""
+    )
+    suspend fun clearDanglingRefundLinks()
 
     @Query("SELECT COUNT(*) FROM transactions WHERE categoryId = :categoryId")
     suspend fun countByCategory(categoryId: Long): Int

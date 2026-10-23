@@ -413,8 +413,15 @@ private fun ImportPreviewStage(
                 )
                 if (bill.refundCount > 0) {
                     Spacer(Modifier.height(4.dp))
+                    val linkedRefunds = bill.refundPairs.size
+                    val pendingRefunds = bill.rows.count { it.refundMark == RefundMark.REFUND_INCOME } - linkedRefunds
                     Text(
-                        "其中退款相关 ${bill.refundCount} 条（已入库：退款收入记入收入，被退款的原支出照常记入支出）",
+                        buildString {
+                            append("其中退款相关 ${bill.refundCount} 条：")
+                            append("$linkedRefunds 条已对上原支出")
+                            if (pendingRefunds > 0) append("，$pendingRefunds 条导入后进待确认指认原支出")
+                            append("（退款收入记入收入，被退款的原支出照常记入支出）")
+                        },
                         style = EcoType.PageNote,
                         color = c.amber,
                     )
@@ -574,6 +581,15 @@ private fun ImportDoneStage(
                 color = c.muted,
                 textAlign = TextAlign.Center,
             )
+            if (result.refundLinked > 0) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    "其中 ${result.refundLinked} 条退款已自动对上原支出。",
+                    style = EcoType.PageNote.copy(textAlign = TextAlign.Center),
+                    color = c.muted,
+                    textAlign = TextAlign.Center,
+                )
+            }
             if (accountName != null) {
                 Spacer(Modifier.height(3.dp))
                 Text(
