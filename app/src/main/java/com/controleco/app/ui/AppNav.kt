@@ -225,6 +225,8 @@ fun AccBookNav(
                 onOpenPermissions = { navController.navigate("settings/permissions") },
                 onOpenWatchedApps = { navController.navigate("settings/watchedApps") },
                 onOpenMerchantRules = { navController.navigate("settings/merchantRules") },
+                onOpenPending = { navController.navigate("pending") },
+                onOpenKeepAlive = { navController.navigate("keepAlive") },
                 onOpenDeveloper = { navController.navigate("settings/developer") },
                 onOpenAbout = { navController.navigate("settings/about") },
             )
@@ -261,10 +263,8 @@ fun AccBookNav(
             SettingsDeveloperScreen(
                 vm = vm,
                 onBack = { navController.popBackStack() },
-                onOpenPending = { navController.navigate("pending") },
                 onOpenCaptureLog = { navController.navigate("captureLog") },
                 onOpenCaptureTrace = { navController.navigate("captureTrace") },
-                onOpenKeepAlive = { navController.navigate("keepAlive") },
             )
         }
         composable("settings/about") {

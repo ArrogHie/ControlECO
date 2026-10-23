@@ -27,22 +27,20 @@ import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.eco
 
 /**
- * 设置 → 开发者功能：手动启动（链路测试）+ 日志与诊断（待确认、捕获日志、保活、调试开关）
+ * 设置 → 开发者功能：手动启动（链路测试）+ 日志与诊断（捕获日志、最近捕获、调试开关）
  * + 自动记账溯源。所有"测试/排查"性质的东西集中在这一页，权限页与个人页保持干净。
  *
+ * 待确认账单与保活与自启动是普通用户入口，已移到 设置 → 自动记账，不在这里重复。
  * release 构建也保留本页；所有测试只在本机运行。
  */
 @Composable
 fun SettingsDeveloperScreen(
     vm: LedgerViewModel,
     onBack: () -> Unit,
-    onOpenPending: () -> Unit,
     onOpenCaptureLog: () -> Unit,
     onOpenCaptureTrace: () -> Unit,
-    onOpenKeepAlive: () -> Unit,
 ) {
     val lastCaptureAt by vm.lastCaptureAt.collectAsStateWithLifecycle()
-    val pendingCount by vm.pendingCount.collectAsStateWithLifecycle()
     val debugCaptureAll by vm.debugCaptureAll.collectAsStateWithLifecycle()
     val debugCaptureAllPages by vm.debugCaptureAllPages.collectAsStateWithLifecycle()
     val traceEnabled by vm.traceEnabled.collectAsStateWithLifecycle()
@@ -77,17 +75,6 @@ fun SettingsDeveloperScreen(
         SettingsSection(title = "日志与诊断", aside = "DIAGNOSTICS")
         SettingsPane {
             SettingsRow(
-                title = "待确认账单",
-                subtitle = if (pendingCount == 0) "没有等待处理的条目" else "$pendingCount 笔等待处理",
-                icon = EcoIcons.Receipt,
-                iconTint = MaterialTheme.eco.amber,
-                trail = "查看",
-                trailColor = MaterialTheme.eco.blue,
-                showChevron = true,
-                onClick = onOpenPending,
-            )
-            SettingsDivider()
-            SettingsRow(
                 title = "捕获日志",
                 icon = EcoIcons.File,
                 iconTint = MaterialTheme.eco.violet,
@@ -95,16 +82,6 @@ fun SettingsDeveloperScreen(
                 trailColor = MaterialTheme.eco.blue,
                 showChevron = true,
                 onClick = onOpenCaptureLog,
-            )
-            SettingsDivider()
-            SettingsRow(
-                title = "保活与自启动",
-                icon = EcoIcons.Battery,
-                iconTint = MaterialTheme.eco.jade,
-                trail = "查看",
-                trailColor = MaterialTheme.eco.blue,
-                showChevron = true,
-                onClick = onOpenKeepAlive,
             )
             SettingsDivider()
             SettingsValueRow(

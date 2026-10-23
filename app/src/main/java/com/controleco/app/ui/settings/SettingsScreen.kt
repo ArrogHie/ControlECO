@@ -76,9 +76,9 @@ private val HERO_SIGNAL: Color
  * 设置（一级页）：视觉与原型 5.12 对齐——深色运行状态卡 + 三组卡片
  * （自动记账 / 系统 / 关于），底部 `NO CLOUD · LOCAL ONLY`。
  *
- * 入口一个不少：三个入账方式开关、监听的 App、商户归类、权限（含通知监听 / 无障碍 /
- * 悬浮窗 / 短信的汇总胶囊）、自动更新、检查更新、开发者功能（内含待确认、捕获日志、
- * 溯源、保活）、关于与版本。账本（账户 / 账单导入）入口仍在个人页，不在此页重复。
+ * 入口一个不少：三个入账方式开关、待确认账单、监听的 App、商户归类、保活与自启动、权限
+ * （含通知监听 / 无障碍 / 悬浮窗 / 短信的汇总胶囊）、自动更新、检查更新、开发者功能（内含
+ * 捕获日志、溯源）、关于与版本。账本（账户 / 账单导入）入口仍在个人页，不在此页重复。
  */
 @Composable
 fun SettingsScreen(
@@ -87,6 +87,8 @@ fun SettingsScreen(
     onOpenPermissions: () -> Unit,
     onOpenWatchedApps: () -> Unit,
     onOpenMerchantRules: () -> Unit,
+    onOpenPending: () -> Unit,
+    onOpenKeepAlive: () -> Unit,
     onOpenDeveloper: () -> Unit,
     onOpenAbout: () -> Unit,
 ) {
@@ -111,6 +113,7 @@ fun SettingsScreen(
     val autoUpdate by vm.autoUpdateEnabled.collectAsStateWithLifecycle()
     val captureEnabled by vm.captureEnabled.collectAsStateWithLifecycle()
     val lastCaptureAt by vm.lastCaptureAt.collectAsStateWithLifecycle()
+    val pendingCount by vm.pendingCount.collectAsStateWithLifecycle()
     val rules by vm.merchantRules.collectAsStateWithLifecycle(initialValue = emptyList())
 
     val listenerGranted = remember(resumeTick) { vm.isListenerGranted() }
@@ -147,6 +150,18 @@ fun SettingsScreen(
                 onCheckedChange = { vm.setAutoEntryEnabled(it) },
             )
             SettingsDivider()
+            // 待确认账单：自动记账的产出队列，有笔数时副标直接显示待处理条数
+            SettingsRow(
+                title = "待确认账单",
+                subtitle = if (pendingCount == 0) "没有等待处理的条目" else "$pendingCount 笔等待处理",
+                icon = EcoIcons.Receipt,
+                iconTint = MaterialTheme.eco.amber,
+                trail = "查看",
+                trailColor = MaterialTheme.eco.blue,
+                showChevron = true,
+                onClick = onOpenPending,
+            )
+            SettingsDivider()
             SettingsRow(
                 title = "监听的 App",
                 icon = EcoIcons.App,
@@ -163,6 +178,16 @@ fun SettingsScreen(
                 trail = "${rules.size} 条",
                 showChevron = true,
                 onClick = onOpenMerchantRules,
+            )
+            SettingsDivider()
+            SettingsRow(
+                title = "保活与自启动",
+                icon = EcoIcons.Battery,
+                iconTint = MaterialTheme.eco.jade,
+                trail = "查看",
+                trailColor = MaterialTheme.eco.blue,
+                showChevron = true,
+                onClick = onOpenKeepAlive,
             )
             SettingsDivider()
             SettingsRow(
