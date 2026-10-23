@@ -47,6 +47,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -207,8 +208,10 @@ fun TransactionListScreen(
     val expense = totalsReady.firstOrNull { it.type == TxType.EXPENSE }?.totalCents ?: 0L
     val income = totalsReady.firstOrNull { it.type == TxType.INCOME }?.totalCents ?: 0L
 
-    var filter by remember { mutableStateOf(TxFilter.ALL) }
-    var loadedLimit by remember { mutableIntStateOf(FIRST_PAGE_ROWS) }
+    // 筛选与分页深度都要跨「进详情页再返回」保留：分页深度若回到首页，
+    // rememberLazyListState 恢复出来的 index 会被只排了首页的那点内容夹到页尾。
+    var filter by rememberSaveable { mutableStateOf(TxFilter.ALL) }
+    var loadedLimit by rememberSaveable { mutableIntStateOf(FIRST_PAGE_ROWS) }
     var jumpTarget by remember { mutableStateOf<LocalDate?>(null) }
     var pendingJump by remember { mutableStateOf<LocalDate?>(null) }
     var showPicker by remember { mutableStateOf(false) }
@@ -251,13 +254,25 @@ fun TransactionListScreen(
             listState.animateScrollToItem(0)
         }
     }
+    // 周期/筛选变了才回顶：LaunchedEffect 每次重新进入组合（从编辑页返回、切 tab 回来）
+    // 都会重跑一遍，无条件 scrollToItem(0) 会把刚恢复好的滚动位置抹掉。
+    var lastPeriodKey by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(month, mode) {
+        val key = billPeriodKey(month, mode)
+        val previous = lastPeriodKey
+        lastPeriodKey = key
+        if (!shouldResetBillList(previous, key)) return@LaunchedEffect
         selecting = false
         selected = emptySet()
         loadedLimit = FIRST_PAGE_ROWS
         listState.scrollToItem(0)
     }
+    var lastFilterKey by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(filter) {
+        val key = filter.name
+        val previous = lastFilterKey
+        lastFilterKey = key
+        if (!shouldResetBillList(previous, key)) return@LaunchedEffect
         loadedLimit = FIRST_PAGE_ROWS
         listState.scrollToItem(0)
     }
