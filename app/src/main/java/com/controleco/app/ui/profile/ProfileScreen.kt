@@ -241,7 +241,7 @@ fun ProfileScreen(
 ) {
     val context = LocalContext.current
     val budget by vm.monthlyBudgetCents.collectAsStateWithLifecycle()
-    val spent by vm.homeNetSpent.collectAsStateWithLifecycle()
+    val spent by vm.homeSpent.collectAsStateWithLifecycle()
     val currency by vm.currencySymbol.collectAsStateWithLifecycle()
     val pendingCount by vm.pendingCount.collectAsStateWithLifecycle()
     val monthStartDay by vm.monthStartDay.collectAsStateWithLifecycle()

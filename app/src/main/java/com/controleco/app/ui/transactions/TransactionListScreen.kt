@@ -194,7 +194,6 @@ fun TransactionListScreen(
     val mode by vm.periodMode.collectAsStateWithLifecycle()
     val currentAccountingMonth by vm.currentAccountingMonth.collectAsStateWithLifecycle()
     val monthStartDay by vm.monthStartDay.collectAsStateWithLifecycle()
-    val refundTotal by vm.periodRefundTotal.collectAsStateWithLifecycle()
     val cardImageUri by vm.cardImageUri.collectAsStateWithLifecycle()
     val cardTransform by vm.cardTransform.collectAsStateWithLifecycle()
     val cardImage by vm.cardImage.collectAsStateWithLifecycle()
@@ -203,7 +202,6 @@ fun TransactionListScreen(
 
     val rowsReady = rows ?: return
     val totalsReady = totals ?: return
-    val refundReady = refundTotal ?: return
 
     val expense = totalsReady.firstOrNull { it.type == TxType.EXPENSE }?.totalCents ?: 0L
     val income = totalsReady.firstOrNull { it.type == TxType.INCOME }?.totalCents ?: 0L

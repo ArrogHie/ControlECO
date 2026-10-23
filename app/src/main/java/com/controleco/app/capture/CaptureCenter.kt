@@ -228,7 +228,7 @@ object CaptureCenter {
         }.onFailure { AppLog.w("Ntf", "create channel failed", it) }
     }
 
-    /** 系统通知（横幅）：点击跳转 App 内对应页面（该笔编辑页 / 待确认队列 / 退款关联）；可带动作按钮 */
+    /** 系统通知（横幅）：点击跳转 App 内对应页面（该笔编辑页 / 待确认队列 / 登记退款页）；可带动作按钮 */
     private fun postCaptureNotification(
         title: String,
         text: String,
@@ -1380,7 +1380,7 @@ object CaptureCenter {
                 if (parsed == null) {
                     AppLog.d("Ntf", "no rule matched pkg=$packageName title=[$title] text=[$text]")
                     if (interested && isCaptureEnabled()) {
-                        // 无金额的退款到账通知（微信折叠通知实测样本）→ 转退款关联提醒
+                        // 无金额的退款到账通知（微信折叠通知实测样本）→ 转退款待处理提醒
                         if (NotificationRules.isAmountlessRefundNotice(packageName, title, text)) {
                             handleRefundNotice(packageName, rawId, sourceAt, title, text, bigText)
                             return@launch
@@ -2280,9 +2280,9 @@ object CaptureCenter {
         orderId = candidate.orderId.orEmpty(),
     )
 
-    // ---------- 退款关联提醒（无金额退款通知） ----------
+    // ---------- 退款待处理提醒（无金额退款通知） ----------
 
-    /** 微信"退款到账通知"没有金额，无法直接入队：发通知提醒用户进 App 选择被退款的账单 */
+    /** 微信"退款到账通知"没有金额，无法直接入队：发通知提醒用户进 App 选被退款的账单 */
     private suspend fun handleRefundNotice(
         packageName: String,
         rawId: Long,
@@ -2291,15 +2291,15 @@ object CaptureCenter {
         text: String,
         bigText: String,
     ) {
-        captureDao.updateMatch(rawId, "退款·待关联", false)
-        AppLog.i("Ntf", "amountless refund notice -> link reminder pkg=$packageName")
+        captureDao.updateMatch(rawId, "退款·待处理", false)
+        AppLog.i("Ntf", "amountless refund notice -> refund reminder pkg=$packageName")
         // 溯源记录不产生账目：dedupKey 用提醒 id 的同一构造，永远不会和交易对上（状态固定为"仅提醒"）
         traceCapture(
             channel = CaptureChannel.NOTIFICATION,
             packageName = packageName,
             title = title, text = text, bigText = bigText,
             capturedAt = if (postTime > 0) postTime else System.currentTimeMillis(),
-            matchedRule = "退款·待关联",
+            matchedRule = "退款·待处理",
             type = null,
             amountCents = 0,
             dedupKey = "refund|$packageName|$postTime",

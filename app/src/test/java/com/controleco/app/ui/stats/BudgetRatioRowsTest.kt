@@ -111,34 +111,6 @@ class BudgetRatioRowsTest {
     }
 
     @Test
-    fun `分类净额为负也要列出_本期退款大于支出`() {
-        val rows = buildRatioRows(
-            categoryBudgets = emptyMap(),
-            categories = categories,
-            byCategory = listOf(sum(1, "餐饮", 10_000), sum(2, "交通", -3_000)),
-            mode = PeriodMode.MONTH,
-        )
-
-        assertEquals(listOf("餐饮", "交通"), rows.map { it.name })
-        assertEquals(-3_000L, rows[1].actualCents)
-        assertEquals(0L, rows[1].budgetCents)
-    }
-
-    @Test
-    fun `设了预算的分类净额为负时也保留预算`() {
-        val rows = buildRatioRows(
-            categoryBudgets = mapOf(2L to 30_000L),
-            categories = categories,
-            byCategory = listOf(sum(2, "交通", -3_000)),
-            mode = PeriodMode.MONTH,
-        )
-
-        assertEquals(1, rows.size)
-        assertEquals(-3_000L, rows.single().actualCents)
-        assertEquals(30_000L, rows.single().budgetCents)
-    }
-
-    @Test
     fun `同额时按预算降序再按名字升序_顺序稳定`() {
         val rows = buildRatioRows(
             categoryBudgets = mapOf(3L to 30_000L),

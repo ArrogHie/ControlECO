@@ -21,18 +21,7 @@ data class ImportedBillRow(
     val externalId: String?,
     val guessedCategoryName: String,
     val refundMark: RefundMark = RefundMark.NONE,
-    /**
-     * 原支出行状态里写明的退款金额（如微信 `已退款(¥8.54)`）。
-     * 只用于把退款收入配回这笔支出；全额退款为 null（金额与原支出相同）。
-     */
-    val refundedCents: Long? = null,
 )
-
-/**
- * 退款收入 → 原支出的配对结果（下标指向 [ParsedBill.rows]）。
- * 账单里成对的退款记录在导入时据此自动关联，配不上的退款进「待确认账单」等用户选。
- */
-data class RefundPair(val refundIndex: Int, val expenseIndex: Int)
 
 /** 一个账单文件的解析结果 */
 data class ParsedBill(
@@ -44,13 +33,6 @@ data class ParsedBill(
     val skippedStatus: Int,
     /** 退款相关记录数（始终入库） */
     val refundCount: Int,
-    /** 账单里能确定配对上的「退款收入 → 原支出」 */
-    val refundPairs: List<RefundPair> = emptyList(),
 )
 
-data class ImportCommitResult(
-    val inserted: Int,
-    val duplicated: Int,
-    /** 本次导入顺带关联上的退款条数（配对成功且原支出能定位到） */
-    val refundLinked: Int = 0,
-)
+data class ImportCommitResult(val inserted: Int, val duplicated: Int)

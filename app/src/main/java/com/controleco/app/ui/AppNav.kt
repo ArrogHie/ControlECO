@@ -414,7 +414,7 @@ private fun TabPage(
             onOpenSettings = onOpenSettings,
             scrollToTopTick = reenterTick,
         )
-        2 -> StatsScreen(vm = vm, scrollToTopTick = reenterTick, onOpenPending = onOpenPending)
+        2 -> StatsScreen(vm = vm, scrollToTopTick = reenterTick)
         3 -> ProfileScreen(
             vm = vm,
             onOpenAccount = onOpenAccount,

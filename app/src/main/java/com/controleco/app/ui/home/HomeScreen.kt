@@ -158,8 +158,8 @@ fun HomeScreen(
     onOpenCategories: () -> Unit,
 ) {
     val budgetCents by vm.monthlyBudgetCents.collectAsStateWithLifecycle()
-    val spentCents by vm.homeNetSpent.collectAsStateWithLifecycle()
-    val todaySpentCents by vm.homeTodayNetSpent.collectAsStateWithLifecycle()
+    val spentCents by vm.homeSpent.collectAsStateWithLifecycle()
+    val todaySpentCents by vm.homeTodaySpent.collectAsStateWithLifecycle()
     val categoryBudgets by vm.categoryBudgets.collectAsStateWithLifecycle()
     val categorySums by vm.homeCategorySums.collectAsStateWithLifecycle()
     val categories by vm.categories.collectAsStateWithLifecycle()

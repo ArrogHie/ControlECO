@@ -49,8 +49,10 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /**
- * 退款关联页：微信"退款到账通知"不带金额，无法自动入账——
- * 用户在此选择被退款的支出，生成退款收入（金额可改，支持部分退款）并把原支出标记已退款。
+ * 登记退款页：微信"退款到账通知"不带金额，无法自动入账——
+ * 用户在此选择被退款的支出，生成退款收入（金额可改，支持部分退款）并把那笔支出标「已退款」。
+ *
+ * 两笔记录之间**不建立关联**：支出只是被标了「已退款」，退款收入只是一笔收入。
  */
 @Composable
 fun RefundLinkScreen(vm: LedgerViewModel, onBack: () -> Unit) {
@@ -100,8 +102,8 @@ fun RefundLinkScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                 rows.isEmpty() -> {
                     EcoPane {
                         EcoEmpty(
-                            title = "暂无可关联的支出",
-                            body = "近 60 天没有可关联的支出记录。退款收入默认等于原支出金额。",
+                            title = "暂无可选的支出",
+                            body = "近 60 天没有可选的支出记录。退款收入默认等于原支出金额。",
                             icon = EcoIcons.Receipt,
                         )
                     }
@@ -126,7 +128,7 @@ fun RefundLinkScreen(vm: LedgerViewModel, onBack: () -> Unit) {
         LinkRefundSheet(
             row = row,
             onLink = { amountCents, onResult ->
-                vm.linkRefund(row.id, amountCents) { error ->
+                vm.registerRefund(row.id, amountCents) { error ->
                     onResult(error)
                     if (error == null) {
                         // 原支出已标记退款，从候选中移除

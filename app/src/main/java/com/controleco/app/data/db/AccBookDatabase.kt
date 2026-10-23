@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CaptureTraceEntity::class,
         MerchantRuleEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
 )
 abstract class AccBookDatabase : RoomDatabase() {
@@ -217,6 +217,56 @@ abstract class AccBookDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v13：退款不再与原支出建立关联。
+         *
+         * 支出只标「已退款」、退款收入只标「已处理」，两者互不指向（见 [TransactionEntity.refundPending]），
+         * 所以 v12 加的 `refundLinkId` 列整个删掉。
+         *
+         * minSdk 26 的 SQLite 是 3.18/3.19，**不支持 `ALTER TABLE ... DROP COLUMN`**（3.35+），
+         * 按 Room 的标准做法重建表：建新表 → 原样搬列（保留 id）→ 删旧表 → 改名 → 重建唯一索引。
+         * 列定义逐字取自 v12 导出的 schema（`app/schemas/.../12.json`），只去掉 `refundLinkId`。
+         */
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `transactions_new` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`type` TEXT NOT NULL, " +
+                        "`amountCents` INTEGER NOT NULL, " +
+                        "`categoryId` INTEGER NOT NULL, " +
+                        "`accountId` INTEGER NOT NULL, " +
+                        "`timestamp` INTEGER NOT NULL, " +
+                        "`note` TEXT NOT NULL, " +
+                        "`counterparty` TEXT NOT NULL, " +
+                        "`source` TEXT NOT NULL, " +
+                        "`externalId` TEXT, " +
+                        "`refundMark` TEXT NOT NULL, " +
+                        "`refundPending` INTEGER NOT NULL DEFAULT 0, " +
+                        "`flowId` TEXT NOT NULL DEFAULT '', " +
+                        "`createdAt` INTEGER NOT NULL, " +
+                        "FOREIGN KEY(`categoryId`) REFERENCES `categories`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE RESTRICT , " +
+                        "FOREIGN KEY(`accountId`) REFERENCES `accounts`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE RESTRICT )",
+                )
+                db.execSQL(
+                    "INSERT INTO `transactions_new` (`id`, `type`, `amountCents`, `categoryId`, `accountId`, " +
+                        "`timestamp`, `note`, `counterparty`, `source`, `externalId`, `refundMark`, " +
+                        "`refundPending`, `flowId`, `createdAt`) " +
+                        "SELECT `id`, `type`, `amountCents`, `categoryId`, `accountId`, `timestamp`, `note`, " +
+                        "`counterparty`, `source`, `externalId`, `refundMark`, `refundPending`, `flowId`, " +
+                        "`createdAt` FROM `transactions`",
+                )
+                db.execSQL("DROP TABLE `transactions`")
+                db.execSQL("ALTER TABLE `transactions_new` RENAME TO `transactions`")
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_transactions_externalId` " +
+                        "ON `transactions` (`externalId`)",
+                )
+            }
+        }
+
         @Volatile
         private var instance: AccBookDatabase? = null
 
@@ -230,7 +280,7 @@ abstract class AccBookDatabase : RoomDatabase() {
                     .addMigrations(
                         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
                         MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
-                        MIGRATION_10_11, MIGRATION_11_12,
+                        MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
                     )
                     .build().also { instance = it }
             }

@@ -81,9 +81,10 @@ import java.time.format.DateTimeFormatter
  * 待确认账单：通知/页面捕获到的交易先落在这里，用户逐条确认（分类/账户/商户）或丢弃；
  * 0 元占位条需先补金额；微信红包（ASK）必须逐条明确确认，不参与「全部确认」。
  *
- * 除此之外还有一类条目：**还没指认原支出的退款收入**（导入/捕获来的退款）。
+ * 除此之外还有一类条目：**已经入账、但还没处理**的退款收入（捕获来的退款）。
  * 它和捕获条目**并进同一个列表，不单独分区**（产品要求）；点开列同金额的支出让用户选，
- * 选不到就「记为收入」。退款指到哪笔支出，分类预算才会从哪个分类里扣掉这笔钱。
+ * 选中后那笔支出标记「已退款」、不再计入支出；选不到就「记为收入」。
+ * 导入的退款账单由账单自身标记，不进这里。
  */
 @Composable
 fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
@@ -180,8 +181,8 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                     item(key = "refund-warning") {
                         PendingWarning(
                             icon = EcoIcons.Receipt,
-                            text = "有 ${refunds.size} 条退款待关联原账单：选中被退款的支出后，" +
-                                "这笔退款才会从对应分类预算里扣掉。",
+                            text = "有 ${refunds.size} 条退款待处理：选中被退款的支出后，" +
+                                "那笔支出会标记为「已退款」，不再计入本月支出与分类预算。",
                             fg = c.blue,
                             bg = c.blueSoft,
                         )
@@ -212,7 +213,7 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                         Text(
                             buildString {
                                 append("共 ${pending.size + refunds.size} 条，$confirmableCount 条可一键确认")
-                                if (refunds.isNotEmpty()) append("，${refunds.size} 条退款待关联")
+                                if (refunds.isNotEmpty()) append("，${refunds.size} 条退款待处理")
                             },
                             style = EcoType.PageNote,
                             color = c.quiet,
@@ -265,11 +266,11 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
             submitting = submitting,
             onPick = { expense ->
                 submitting = true
-                vm.linkRefundToExpense(row.id, expense.id) { error ->
+                vm.handlePendingRefund(row.id, expense.id) { error ->
                     submitting = false
                     if (error == null) {
                         linking = null
-                        EcoToast.show("已关联原账单")
+                        EcoToast.show("已标记为已退款")
                     } else {
                         linkError = error
                     }
@@ -286,7 +287,7 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
     incomeAsk?.let { row ->
         EcoConfirm(
             title = "记为收入",
-            body = "这笔退款将按普通收入记账，不再从「本月已花」和分类预算里减掉。之后不会再出现在待确认里。",
+            body = "这笔退款按普通收入记账；对应的支出不会被标记为已退款，仍计入本月支出。之后不会再出现在待处理里。",
             confirmText = "记为收入",
             onConfirm = {
                 vm.markRefundAsIncome(row.id) { error ->
@@ -304,7 +305,7 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
         val confirmBody = buildString {
             append("将把 $confirmable 条按默认分类（其他）与推测账户入账，之后可在流水中修改。")
             if (amountMissing > 0) append("另有 $amountMissing 条金额待补录，不会被确认。")
-            if (refunds.isNotEmpty()) append("${refunds.size} 条退款待关联不会被动到。")
+            if (refunds.isNotEmpty()) append("${refunds.size} 条退款待处理不会被动到。")
         }
         EcoConfirm(
             title = "全部确认",
@@ -470,8 +471,8 @@ private fun PendingRow(
 }
 
 /**
- * 退款待关联行：已入账的退款收入，还不知道退的是哪一笔支出。
- * 动作：关联原账单（列同金额支出）/ 记为收入（按普通收入，不从预算扣）。
+ * 退款待处理行：已入账的退款收入，还没标记对应的原支出。
+ * 动作：选被退款的账单（那笔支出标「已退款」，不再计入支出）/ 记为收入（只按普通收入记账）。
  */
 @Composable
 private fun RefundPendingRow(
@@ -516,7 +517,7 @@ private fun RefundPendingRow(
                 )
             }
             Spacer(Modifier.width(10.dp))
-            EcoPill(text = "待关联", tone = EcoPillTone.Warn)
+            EcoPill(text = "待处理", tone = EcoPillTone.Warn)
         }
         Row(
             Modifier
@@ -525,7 +526,7 @@ private fun RefundPendingRow(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PendingTextAction("关联原账单", c.blue, onLink)
+            PendingTextAction("选择原账单", c.blue, onLink)
             Spacer(Modifier.width(18.dp))
             PendingTextAction("记为收入", c.muted, onMarkIncome)
         }
@@ -533,11 +534,11 @@ private fun RefundPendingRow(
     EcoRowDivider(inset = 0.dp)
 }
 
-// ---------- 退款关联 sheet ----------
+// ---------- 选原账单 sheet ----------
 
 /**
- * 选原支出：**只列同金额的支出**（产品口径）。没有候选时引导「记为收入」；
- * 每一行点一下就完成关联，不再多一步确认。
+ * 选原账单：**只列同金额的支出**（产品口径）。没有候选时引导「记为收入」；
+ * 每一行点一下就完成处理（那笔支出标「已退款」、退款标「已处理」），不再多一步确认。
  */
 @Composable
 private fun RefundLinkSheet(
@@ -558,6 +559,11 @@ private fun RefundLinkSheet(
         subtitle = "退款 +${Money.formatYuan(row.amountCents)}，$merchant，${pendingTime(row.timestamp)}",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(
+                "选中后，那笔支出会标记为「已退款」，不再计入本月支出与分类预算。",
+                style = EcoType.PageNote,
+                color = c.muted,
+            )
             Text("同金额的支出账单", style = EcoType.FieldLabel, color = c.muted)
             when {
                 candidates == null -> Text("加载中…", style = EcoType.PageNote, color = c.quiet)
@@ -565,7 +571,7 @@ private fun RefundLinkSheet(
                     Text("没有同金额的支出账单", style = EcoType.PageNote, color = c.amber)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "可以「记为收入」：这笔退款按普通收入记账，不再从「本月已花」和分类预算里减掉。",
+                        "可以「记为收入」：这笔退款按普通收入记账，对应的支出不会被标记为已退款。",
                         style = EcoType.PageNote,
                         color = c.quiet,
                     )

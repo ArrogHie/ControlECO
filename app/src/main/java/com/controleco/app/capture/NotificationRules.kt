@@ -80,7 +80,7 @@ object NotificationRules {
 
     /**
      * 无金额的退款到账提醒（微信折叠通知"退款到账通知"常不带金额，实测样本：
-     * title=微信支付 text=退款到账通知）——无法入队，转"退款关联"流程让用户选择原账单。
+     * title=微信支付 text=退款到账通知）——无法入队，转"退款待处理"流程让用户选被退款的账单。
      * 带金额的退款在 parse() 里已正常入队，不会走到这里。
      */
     fun isAmountlessRefundNotice(packageName: String, title: String, text: String): Boolean =
@@ -262,7 +262,7 @@ object NotificationRules {
     /**
      * 方向可辨、金额缺失的通知 → 通知栏「输入金额」补录。
      * 判定刻意收紧：必须命中明确的**交易确认短语**，否则不打扰用户（服务通知、账单提醒一律不弹）。
-     * 退款不走这里（金额常由原账单承载，用既有的"退款关联"流程）。
+     * 退款不走这里（金额常由原账单承载，用既有的"退款待处理"流程）。
      */
     data class DirectionHint(
         val type: TxType,

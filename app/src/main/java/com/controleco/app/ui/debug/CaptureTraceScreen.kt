@@ -290,7 +290,7 @@ private fun TraceRowCard(
                     when {
                         linkedId != null -> "对应账单 #$linkedId（点下方「查看对应账单」）"
                         row.pendingCount > 0 -> "仍在待确认队列（确认或丢弃后此状态自动更新）"
-                        t.outcome == TraceOutcome.REFUND_NOTICE -> "仅提醒，不产生账目（关联退款后生成独立收入记录）"
+                        t.outcome == TraceOutcome.REFUND_NOTICE -> "仅提醒，不产生账目（登记退款后生成独立收入记录）"
                         else -> "无对应账单（未入账或已删除）"
                     },
                     style = EcoType.PageNote.copy(fontSize = 8.5.sp),

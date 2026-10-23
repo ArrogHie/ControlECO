@@ -217,7 +217,7 @@ private fun NotificationSection(vm: LedgerViewModel, resumeTick: Int, onOpenNoti
         CaptureNotifySetting(vm, resumeTick)
         SettingsDivider()
         SettingsSwitchRow(
-            title = "退款到账关联提醒",
+            title = "退款到账提醒",
             checked = refundLinkEnabled,
             onCheckedChange = { vm.setRefundLinkEnabled(it) },
         )

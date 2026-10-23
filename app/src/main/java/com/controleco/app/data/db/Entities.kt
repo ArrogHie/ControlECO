@@ -79,17 +79,15 @@ data class TransactionEntity(
     val externalId: String? = null,
     val refundMark: RefundMark = RefundMark.NONE,
     /**
-     * 退款收入 → 被退款的原支出 id（只有 `refundMark = REFUND_INCOME` 的行可能有值）。
+     * 退款收入是否还没被用户处理（决定它是否出现在「待确认账单」里）。
      *
-     * 用途只有一个：**分类预算按 支出 − 退款 计算**时，知道这笔退款该从哪个分类里扣。
-     * 普通收支、被退款的原支出本身恒为 null。
-     */
-    val refundLinkId: Long? = null,
-    /**
-     * 退款收入是否仍在等用户指定原支出（出现在「待确认账单」里）。
+     * **退款与原支出互不关联**：支出只被打上 [RefundMark.REFUNDED_EXPENSE]（已退款、不再计入支出），
+     * 退款收入只被打上「已处理」（`refundPending = false`、照常计入收入），两者之间没有 id 关系。
+     * 账单导入时账单自己就把该标的都标好了，所以导入的退款 = false，不打扰用户。
      *
-     * - 新导入/新捕获的退款收入 = true，直到用户选中原支出或选择「记为收入」；
-     * - 本次升级前已入库的历史退款 = false（不打扰用户，见迁移 v12）。
+     * - 账单导入的退款收入 = false；
+     * - 通知/页面捕获的退款收入 = true，直到用户在待确认里选中被退款的支出或选择「记为收入」；
+     * - 迁移 v12 之前入库的历史退款 = false（不打扰用户）。
      */
     @ColumnInfo(defaultValue = "0")
     val refundPending: Boolean = false,
