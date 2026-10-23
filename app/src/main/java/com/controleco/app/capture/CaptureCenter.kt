@@ -1381,7 +1381,7 @@ object CaptureCenter {
                     AppLog.d("Ntf", "no rule matched pkg=$packageName title=[$title] text=[$text]")
                     if (interested && isCaptureEnabled()) {
                         // 无金额的退款到账通知（微信折叠通知实测样本）→ 转退款待处理提醒
-                        if (NotificationRules.isAmountlessRefundNotice(packageName, title, text)) {
+                        if (NotificationRules.isAmountlessRefundNotice(packageName, title, text, bigText)) {
                             handleRefundNotice(packageName, rawId, sourceAt, title, text, bigText)
                             return@launch
                         }

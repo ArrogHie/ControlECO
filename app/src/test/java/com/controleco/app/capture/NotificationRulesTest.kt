@@ -2,6 +2,7 @@ package com.controleco.app.capture
 
 import com.controleco.app.data.db.TxType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -227,6 +228,97 @@ class NotificationRulesTest {
         assertEquals(1280L, r.amountCents)
     }
 
+    // ---------- 微信身份闸门与支出词收窄（2026-10-23 两条真实误判回归） ----------
+
+    @Test
+    fun `微信聊天与营销推送没有微信支付标识_只进日志不入账`() {
+        // 真实误判样本（2026-10-23，channel=通知，两条都被自动入账）：
+        // title 是联系人昵称、正文是"玩赚抽奖/立减券"营销文案，与支付通知共用 com.tencent.mm。
+        // 身份闸门要求 title/正文带"微信支付"，两条都命中不到 → 不入账（原文仍进捕获日志）
+        assertNull(
+            parse(
+                NotificationRules.WECHAT,
+                "啊小号",
+                "啊小号: [闪电] 你的玩赚抽奖机会，千万别浪费啦\n" +
+                    "[钱] 满0.62元消费冲击620元立减券\n" +
+                    "[表情] 线下点亮商户，额外拿最高13.5元立减券\n" +
+                    "[右] 活动参与：https://qr.dexfu.cn/s/fr4o",
+            ),
+        )
+        assertNull(
+            parse(
+                NotificationRules.WECHAT,
+                ".。o0O",
+                ".。o0O: [链接] 玩赚中心｜消费抽620元，点亮商户赢13.5元",
+            ),
+        )
+    }
+
+    @Test
+    fun `微信通知带微信支付标识但只有营销消费词_仍不入账`() {
+        // 身份闸门 + 支出词收窄的双重防护：即使正文带"微信支付"，只有营销词"消费"也不成单
+        assertNull(parse(NotificationRules.WECHAT, "微信支付", "满0.62元消费冲击620元立减券"))
+        assertNull(parse(NotificationRules.WECHAT, "微信支付", "玩赚中心｜消费抽620元，点亮商户赢13.5元"))
+    }
+
+    @Test
+    fun `微信支付通知的两种形态仍然识别`() {
+        // 收款（title/正文都带"微信支付"）
+        val income = parse(NotificationRules.WECHAT, "微信支付", "微信支付收款0.01元（朋友到账）")!!
+        assertEquals(TxType.INCOME, income.type)
+        assertEquals(1L, income.amountCents)
+        // 支出（title 带"微信支付"）
+        val expense = parse(NotificationRules.WECHAT, "微信支付", "已支付¥12.80")!!
+        assertEquals(TxType.EXPENSE, expense.type)
+        assertEquals(1280L, expense.amountCents)
+    }
+
+    @Test
+    fun `微信已支付通知的营销尾巴不会被当成金额`() {
+        // 通用反向正则含"消费"时会把"620元消费"当金额；微信专用词表只认已支付/已扣费/自动扣费
+        val r = parse(NotificationRules.WECHAT, "微信支付", "已支付¥12.80，满620元消费立减")!!
+        assertEquals(TxType.EXPENSE, r.type)
+        assertEquals(1280L, r.amountCents)
+    }
+
+    @Test
+    fun `微信身份闸门不影响支付宝与云闪付`() {
+        // 闸门只管微信：没有"微信支付"字样的支付宝/云闪付通知照常识别（消费等词仍生效）
+        assertEquals(
+            100L,
+            parse(NotificationRules.ALIPAY, "支付宝通知", "支付宝成功收款1.00元")!!.amountCents,
+        )
+        assertEquals(
+            5000L,
+            parse(NotificationRules.UNIONPAY, "云闪付", "您尾号1234的账户消费50.00元")!!.amountCents,
+        )
+    }
+
+    @Test
+    fun `微信身份闸门同样约束金额补录流程`() {
+        // parseDirectionOnly 也过闸门：带"微信支付"的支出骨架仍能提示补金额
+        val hint = NotificationRules.parseDirectionOnly(NotificationRules.WECHAT, "微信支付", "已支付")!!
+        assertEquals(TxType.EXPENSE, hint.type)
+        // 聊天里出现"已支付"但没有身份标识 → 不打扰用户
+        assertNull(NotificationRules.parseDirectionOnly(NotificationRules.WECHAT, "啊小号", "我已经支付了"))
+    }
+
+    @Test
+    fun `无金额退款提醒也要过微信身份闸门`() {
+        // 真实形态：title=微信支付 text=退款到账通知 → 仍转"退款待处理"流程
+        assertTrue(
+            NotificationRules.isAmountlessRefundNotice(NotificationRules.WECHAT, "微信支付", "退款到账通知"),
+        )
+        // 聊天里出现"退款"但没有身份标识 → 不触发退款流程（只进捕获日志）
+        assertFalse(
+            NotificationRules.isAmountlessRefundNotice(NotificationRules.WECHAT, "啊小号", "我申请退款了"),
+        )
+        // 闸门只管微信：支付宝的无金额退款提醒不受影响
+        assertTrue(
+            NotificationRules.isAmountlessRefundNotice(NotificationRules.ALIPAY, "支付宝", "退款到账通知"),
+        )
+    }
+
     // ---------- 边界 ----------
 
     @Test
@@ -236,7 +328,9 @@ class NotificationRulesTest {
 
     @Test
     fun `ambiguous direction returns null`() {
-        assertNull(parse(NotificationRules.WECHAT, "微信支付", "收款10.00元同时有支出20.00元"))
+        // 微信支出词收窄到 已支付/已扣费/自动扣费 后，歧义样本改用微信在用的支出写法
+        // （原样本用"支出"，收窄后它不再是微信支出词，样本会变成单纯收款）
+        assertNull(parse(NotificationRules.WECHAT, "微信支付", "收款10.00元同时已支付20.00元"))
     }
 
     @Test

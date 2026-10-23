@@ -26,6 +26,16 @@ import com.controleco.app.util.Money
  * 4. 金额上限：超过 ¥1000 万视为误抓（订单号/手机号），宁可漏记不记错账；
  * 5. 噪声黑名单：只在**没有任何交易确认短语**时一票否决（真实通知常带"使用优惠券省 3 元"的
  *    营销尾巴，不能连交易一起丢）。
+ *
+ * 2026-10-23 两条真实误判 → 2026-10-24 微信通道收紧（见 docs/开发日志.md）：
+ * title=啊小号 `满0.62元消费冲击620元立减券` → ¥0.62；title=.。o0O `玩赚中心｜消费抽620元` → ¥620.00。
+ * 两条都是**微信聊天/营销推送**（title 是联系人昵称），只因含"消费"+金额就被当成支出。
+ * 1. **身份闸门**（只作用于 `com.tencent.mm`）：title/正文必须出现「微信支付」才解析，
+ *    否则只进捕获日志、不入账（微信支付通知的两种形态都带它：收款 `微信支付收款0.01元（朋友到账）`、
+ *    支出 `已支付¥12.80`）；
+ * 2. **微信支出词收窄**为测试锁定的三种（`已支付`/`已扣费`/`自动扣费`），去掉泛化的 `消费`；
+ *    微信金额正则同步换成同一组关键词，避免"已支付¥12.80，满620元消费立减"把 ¥620 当金额。
+ * 支付宝/云闪付/银行/电商链路与微信页面解析均不受影响。
  */
 object NotificationRules {
 
@@ -72,6 +82,27 @@ object NotificationRules {
     fun isInterested(packageName: String): Boolean =
         packageName in knownPackages || packageName in checkoutPackages
 
+    // ---------- 微信通知身份闸门（只作用于微信，2026-10-24） ----------
+
+    /** 「微信支付」服务通知的身份标识：微信账务通知的两种形态都带它（见测试锁定的真实样本） */
+    const val WECHAT_PAY_MARK = "微信支付"
+
+    /**
+     * 微信通知身份闸门：`com.tencent.mm` 的通知只有**「微信支付」服务通知**才参与账务解析——
+     * title 或正文（text/bigText）必须出现「微信支付」。
+     *
+     * 为什么必须有这道闸门：微信的聊天/群/公众号消息与支付通知共用同一个包名，聊天消息的 title
+     * 是联系人昵称、正文以昵称开头。真实误判（2026-10-23，channel=通知，两条都被自动入账）：
+     * title=啊小号 正文`满0.62元消费冲击620元立减券` → 记成 ¥0.62；
+     * title=.。o0O 正文`玩赚中心｜消费抽620元` → 记成 ¥620.00。
+     * 命中不到身份标识的通知**只进捕获日志、不入账**：原始快照仍由 CaptureCenter 先落库，
+     * 规则返回 null 即可（不入待确认、不自动入账）。
+     *
+     * 非微信来源恒为 true——本闸门只管微信，支付宝/云闪付/银行/电商链路不受影响。
+     */
+    fun wechatIdentityOk(packageName: String, title: String, text: String, bigText: String): Boolean =
+        packageName != WECHAT || (title + text + bigText).contains(WECHAT_PAY_MARK)
+
     /** 全渠道统一金额捕获组：优先匹配带千分位的写法（6,064.76），否则普通写法（0.01 / 100） */
     private const val AMT = "([0-9]{1,3}(?:,[0-9]{3})+(?:\\.[0-9]{1,2})?|[0-9]+(?:\\.[0-9]{1,2})?)"
 
@@ -83,8 +114,15 @@ object NotificationRules {
      * title=微信支付 text=退款到账通知）——无法入队，转"退款待处理"流程让用户选被退款的账单。
      * 带金额的退款在 parse() 里已正常入队，不会走到这里。
      */
-    fun isAmountlessRefundNotice(packageName: String, title: String, text: String): Boolean =
+    fun isAmountlessRefundNotice(
+        packageName: String,
+        title: String,
+        text: String,
+        bigText: String = "",
+    ): Boolean =
         packageName in knownPackages &&
+            // 微信同样要过身份闸门：聊天里出现"退款"不能触发退款待处理流程
+            wechatIdentityOk(packageName, title, text, bigText) &&
             ((title + text).contains("退款") || (title + text).contains("退回"))
 
     fun sourceLabel(packageName: String): String = when {
@@ -245,6 +283,16 @@ object NotificationRules {
         "已扣费", "消费成功",
     )
 
+    /**
+     * 微信支出方向词：**只认测试锁定过的三种**（`已支付` / `已扣费` / `自动扣费`）。
+     *
+     * 刻意不含泛化的 `消费`（也不含 `支出`/`付款`/`扣款`）：这些是营销文案的常用词，
+     * 微信通道没有真机样本支撑它们。真实误判（2026-10-23）就是靠 `消费` 定向的——
+     * 「满0.62元消费冲击620元立减券」被判支出，再由金额正则抓出 ¥0.62 / ¥620.00。
+     * 收窄后微信只按已确认的三种支出写法识别；`消费` 等词仍服务支付宝/云闪付/银行（通用词表）。
+     */
+    private val wechatExpenseWords = listOf("已支付", "已扣费", "自动扣费")
+
     /** 文本是否像折叠摘要（`[2条]`/`共3条`/`2条新消息`）；摘要自身常不含金额，需要子通知补全 */
     fun looksLikeGroupedSummary(text: String): Boolean = groupedSummary.containsMatchIn(text)
 
@@ -284,6 +332,11 @@ object NotificationRules {
         if (looksLikeGroupedSummary(raw)) return null
         val body = normalize(raw)
         if (body.isBlank()) return null
+        // 微信身份闸门（只影响微信）：聊天/营销通知不进"输入金额"补录流程
+        if (!wechatIdentityOk(packageName, title, text, bigText)) {
+            AppLog.d("Ntf", "skip wechat non-pay notice (identity gate) pkg=$packageName title=[$title] body=$body")
+            return null
+        }
         if (isNoise(body)) return null
         if (isRedPacketNotice(body)) {
             AppLog.d("Ntf", "skip red packet notice (user confirmation only) pkg=$packageName body=$body")
@@ -292,7 +345,12 @@ object NotificationRules {
         if (body.contains("退款") || body.contains("退回")) return null
 
         val income = incomePhrases.any { body.contains(it) }
-        val expense = expensePhrases.any { body.contains(it) }
+        // 微信支出词收窄（同 parse）：只认已支付/已扣费/自动扣费
+        val expense = if (packageName == WECHAT) {
+            wechatExpenseWords.any { body.contains(it) }
+        } else {
+            expensePhrases.any { body.contains(it) }
+        }
         val type = when {
             income && !expense -> TxType.INCOME
             expense && !income -> TxType.EXPENSE
@@ -332,6 +390,23 @@ object NotificationRules {
     /** 兜底：文本里直接出现 ¥ 金额（已支付¥12.80 / 收款金额¥0.01） */
     private val currencyAmount = Regex("""[￥¥]\s*$AMT""")
 
+    // ---------- 微信专用金额正则（关键词与 wechatExpenseWords 对齐，2026-10-24） ----------
+
+    /**
+     * 微信支出金额（正向/反向）刻意与 [wechatExpenseWords] 用同一组关键词。
+     *
+     * 通用正则里含 `消费/支出/付款`，反向优先时会跨越真实支付金额去够营销尾巴：
+     * 「已支付¥12.80，满620元消费立减」会被通用反向正则抓成 ¥620.00（真实支付金额被丢掉）。
+     * 微信单独一套后，`消费` 在微信通道的方向与金额两处都不再参与。
+     */
+    private val wechatExpenseAmount =
+        Regex("""(?:已支付|已扣费|自动扣费)[^\d￥¥.]{0,8}${AMT}元""")
+
+    /** 微信反向金额：只认微信在用的收/退/支写法（`6.50元的自动扣费`） */
+    private val wechatReversedAmount = Regex(
+        """$AMT\s*元[^，。\d]{0,8}的?\s*(?:收款|收入|到账|入账|退款|退回|已支付|已扣费|自动扣费)""",
+    )
+
     data class ParsedNotification(
         val type: TxType,
         val amountCents: Long,
@@ -357,6 +432,12 @@ object NotificationRules {
         ).trim()
         if (body.isBlank()) return null
 
+        // 微信身份闸门（只影响微信）：非「微信支付」服务通知只进捕获日志，不入队/不入账
+        if (!wechatIdentityOk(packageName, title, text, bigText)) {
+            AppLog.d("Ntf", "skip wechat non-pay notice (identity gate) pkg=$packageName title=[$title] body=$body")
+            return null
+        }
+
         if (isNoise(body)) {
             AppLog.d("Ntf", "skip noise pkg=$packageName body=$body")
             return null
@@ -375,9 +456,15 @@ object NotificationRules {
         val refundHit = body.contains("退款") || body.contains("退回")
         val receiveHit = receivePhrases.any { body.contains(it) }
         val incomeHit = body.contains("收款") || body.contains("到账") || body.contains("入账") || body.contains("收入")
-        val expenseHit = body.contains("已支付") || body.contains("支付成功") || body.contains("支出") ||
-            body.contains("消费") || body.contains("付款") || body.contains("扣款") ||
-            body.contains("扣费") || body.contains("支付凭证")
+        // 微信支出词单独收窄（只认已支付/已扣费/自动扣费，不含"消费"）；
+        // 支付宝/云闪付/银行/电商仍走通用词表，行为不变
+        val expenseHit = if (packageName == WECHAT) {
+            wechatExpenseWords.any { body.contains(it) }
+        } else {
+            body.contains("已支付") || body.contains("支付成功") || body.contains("支出") ||
+                body.contains("消费") || body.contains("付款") || body.contains("扣款") ||
+                body.contains("扣费") || body.contains("支付凭证")
+        }
 
         val type: TxType
         val isRefund: Boolean
@@ -394,9 +481,12 @@ object NotificationRules {
             }
         }
 
+        val wechat = packageName == WECHAT
         val primary = when {
             isRefund -> refundAmount
             type == TxType.INCOME -> incomeAmount
+            // 微信支出金额用专用正则：通用正则里的"消费"会把营销尾巴的金额当成本笔金额
+            wechat -> wechatExpenseAmount
             else -> expenseAmount
         }
         val fallbackAllowed = refundHit || receiveHit || (type == TxType.INCOME && incomeHit) ||
@@ -404,7 +494,8 @@ object NotificationRules {
         // 反向优先：金额在关键词前是主流格式（"你有一笔14.90元的支出"），且能避开
         // 关键词后跟营销文案的干扰（真实样本"你有一笔0.01元的支出，领1元生活缴费红包"
         // 曾被正向正则抓走红包的"1元"，识别成 ¥1.00）
-        val amountText = reversedAmount.find(body)?.groupValues?.get(1)
+        val reversed = if (wechat) wechatReversedAmount else reversedAmount
+        val amountText = reversed.find(body)?.groupValues?.get(1)
             ?: primary.find(body)?.groupValues?.get(1)
             ?: (if (fallbackAllowed) currencyAmount.find(body)?.groupValues?.get(1) else null)
         if (amountText == null) {
