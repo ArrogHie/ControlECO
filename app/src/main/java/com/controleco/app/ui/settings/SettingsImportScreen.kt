@@ -1,28 +1,24 @@
 package com.controleco.app.ui.settings
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.controleco.app.data.LedgerViewModel
 import com.controleco.app.ui.common.EcoIcons
 import com.controleco.app.ui.common.SettingsDivider
-import com.controleco.app.ui.common.SettingsNote
 import com.controleco.app.ui.common.SettingsPage
 import com.controleco.app.ui.common.SettingsPane
 import com.controleco.app.ui.common.SettingsRow
 import com.controleco.app.ui.common.SettingsSection
-import com.controleco.app.ui.common.SettingsSwitchRow
 import com.controleco.app.ui.theme.eco
 
 /**
- * 账单导入（个人页「账本」→ 账单导入）：导入入口 + 微信/支付宝导出账单的路径教程
- * + 退款记录显示开关。所有回调与开关写回逻辑保持不变。
+ * 账单导入（个人页「账本」→ 账单导入）：导入入口 + 微信/支付宝导出账单的路径教程。
+ *
+ * 页面上不再有「显示退款记录」开关：退款记录永远入库、永远显示、永远按收入计入汇总额，
+ * 被退款的原支出照常作为支出显示（带「已退」角标）。
  */
 @Composable
 fun SettingsImportScreen(
-    vm: LedgerViewModel,
     onBack: () -> Unit,
     onImport: () -> Unit,
 ) {
@@ -59,21 +55,5 @@ fun SettingsImportScreen(
                 minHeight = 66.dp,
             )
         }
-
-        SettingsSection(title = "显示", aside = "DISPLAY")
-        SettingsPane {
-            RefundDisplaySetting(vm)
-        }
-
     }
-}
-
-@Composable
-private fun RefundDisplaySetting(vm: LedgerViewModel) {
-    val showRefunds by vm.showRefunds.collectAsStateWithLifecycle()
-    SettingsSwitchRow(
-        title = "显示退款记录",
-        checked = showRefunds,
-        onCheckedChange = { vm.setShowRefunds(it) },
-    )
 }

@@ -238,7 +238,6 @@ fun AccBookNav(
         }
         composable("settings/import") {
             SettingsImportScreen(
-                vm = vm,
                 onBack = { navController.popBackStack() },
                 onImport = { navController.navigate("import") },
             )

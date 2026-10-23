@@ -157,6 +157,7 @@ internal class ConfirmCardState {
             learnedRules = learnedRules,
             counterparty = pending.counterparty,
             note = pending.note,
+            isRefund = pending.refundMark == com.controleco.app.data.db.RefundMark.REFUND_INCOME,
         )
         accountId = CaptureDefaults.accountId(
             accounts,
@@ -193,6 +194,7 @@ internal class ConfirmCardState {
             categoryId = CaptureDefaults.categoryId(
                 categories, pending.type, pending.counterparty.ifBlank { pending.note },
                 learnedRules = learnedRules, counterparty = pending.counterparty, note = pending.note,
+                isRefund = pending.refundMark == com.controleco.app.data.db.RefundMark.REFUND_INCOME,
             )
         }
         if (accountId == null) {

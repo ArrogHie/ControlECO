@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.controleco.app.data.LedgerViewModel
 import com.controleco.app.data.db.AccountEntity
+import com.controleco.app.data.db.RefundCategory
 import com.controleco.app.data.db.RefundMark
 import com.controleco.app.data.db.TxType
 import com.controleco.app.data.model.ImportCommitResult
@@ -95,7 +96,6 @@ fun ImportScreen(vm: LedgerViewModel, onBack: () -> Unit) {
     val error by vm.importError.collectAsStateWithLifecycle()
     val done by vm.importDone.collectAsStateWithLifecycle()
     val accounts by vm.accounts.collectAsStateWithLifecycle()
-    val showRefunds by vm.showRefunds.collectAsStateWithLifecycle()
 
     var accountId by remember { mutableStateOf<Long?>(null) }
     var parsing by remember { mutableStateOf(false) }
@@ -153,7 +153,6 @@ fun ImportScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                     bill = b,
                     accounts = accounts,
                     accountId = accountId,
-                    showRefunds = showRefunds,
                     error = error,
                     onSelectAccount = { accountId = it },
                     onCommit = { accountId?.let { vm.commitImport(b, it) } },
@@ -380,7 +379,6 @@ private fun ImportPreviewStage(
     bill: ParsedBill,
     accounts: List<AccountEntity>,
     accountId: Long?,
-    showRefunds: Boolean,
     error: String?,
     onSelectAccount: (Long) -> Unit,
     onCommit: () -> Unit,
@@ -414,14 +412,9 @@ private fun ImportPreviewStage(
                     color = c.muted,
                 )
                 if (bill.refundCount > 0) {
-                    val refundState = if (showRefunds) {
-                        "已开启显示"
-                    } else {
-                        "未开启显示，不计入流水与汇总"
-                    }
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "其中退款相关 ${bill.refundCount} 条（已入库；当前$refundState，可在设置中切换）",
+                        "其中退款相关 ${bill.refundCount} 条（已入库：退款收入记入收入，被退款的原支出照常记入支出）",
                         style = EcoType.PageNote,
                         color = c.amber,
                     )
@@ -499,7 +492,8 @@ private fun ImportPreviewRow(row: ImportedBillRow) {
     val detail = buildString {
         append(row.note.ifBlank { row.goods }.ifBlank { "-" })
         append(" → ")
-        append(row.guessedCategoryName)
+        // 退款收入入库时固定归「退款」分类（不按商户名猜），预览按同一口径显示
+        append(if (row.refundMark == RefundMark.REFUND_INCOME) RefundCategory.NAME else row.guessedCategoryName)
         if (row.refundMark != RefundMark.NONE) {
             append(" ｜")
             append(if (row.refundMark == RefundMark.REFUND_INCOME) "退款收入" else "已退款")

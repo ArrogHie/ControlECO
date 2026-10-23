@@ -26,6 +26,7 @@ import com.controleco.app.data.db.CapturedNotificationEntity
 import com.controleco.app.data.db.CategoryEntity
 import com.controleco.app.data.db.CategorySumRow
 import com.controleco.app.data.db.PendingTransactionEntity
+import com.controleco.app.data.db.RefundCategory
 import com.controleco.app.data.db.RefundMark
 import com.controleco.app.data.db.TransactionEntity
 import com.controleco.app.data.db.TransactionRow
@@ -80,17 +81,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     private val prefs = getApplication<AccBookApp>()
         .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-
-    private val _showRefunds = MutableStateFlow(
-        prefs.getBoolean(KEY_SHOW_REFUNDS, false),
-    )
-    val showRefunds: StateFlow<Boolean> = _showRefunds
-
-    fun setShowRefunds(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_SHOW_REFUNDS, enabled).apply()
-        _showRefunds.value = enabled
-        AppLog.i("settings", "showRefunds=$enabled")
-    }
 
     // ---------- 预算：会计月首日 / 日·月预算 / 生效月预算 ----------
 
@@ -324,14 +314,15 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * 首页"本期已花"：固定取**当前会计月**（不随流水页翻月变化；区间随月首日滚动）。
-     * 口径 = 本期支出合计 − 本期退款到账（现金净流出，退款始终计入，与显示开关无关）。
+     * 口径 = 本期支出合计 − 本期退款到账（现金净流出）。
+     * 预算只关心"钱少了多少"：工资/红包等收入不参与，**退款必须算回来**（钱退回来了 = 没花）。
      * 剩余/建议日花/状态由 UI 用 Budget.compute 纯函数计算。
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val homeNetSpent: StateFlow<Long?> = currentPeriod.flatMapLatest { period ->
         val (start, end) = period.toMillisRange(zone)
         combine(
-            txDao.observeTypeTotals(start, end, true),
+            txDao.observeTypeTotals(start, end),
             txDao.observeRefundIncomeTotal(start, end),
         ) { totals, refundIncome ->
             (totals.firstOrNull { it.type == TxType.EXPENSE }?.totalCents ?: 0L) - refundIncome
@@ -342,7 +333,7 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     @OptIn(ExperimentalCoroutinesApi::class)
     val homeCategorySums: StateFlow<List<CategorySumRow>?> = currentPeriod.flatMapLatest { period ->
         val (start, end) = period.toMillisRange(zone)
-        txDao.observeCategorySums(start, end, TxType.EXPENSE, true)
+        txDao.observeCategorySums(start, end, TxType.EXPENSE)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
@@ -352,7 +343,7 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     @OptIn(ExperimentalCoroutinesApi::class)
     val homePeriodRows: StateFlow<List<TransactionRow>?> = currentPeriod.flatMapLatest { period ->
         val (start, end) = period.toMillisRange(zone)
-        txDao.observeRows(start, end, true)
+        txDao.observeRows(start, end)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
@@ -369,7 +360,7 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         val start = day.atStartOfDay(zone).toInstant().toEpochMilli()
         val end = day.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
         combine(
-            txDao.observeTypeTotals(start, end, true),
+            txDao.observeTypeTotals(start, end),
             txDao.observeRefundIncomeTotal(start, end),
         ) { totals, refundIncome ->
             (totals.firstOrNull { it.type == TxType.EXPENSE }?.totalCents ?: 0L) - refundIncome
@@ -435,25 +426,23 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     // 账单/统计共用的当月数据：stateIn 缓存上一次结果 —— 切标签页回来先显示缓存、
     // 后台再刷新，不再"每次进页面从空闪到满"；没有订阅者 5 秒后自动停掉 Room 观察。
+    // 退款记录始终参与（不再有"显示退款记录"开关）。
     @OptIn(ExperimentalCoroutinesApi::class)
     val periodRows: StateFlow<List<TransactionRow>?> =
-        combine(periodRange, _showRefunds) { rng, show -> rng to show }.flatMapLatest { (rng, show) ->
-            txDao.observeRows(rng.first, rng.second, show)
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        periodRange.flatMapLatest { (start, end) -> txDao.observeRows(start, end) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val periodTotals: StateFlow<List<TypeTotalRow>?> =
-        combine(periodRange, _showRefunds) { rng, show -> rng to show }.flatMapLatest { (rng, show) ->
-            txDao.observeTypeTotals(rng.first, rng.second, show)
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        periodRange.flatMapLatest { (start, end) -> txDao.observeTypeTotals(start, end) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val periodCategorySums: StateFlow<List<CategorySumRow>?> =
-        combine(periodRange, _showRefunds) { rng, show -> rng to show }.flatMapLatest { (rng, show) ->
-            txDao.observeCategorySums(rng.first, rng.second, TxType.EXPENSE, show)
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        periodRange.flatMapLatest { (start, end) -> txDao.observeCategorySums(start, end, TxType.EXPENSE) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    /** 退款到账金额合计（"已取消收支"），是否展示由 UI 根据开关决定 */
+    /** 退款到账金额合计（预算口径：支出合计 − 本合计 = 现金净流出） */
     @OptIn(ExperimentalCoroutinesApi::class)
     val periodRefundTotal: StateFlow<Long?> = periodRange.flatMapLatest { rng ->
         txDao.observeRefundIncomeTotal(rng.first, rng.second)
@@ -465,10 +454,7 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     val categories: StateFlow<List<CategoryEntity>> =
         categoryDao.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val accountBalances: Flow<List<AccountBalanceRow>> = _showRefunds.flatMapLatest { r ->
-        txDao.observeBalances(r)
-    }
+    val accountBalances: Flow<List<AccountBalanceRow>> = txDao.observeBalances()
 
     /** 首页"总存款"预览：全部账户（初始金额 + 交易净额）合计 */
     val totalDepositCents: StateFlow<Long?> = accountBalances
@@ -876,14 +862,20 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val cats = categoryDao.getAll()
                 val entities = bill.rows.map { row ->
-                    val cat = cats.firstOrNull { it.type == row.type && it.name == row.guessedCategoryName }
-                        ?: cats.firstOrNull { it.type == row.type && it.name == "其他" }
-                        ?: cats.firstOrNull { it.type == row.type }
+                    // 退款收入一律归「退款」分类：导入时按商户名猜出的购物/餐饮对退款行没有意义
+                    val categoryId = (if (row.refundMark == RefundMark.REFUND_INCOME) {
+                        RefundCategory.incomeCategoryId(cats)
+                    } else {
+                        cats.firstOrNull { it.type == row.type && it.name == row.guessedCategoryName }
+                            ?.id
+                            ?: cats.firstOrNull { it.type == row.type && it.name == "其他" }?.id
+                            ?: cats.firstOrNull { it.type == row.type }?.id
+                    })
                         ?: error("缺少${if (row.type == TxType.EXPENSE) "支出" else "收入"}分类，请先在分类管理中添加")
                     TransactionEntity(
                         type = row.type,
                         amountCents = row.amountCents,
-                        categoryId = cat.id,
+                        categoryId = categoryId,
                         accountId = accountId,
                         timestamp = row.timestamp,
                         note = row.note,
@@ -1127,14 +1119,14 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                     amountCents <= 0 -> { onDone("退款金额需大于 0"); return@launch }
                 }
                 val cats = categoryDao.getAll()
-                val incomeCat = cats.firstOrNull { it.type == TxType.INCOME && it.name == "其他" }
-                    ?: cats.firstOrNull { it.type == TxType.INCOME }
+                // 退款收入归「退款」分类（不是收入「其他」）：账单里一眼能看出这是退回来的钱
+                val incomeCatId = RefundCategory.incomeCategoryId(cats)
                     ?: error("缺少收入分类，请先在分类管理中添加")
                 txDao.insert(
                     TransactionEntity(
                         type = TxType.INCOME,
                         amountCents = amountCents,
-                        categoryId = incomeCat.id,
+                        categoryId = incomeCatId,
                         accountId = expense.accountId,
                         timestamp = System.currentTimeMillis(),
                         note = "退款收入（手动关联）",
@@ -1218,7 +1210,10 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             val accs = accountDao.getAll()
             val entities = items.map { item ->
                 val cat = cats.firstOrNull {
-                    it.id == CaptureDefaults.categoryId(cats, item.type, item.counterparty.ifBlank { item.note })
+                    it.id == CaptureDefaults.categoryId(
+                        cats, item.type, item.counterparty.ifBlank { item.note },
+                        isRefund = item.refundMark == RefundMark.REFUND_INCOME,
+                    )
                 }
                     ?: return@launch
                 TransactionEntity(
@@ -1249,9 +1244,9 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 待确认确认弹窗的默认分类（该类型的"其他"，缺省取该类型第一个；规则与自动入账共用） */
-    fun guessCategoryId(type: TxType, merchantHint: String = ""): Long? =
-        CaptureDefaults.categoryId(categories.value, type, merchantHint)
+    /** 待确认确认弹窗的默认分类（退款收入固定「退款」；其余为该类型的"其他"，缺省取该类型第一个） */
+    fun guessCategoryId(type: TxType, merchantHint: String = "", isRefund: Boolean = false): Long? =
+        CaptureDefaults.categoryId(categories.value, type, merchantHint, isRefund = isRefund)
 
     /**
      * 按来源推测账户：微信→微信零钱、支付宝→支付宝、银行侧（短信/银行推送）→ 先按银行名匹配
@@ -1272,7 +1267,6 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val PREFS_NAME = "settings"
-        const val KEY_SHOW_REFUNDS = "show_refunds"
         const val KEY_CARD_IMAGE = "card_image_uri"
         const val KEY_CARD_TRANSFORM = "card_image_transform"
         const val KEY_CARD_COLOR = "card_image_color"

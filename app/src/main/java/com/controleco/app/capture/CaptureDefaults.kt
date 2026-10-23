@@ -5,6 +5,7 @@ import com.controleco.app.capture.page.PaymentInstrumentParser
 import com.controleco.app.data.db.AccountEntity
 import com.controleco.app.data.db.CategoryEntity
 import com.controleco.app.data.db.MerchantRuleEntity
+import com.controleco.app.data.db.RefundCategory
 import com.controleco.app.data.db.TxSource
 import com.controleco.app.data.db.TxType
 import com.controleco.app.util.CategoryGuesser
@@ -25,7 +26,11 @@ internal object CaptureDefaults {
         learnedRules: List<MerchantRuleEntity> = emptyList(),
         counterparty: String = merchantHint,
         note: String = "",
+        /** 退款收入：固定归「退款」分类，不参与商户学习与关键词猜测 */
+        isRefund: Boolean = false,
     ): Long? {
+        // 0) 退款收入永远归「退款」：商户名与原支出相同，学到的规则（购物/餐饮）对退款没有意义
+        if (isRefund) return RefundCategory.incomeCategoryId(categories)
         // 1) 学到的商户规则（"越用越准"）
         MerchantRules.categoryIdFrom(learnedRules, categories, type, counterparty, note)?.let { return it }
         // 2) 关键词猜测

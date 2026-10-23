@@ -45,6 +45,7 @@ import com.controleco.app.data.db.AccountEntity
 import com.controleco.app.data.db.CategoryEntity
 import com.controleco.app.data.db.PendingStatus
 import com.controleco.app.data.db.PendingTransactionEntity
+import com.controleco.app.data.db.RefundMark
 import com.controleco.app.data.db.TxType
 import com.controleco.app.ui.common.EcoIcons
 import com.controleco.app.ui.eco.EcoChip
@@ -172,7 +173,11 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
             item = p,
             accounts = accounts,
             categories = categories,
-            defaultCategoryId = vm.guessCategoryId(p.type, p.counterparty.ifBlank { p.note }),
+            defaultCategoryId = vm.guessCategoryId(
+                p.type,
+                p.counterparty.ifBlank { p.note },
+                isRefund = p.refundMark == RefundMark.REFUND_INCOME,
+            ),
             defaultAccountId = vm.guessAccountId(p.sourcePackage, p.ruleName, p.paymentInstrument),
             onConfirm = { categoryId, accountId, counterparty ->
                 vm.confirmPending(p, categoryId, accountId, counterparty)

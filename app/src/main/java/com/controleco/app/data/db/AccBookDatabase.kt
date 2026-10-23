@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CaptureTraceEntity::class,
         MerchantRuleEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true,
 )
 abstract class AccBookDatabase : RoomDatabase() {
@@ -178,6 +178,31 @@ abstract class AccBookDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v11：退款永远显示、永远按收入记账。
+         * - 收入分类补一条「退款」（已存在则不重复插入）；
+         * - 历史退款收入（refundMark = REFUND_INCOME）统一改挂到「退款」分类，
+         *   否则同一类记录会散落在导入时猜出来的购物/餐饮等分类里。
+         * 无 schema 变化（只补数据），旧库升级与新建库的列结构仍逐字一致。
+         */
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "INSERT INTO categories (name, type, sortOrder, icon) " +
+                        "SELECT '${RefundCategory.NAME}', '${TxType.INCOME}', 3, '' " +
+                        "WHERE NOT EXISTS (" +
+                        "SELECT 1 FROM categories WHERE type = '${TxType.INCOME}' AND name = '${RefundCategory.NAME}')",
+                )
+                db.execSQL(
+                    "UPDATE transactions SET categoryId = (" +
+                        "SELECT id FROM categories " +
+                        "WHERE type = '${TxType.INCOME}' AND name = '${RefundCategory.NAME}' LIMIT 1) " +
+                        "WHERE refundMark = 'REFUND_INCOME' AND EXISTS (" +
+                        "SELECT 1 FROM categories WHERE type = '${TxType.INCOME}' AND name = '${RefundCategory.NAME}')",
+                )
+            }
+        }
+
         @Volatile
         private var instance: AccBookDatabase? = null
 
@@ -191,6 +216,7 @@ abstract class AccBookDatabase : RoomDatabase() {
                     .addMigrations(
                         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
                         MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
+                        MIGRATION_10_11,
                     )
                     .build().also { instance = it }
             }
@@ -205,7 +231,8 @@ object DefaultData {
     val defaultExpenseCategories =
         listOf("餐饮", "交通", "购物", "日用", "居住", "娱乐", "医疗", "其他")
 
-    val defaultIncomeCategories = listOf("工资", "理财", "红包", "其他")
+    /** 收入分类：「退款」固定排在「其他」之前（退款是常规收入项，其他是兜底项） */
+    val defaultIncomeCategories = listOf("工资", "理财", "红包", RefundCategory.NAME, "其他")
 
     suspend fun seedIfNeeded(db: AccBookDatabase) {
         if (db.accountDao().countAll() == 0) {

@@ -2903,6 +2903,7 @@ object CaptureCenter {
         val categoryId = CaptureDefaults.categoryId(
             categories, type, counterparty.ifBlank { note },
             learnedRules = learned, counterparty = counterparty, note = note,
+            isRefund = isRefund,
         )
         // 账户：页面解析出的支付工具（"招商银行(1234)"/"零钱"）优先参与匹配——
         // "从微信付的"不等于"从微信零钱付的"，匹配不到才回落渠道兜底

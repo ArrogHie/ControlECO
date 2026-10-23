@@ -47,7 +47,8 @@ data class AccountBalanceRow(
 interface TransactionDao {
 
     /**
-     * includeRefunds=false 时过滤掉退款标记记录（设置"显示退款记录"关闭）。
+     * 区间内的流水。退款记录（`REFUNDED_EXPENSE` / `REFUND_INCOME`）始终参与查询与统计——
+     * "显示退款记录"开关已删除，退款永远作为收入显示，被退款的原支出照常作为支出显示。
      */
     @Query(
         """SELECT t.id AS id, t.type AS type, t.amountCents AS amountCents, t.timestamp AS timestamp,
@@ -59,29 +60,26 @@ interface TransactionDao {
            JOIN categories c ON t.categoryId = c.id
            JOIN accounts a ON t.accountId = a.id
            WHERE t.timestamp >= :startMillis AND t.timestamp < :endMillis
-             AND (:includeRefunds = 1 OR t.refundMark = 'NONE')
            ORDER BY t.timestamp DESC, t.id DESC"""
     )
-    fun observeRows(startMillis: Long, endMillis: Long, includeRefunds: Boolean): Flow<List<TransactionRow>>
+    fun observeRows(startMillis: Long, endMillis: Long): Flow<List<TransactionRow>>
 
     @Query(
         """SELECT type AS type, SUM(amountCents) AS totalCents FROM transactions
            WHERE timestamp >= :startMillis AND timestamp < :endMillis
-             AND (:includeRefunds = 1 OR refundMark = 'NONE')
            GROUP BY type"""
     )
-    fun observeTypeTotals(startMillis: Long, endMillis: Long, includeRefunds: Boolean): Flow<List<TypeTotalRow>>
+    fun observeTypeTotals(startMillis: Long, endMillis: Long): Flow<List<TypeTotalRow>>
 
     @Query(
         """SELECT c.id AS categoryId, c.name AS categoryName, SUM(t.amountCents) AS totalCents
            FROM transactions t JOIN categories c ON t.categoryId = c.id
            WHERE t.timestamp >= :startMillis AND t.timestamp < :endMillis AND t.type = :type
-             AND (:includeRefunds = 1 OR t.refundMark = 'NONE')
            GROUP BY c.id, c.name ORDER BY totalCents DESC"""
     )
-    fun observeCategorySums(startMillis: Long, endMillis: Long, type: TxType, includeRefunds: Boolean): Flow<List<CategorySumRow>>
+    fun observeCategorySums(startMillis: Long, endMillis: Long, type: TxType): Flow<List<CategorySumRow>>
 
-    /** 退款到账金额合计（"已取消收支"），与显示开关无关，由 UI 决定是否展示 */
+    /** 退款到账金额合计（预算/统计口径：支出合计 − 本合计 = 现金净流出） */
     @Query(
         """SELECT COALESCE(SUM(amountCents), 0) FROM transactions
            WHERE timestamp >= :startMillis AND timestamp < :endMillis
@@ -92,11 +90,10 @@ interface TransactionDao {
     @Query(
         """SELECT a.id AS accountId, a.initialBalanceCents AS initialBalanceCents,
            COALESCE(SUM(CASE WHEN t.type = 'EXPENSE' THEN -t.amountCents ELSE t.amountCents END), 0) AS signedSumCents
-           FROM accounts a LEFT JOIN transactions t
-             ON t.accountId = a.id AND (:includeRefunds = 1 OR t.refundMark = 'NONE')
+           FROM accounts a LEFT JOIN transactions t ON t.accountId = a.id
            GROUP BY a.id"""
     )
-    fun observeBalances(includeRefunds: Boolean): Flow<List<AccountBalanceRow>>
+    fun observeBalances(): Flow<List<AccountBalanceRow>>
 
     @Query("SELECT * FROM transactions WHERE id = :id")
     suspend fun getById(id: Long): TransactionEntity?

@@ -2,6 +2,7 @@ package com.controleco.app.capture
 
 import com.controleco.app.data.db.AccountEntity
 import com.controleco.app.data.db.CategoryEntity
+import com.controleco.app.data.db.RefundCategory
 import com.controleco.app.data.db.TxSource
 import com.controleco.app.data.db.TxType
 import org.junit.Assert.assertEquals
@@ -68,6 +69,18 @@ class CaptureDefaultsTest {
         // 关键词没命中 → 其他
         assertEquals(3L, CaptureDefaults.categoryId(categories, TxType.EXPENSE, "某个完全不认识的商户"))
         assertEquals(3L, CaptureDefaults.categoryId(categories, TxType.EXPENSE, ""))
+    }
+
+    @Test
+    fun `退款收入固定归退款分类_不被商户猜测带走`() {
+        val withRefund = categories + cat(8, RefundCategory.NAME, TxType.INCOME)
+        // 退款行的商户名与原支出相同，按关键词猜会落到购物/餐饮——退款收入必须无视它
+        assertEquals(8L, CaptureDefaults.categoryId(withRefund, TxType.INCOME, "拼多多", isRefund = true))
+        assertEquals(8L, CaptureDefaults.categoryId(withRefund, TxType.INCOME, "滴滴出行", isRefund = true))
+        // 没有「退款」分类时回退收入「其他」，不能抛错也不能落到支出分类
+        assertEquals(5L, CaptureDefaults.categoryId(categories, TxType.INCOME, "拼多多", isRefund = true))
+        // 非退款收入仍按原规则走
+        assertEquals(5L, CaptureDefaults.categoryId(withRefund, TxType.INCOME, ""))
     }
 
     @Test
