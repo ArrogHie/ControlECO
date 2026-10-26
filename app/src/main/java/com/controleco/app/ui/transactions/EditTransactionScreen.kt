@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -40,6 +41,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.controleco.app.data.LedgerViewModel
+import com.controleco.app.data.budget.BudgetShare
 import com.controleco.app.data.db.TransactionEntity
 import com.controleco.app.data.db.TxType
 import com.controleco.app.ui.eco.EcoConfirm
@@ -87,6 +89,10 @@ fun EditTransactionScreen(vm: LedgerViewModel, txId: Long, onBack: () -> Unit) {
     var timeOfDay by remember { mutableStateOf(LocalTime.now()) }
     var counterparty by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
+    // 预算口径（只对支出）：不计入预算 / AA 支出人数
+    var budgetExcluded by remember { mutableStateOf(false) }
+    var aaEnabled by remember { mutableStateOf(false) }
+    var aaSharesText by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
@@ -102,6 +108,9 @@ fun EditTransactionScreen(vm: LedgerViewModel, txId: Long, onBack: () -> Unit) {
             timeOfDay = local.toLocalTime()
             counterparty = t.counterparty
             note = t.note
+            budgetExcluded = t.budgetExcluded
+            aaEnabled = t.aaShares >= BudgetShare.MIN_AA_SHARES
+            aaSharesText = if (aaEnabled) t.aaShares.toString() else ""
         }
     }
 
@@ -123,15 +132,21 @@ fun EditTransactionScreen(vm: LedgerViewModel, txId: Long, onBack: () -> Unit) {
 
     fun save() {
         val value = Money.parseCents(amountText)
+        // AA 人数只在「支出 + 勾选 AA」时才需要合法；其余情况一律按 0 落库
+        val wantAa = type == TxType.EXPENSE && aaEnabled
+        val shares = if (wantAa) BudgetShare.parseShares(aaSharesText) else 0
         when {
             value == null || value <= 0L -> error = "请输入有效金额"
             categoryId == null -> error = "请选择分类"
             accountId == null -> error = "请选择账户"
+            wantAa && shares == null -> error = "AA 人数需在 2 到 99 之间"
             else -> {
                 val ts = LocalDateTime.of(date, timeOfDay)
                     .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
                 vm.saveTransaction(
                     txId, type, value, categoryId!!, accountId!!, ts, note.trim(), counterparty.trim(),
+                    budgetExcluded = budgetExcluded,
+                    aaShares = shares ?: 0,
                 )
                 EcoToast.show(if (txId > 0) "已保存修改" else "已记一笔")
                 onBack()
@@ -220,6 +235,12 @@ fun EditTransactionScreen(vm: LedgerViewModel, txId: Long, onBack: () -> Unit) {
                 onChange = {
                     type = it
                     error = null
+                    // 预算口径只对支出有意义：切到收入时把两个标记一起清掉，
+                    // 否则切回支出会冒出用户看不见的旧勾选
+                    if (it == TxType.INCOME) {
+                        budgetExcluded = false
+                        aaEnabled = false
+                    }
                 },
                 modifier = Modifier.width(140.dp),
             )
@@ -288,6 +309,40 @@ fun EditTransactionScreen(vm: LedgerViewModel, txId: Long, onBack: () -> Unit) {
                 modifier = Modifier.fillMaxWidth(),
                 placeholder = "可选",
             )
+
+            // 预算口径：只对支出显示（收入不进预算，没有这两个标记的意义）
+            if (type == TxType.EXPENSE) {
+                Spacer(Modifier.height(15.dp))
+                TxSectionLabel("预算")
+                Spacer(Modifier.height(8.dp))
+                EcoPane(
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = 4.dp,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 2.dp),
+                ) {
+                    TxBudgetOptions(
+                        budgetExcluded = budgetExcluded,
+                        onBudgetExcludedChange = {
+                            budgetExcluded = it
+                            error = null
+                        },
+                        aaEnabled = aaEnabled,
+                        onAaEnabledChange = { on ->
+                            aaEnabled = on
+                            // 打开 AA 时给一个合法默认人数，避免输入框空着还要用户自己填
+                            if (on && BudgetShare.parseShares(aaSharesText) == null) {
+                                aaSharesText = BudgetShare.DEFAULT_AA_SHARES.toString()
+                            }
+                            error = null
+                        },
+                        sharesText = aaSharesText,
+                        onSharesTextChange = {
+                            aaSharesText = it
+                            error = null
+                        },
+                    )
+                }
+            }
 
             val message = error
             if (message != null) {

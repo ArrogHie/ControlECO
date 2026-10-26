@@ -70,6 +70,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.controleco.app.data.CardTransform
 import com.controleco.app.data.PeriodMode
+import com.controleco.app.data.budget.BudgetShare
 import com.controleco.app.data.budget.MonthPeriod
 import com.controleco.app.data.importCardImage
 import com.controleco.app.data.LedgerViewModel
@@ -1034,6 +1035,18 @@ private fun BillRow(
                         style = EcoType.Pill.copy(fontSize = 8.sp, fontWeight = FontWeight.Bold),
                         color = if (row.refundMark == RefundMark.REFUND_INCOME) c.jade else c.amber,
                     )
+                }
+                // 预算口径小标（只对支出）：不计入预算 / AA n。与「已退」同一位置与字号
+                if (isExpense) {
+                    val budgetTag = BudgetShare.tag(row.budgetExcluded, row.aaShares)
+                    if (budgetTag != null) {
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            budgetTag,
+                            style = EcoType.Pill.copy(fontSize = 8.sp, fontWeight = FontWeight.Bold),
+                            color = if (row.budgetExcluded) c.muted else c.blueDeep,
+                        )
+                    }
                 }
             }
             Text(

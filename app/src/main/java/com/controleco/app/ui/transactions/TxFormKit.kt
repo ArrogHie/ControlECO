@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
@@ -38,10 +40,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -49,7 +54,9 @@ import androidx.compose.ui.unit.sp
 import com.controleco.app.data.db.TxType
 import com.controleco.app.ui.common.EcoIcons
 import com.controleco.app.ui.eco.EcoChip
+import com.controleco.app.ui.eco.EcoHairline
 import com.controleco.app.ui.eco.EcoSegmented
+import com.controleco.app.ui.eco.EcoSwitch
 import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.accBook
 import com.controleco.app.ui.theme.categoryColor
@@ -295,6 +302,122 @@ fun TxCategoryChip(
         modifier = modifier,
         height = height,
     )
+}
+
+// ---------- 预算口径（不计入预算 / AA 支出） ----------
+
+/**
+ * 支出账单的预算口径开关（编辑页与快速记账页共用；**只在支出类型下渲染**）：
+ * - 不计入预算：这笔钱不进本期预算额度（余额、账单金额、统计页实际支出都不变）；
+ * - AA 支出：勾选后可输入人数 n（2..99），计入预算的金额 = 金额 ÷ n（四舍五入到分）。
+ *
+ * 人数存在父级（[sharesText]），勾上 AA 时若还没填，父级会预填默认 2
+ * （见 `com.controleco.app.data.budget.BudgetShare.DEFAULT_AA_SHARES`）。
+ * [compact] = 快速记账「补充信息」里的窄行（小字号、36dp 行高）。
+ */
+@Composable
+fun TxBudgetOptions(
+    budgetExcluded: Boolean,
+    onBudgetExcludedChange: (Boolean) -> Unit,
+    aaEnabled: Boolean,
+    onAaEnabledChange: (Boolean) -> Unit,
+    sharesText: String,
+    onSharesTextChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
+    val rowHeight = if (compact) 36.dp else 46.dp
+    Column(modifier.fillMaxWidth()) {
+        TxBudgetSwitchRow(
+            title = "不计入预算",
+            checked = budgetExcluded,
+            onCheckedChange = onBudgetExcludedChange,
+            height = rowHeight,
+            compact = compact,
+        )
+        EcoHairline()
+        TxBudgetSwitchRow(
+            title = "AA 支出",
+            checked = aaEnabled,
+            onCheckedChange = onAaEnabledChange,
+            height = rowHeight,
+            compact = compact,
+            trailing = if (aaEnabled) {
+                { TxSharesInput(value = sharesText, onValueChange = onSharesTextChange, compact = compact) }
+            } else {
+                null
+            },
+        )
+    }
+}
+
+@Composable
+private fun TxBudgetSwitchRow(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    height: Dp,
+    compact: Boolean,
+    trailing: (@Composable () -> Unit)? = null,
+) {
+    val c = MaterialTheme.eco
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(height),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            title,
+            style = if (compact) TxToggleStyle else EcoType.RowTitle,
+            color = c.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.weight(1f))
+        if (trailing != null) {
+            trailing()
+            Spacer(Modifier.width(10.dp))
+        }
+        EcoSwitch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+/** AA 人数输入：窄框 + 「人」单位；只收数字，最多两位 */
+@Composable
+private fun TxSharesInput(
+    value: String,
+    onValueChange: (String) -> Unit,
+    compact: Boolean,
+) {
+    val c = MaterialTheme.eco
+    val shape = RoundedCornerShape(9.dp)
+    Row(
+        Modifier
+            .width(if (compact) 58.dp else 64.dp)
+            .height(if (compact) 28.dp else 32.dp)
+            .clip(shape)
+            .background(c.surface2)
+            .border(1.dp, c.rule, shape)
+            .padding(horizontal = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BasicTextField(
+            value = value,
+            onValueChange = { raw -> onValueChange(raw.filter { it.isDigit() }.take(2)) },
+            singleLine = true,
+            textStyle = (if (compact) EcoType.RowSub else EcoType.Input)
+                .copy(color = c.ink, textAlign = TextAlign.Center),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            cursorBrush = SolidColor(c.blue),
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            "人",
+            style = if (compact) TxToggleStyle else EcoType.RowSub,
+            color = c.muted,
+        )
+    }
 }
 
 // ---------- 数字键盘 ----------

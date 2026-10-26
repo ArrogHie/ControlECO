@@ -89,9 +89,13 @@ import kotlin.math.roundToInt
  * [LedgerViewModel.periodCategorySums] / [LedgerViewModel.categoryBudgets]），
  * 月视角每日一柱、年视角每月一柱；柱状图与圆环都是自绘 Canvas，不引第三方图表库。
  *
- * 口径：`02` 分类预算与占比的「实际支出」= **未被标记「已退款」的支出之和**，
- * 与首页「本月支出」是同一个数（[LedgerViewModel.periodSpendingTotal]）。
- * 封面与支出节奏仍按账面（含已退款的原支出），两者用途不同。
+ * 口径：
+ * - 「实际支出」（`02` 总额、分类占比圆环、结余封面、支出节奏）= **未被标记「已退款」的支出账面金额**
+ *   （[LedgerViewModel.periodSpendingTotal] / [LedgerViewModel.periodCategorySums]），
+ *   不扣「不计入预算 / AA」——钱确实花出去了；
+ * - 「预算对比」= **计入预算的金额**（[LedgerViewModel.periodBudgetCategorySums]），
+ *   与首页「本月支出」同一口径（不计入预算算 0、AA 按 金额 ÷ n）；
+ * - 封面与支出节奏仍按账面（含已退款的原支出），两者用途不同。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -104,6 +108,7 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
     var showPicker by remember { mutableStateOf(false) }
     val totals by vm.periodTotals.collectAsStateWithLifecycle()
     val byCategory by vm.periodCategorySums.collectAsStateWithLifecycle()
+    val byBudgetCategory by vm.periodBudgetCategorySums.collectAsStateWithLifecycle()
     val rows by vm.periodRows.collectAsStateWithLifecycle()
     val spendingTotal by vm.periodSpendingTotal.collectAsStateWithLifecycle()
     val categoryBudgets by vm.categoryBudgets.collectAsStateWithLifecycle()
@@ -118,6 +123,7 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
     val rowsReady = rows ?: return
     val totalsReady = totals ?: return
     val byCategoryReady = byCategory ?: return
+    val byBudgetCategoryReady = byBudgetCategory ?: return
     val spendingReady = spendingTotal ?: return
 
     val expense = totalsReady.firstOrNull { it.type == TxType.EXPENSE }?.totalCents ?: 0L
@@ -198,9 +204,10 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
         sliceColorsOf(palette, slices, iconByName)
     }
 
-    // 预算对比：分类预算（年视角 ×12）与实际支出对齐，按实际降序
-    val ratioRows = remember(categoryBudgets, categories, byCategoryReady, mode) {
-        buildRatioRows(categoryBudgets, categories, byCategoryReady, mode)
+    // 预算对比：分类预算（年视角 ×12）与**计入预算的支出**对齐（不计入预算算 0、AA 按 金额÷n），
+    // 与首页预算卡同一口径；圆环「分类占比」仍用账面实际支出（byCategoryReady）。
+    val ratioRows = remember(categoryBudgets, categories, byBudgetCategoryReady, mode) {
+        buildRatioRows(categoryBudgets, categories, byBudgetCategoryReady, mode)
     }
     val ratioBudget = ratioRows.sumOf { it.budgetCents }
 
@@ -986,6 +993,9 @@ private fun RatioListRow(
 
 /**
  * 预算对比的行数据 = **设了预算的支出分类** ∪ **本期有账单记录的支出分类**（按分类名去重）。
+ *
+ * [byCategory] 传的是**计入预算的金额**（`periodBudgetCategorySums`：不计入预算算 0、AA 按 金额÷n），
+ * 所以这里的「实际」不是账面金额，而是预算口径。
  *
  * - 只设了预算、本期没花的分也保留（预算 0 实际，点名"预算没用上"）；
  * - 本期有支出但**没设预算**的分类同样要出现（预算记 0、占比 0%），否则用户看不到这笔钱花在哪

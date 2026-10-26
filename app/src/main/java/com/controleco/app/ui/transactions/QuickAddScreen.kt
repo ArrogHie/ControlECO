@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.controleco.app.data.LedgerViewModel
+import com.controleco.app.data.budget.BudgetShare
 import com.controleco.app.data.db.CategoryEntity
 import com.controleco.app.data.db.TxType
 import com.controleco.app.ui.common.EcoIcons
@@ -99,6 +100,10 @@ fun QuickAddScreen(vm: LedgerViewModel, onBack: () -> Unit) {
     var date by remember { mutableStateOf(LocalDate.now()) }
     var counterparty by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
+    // 预算口径（只对支出）：不计入预算 / AA 支出人数
+    var budgetExcluded by remember { mutableStateOf(false) }
+    var aaEnabled by remember { mutableStateOf(false) }
+    var aaSharesText by remember { mutableStateOf("") }
     var showMore by remember { mutableStateOf(false) }
     var categoryExpanded by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -158,10 +163,14 @@ fun QuickAddScreen(vm: LedgerViewModel, onBack: () -> Unit) {
 
     fun save() {
         val amount = Money.parseCents(amountText)
+        // AA 人数只在「支出 + 勾选 AA」时才需要合法；其余情况一律按 0 落库
+        val wantAa = type == TxType.EXPENSE && aaEnabled
+        val shares = if (wantAa) BudgetShare.parseShares(aaSharesText) else 0
         when {
             amount == null || amount <= 0L -> error = "请输入有效金额"
             categoryId == null -> error = "请选择分类"
             accountId == null -> error = "请选择账户"
+            wantAa && shares == null -> error = "AA 人数需在 2 到 99 之间"
             else -> {
                 // 手动记账：默认记的是"现在"（含时分），选了别的日期则沿用当前时刻
                 val zone = ZoneId.systemDefault()
@@ -172,6 +181,8 @@ fun QuickAddScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                 }
                 vm.saveTransaction(
                     -1L, type, amount, categoryId!!, accountId!!, ts, note.trim(), counterparty.trim(),
+                    budgetExcluded = budgetExcluded,
+                    aaShares = shares ?: 0,
                 )
                 EcoToast.show("已记一笔")
                 onBack()
@@ -216,6 +227,11 @@ fun QuickAddScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                     onSelect = {
                         type = if (it == 0) TxType.EXPENSE else TxType.INCOME
                         error = null
+                        // 预算口径只对支出有意义：切到收入时把两个标记一起清掉
+                        if (type == TxType.INCOME) {
+                            budgetExcluded = false
+                            aaEnabled = false
+                        }
                     },
                 )
             }
@@ -272,6 +288,33 @@ fun QuickAddScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                             modifier = Modifier.weight(1f),
                             placeholder = "可选",
                             minHeight = 34.dp,
+                        )
+                    }
+                    // 预算口径：只对支出显示（放在「补充信息」里，不打断金额→分类→记一笔的主流程）
+                    if (type == TxType.EXPENSE) {
+                        Spacer(Modifier.height(8.dp))
+                        TxSectionLabel("预算")
+                        Spacer(Modifier.height(2.dp))
+                        TxBudgetOptions(
+                            budgetExcluded = budgetExcluded,
+                            onBudgetExcludedChange = {
+                                budgetExcluded = it
+                                error = null
+                            },
+                            aaEnabled = aaEnabled,
+                            onAaEnabledChange = { on ->
+                                aaEnabled = on
+                                if (on && BudgetShare.parseShares(aaSharesText) == null) {
+                                    aaSharesText = BudgetShare.DEFAULT_AA_SHARES.toString()
+                                }
+                                error = null
+                            },
+                            sharesText = aaSharesText,
+                            onSharesTextChange = {
+                                aaSharesText = it
+                                error = null
+                            },
+                            compact = true,
                         )
                     }
                 }
