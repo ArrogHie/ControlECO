@@ -1,81 +1,125 @@
-# 易控钱包
+<div align="center">
 
-本地优先的安卓记账应用：自动记录微信、支付宝、云闪付与银行动账，也能导入历史账单；预算、分类与统计一页看清。账本数据默认只保存在本机。
+<img src="docs/images/logo.webp" alt="ControlECO Logo" width="116" height="116">
 
-## 为什么用它
+# 易控钱包 · ControlECO
 
-- **记完就忘**：付款后自动识别金额、商户与支付方式，默认直接入账，不用再手动补。
-- **不会记重**：同一笔付款被通知、页面、短信多路捕获时，自动合并成一条。
-- **漏了能补**：微信、支付宝账单可直接导入，重复导入自动去重；漏记、记错还能在捕获日志里查原因。
-- **完全本地**：没有账号、没有云同步、没有广告，唯一联网用途是检查更新。
+**让记账自动发生，让每一笔开支都有迹可循。**
 
-## 自动记账
+本地优先的 Android 自动记账应用。无需注册，自动识别日常收支，轻松管理预算与账单。
 
-四条通道互相补全，按需开启：
+[![Android](https://img.shields.io/badge/Android-8.0%2B-318993?style=flat-square&logo=android&logoColor=white)](https://github.com/ArrogHie/ControlECO/releases/latest)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-318993?style=flat-square&logo=kotlin&logoColor=white)](https://github.com/ArrogHie/ControlECO/blob/main/gradle/libs.versions.toml)
+[![Release](https://img.shields.io/github/v/release/ArrogHie/ControlECO?style=flat-square&label=Release&color=318993)](https://github.com/ArrogHie/ControlECO/releases/latest)
+![Local First](https://img.shields.io/badge/Data-Local%20First-318993?style=flat-square)
 
-| 通道 | 捕获内容 | 需要的权限 |
-| --- | --- | --- |
-| 通知监听 | 微信 / 支付宝 / 云闪付 / 银行 App 的动账推送，电商与外卖的收银台通知 | 通知使用权 |
-| 支付页面读取 | 支付成功页、订单详情页上的金额、商户、支付方式 | 无障碍服务 |
-| 银行动账短信 | 银行卡收支短信（只处理新收到的短信） | 短信权限 |
-| 账单导入 | 微信、支付宝导出的账单文件 | 无需敏感权限 |
+**[⬇ 下载 APK](https://github.com/ArrogHie/ControlECO/releases/latest)** · [版本记录](https://github.com/ArrogHie/ControlECO/releases) · [问题反馈](https://github.com/ArrogHie/ControlECO/issues)
 
-入账方式三选一（默认自动入账）：
+</div>
 
-- **自动入账**：识别到即记账，事后可在账单里修改。
-- **悬浮确认卡**：付款后弹出确认卡，改完关掉即同步；点「忽略」删除这笔。
-- **通知栏提醒**：发一条「已记入一笔账」，点开可改。
+<p align="center">
+  <img src="docs/images/showcase.webp" alt="ControlECO 软件界面：统计、账单、首页、分类预算、个人中心" width="100%">
+</p>
 
-拿不准的会进入「待确认」：红包、金额缺失等不会自动入账，逐条确认即可；收到没有金额的退款通知时，选一笔原账单就能生成退款收入（支持部分退款）。
+<details>
+<summary>📱 查看单张界面截图</summary>
+<br>
+<p align="center">
+  <img src="docs/images/home.webp" alt="首页" width="19%">
+  <img src="docs/images/ledger.webp" alt="账单" width="19%">
+  <img src="docs/images/statistics.webp" alt="统计" width="19%">
+  <img src="docs/images/categories.webp" alt="分类预算" width="19%">
+  <img src="docs/images/profile.webp" alt="个人中心" width="19%">
+</p>
+</details>
 
-## 预算与统计
+## ✨ 功能亮点
 
-- 首页是一张可翻转的卡片：预算环（今日剩余与时间进度）、分类预算、本月已花 / 总存款，三面切换。
-- 统计页：每日或月度支出柱状图、分类预算圆环（预算对比实际）、预算对比清单。
-- 月预算、日预算、分类预算可分别设置；每月起始日可自定义，适合非 1 号发薪或对账的习惯。
+- **自动记账**：通过通知、支付页面、银行短信识别微信、支付宝、云闪付及银行收支，按需开启采集通道。
+- **智能去重**：多通道捕获同一笔交易时自动合并；识别不确定的记录进入「待确认」。
+- **轻松补账**：支持导入微信、支付宝历史账单，重复导入自动去重，也支持手动新增与修改。
+- **预算管理**：月预算、日预算、分类预算与剩余额度一目了然，可自定义每月起始日。
+- **账单与统计**：按日查看交易，了解支出趋势、分类占比和预算执行情况。
+- **本地优先**：无账号、无广告、无云同步，账本只保存在本机。
 
-## 账单与整理
+## 📦 下载与使用
 
-- 账单按日分组，月度收入、支出与结余一目了然；支持多选、按月、按年批量删除。
-- 快速记账、编辑交易；账户与分类都能自己增改。
-- 商户归类按商户名自动学习，越用越准，也可以手动维护规则。
-- 捕获日志与记账溯源：能回看原始通知与页面文字，知道一笔账从哪来、为什么没记上。
+1. 前往 [GitHub Releases](https://github.com/ArrogHie/ControlECO/releases/latest) 下载 APK；支持 **Android 8.0（API 26）及以上**。
+2. 首次使用时，根据需要授权通知使用权、无障碍服务、短信或悬浮窗权限；**只导入历史账单不需要这些采集权限**。
+3. 设定预算，开始记账。漏记时可以手动补录或导入历史账单。
 
-## 支持的 App
+> **注意**：Android 13+ 的侧载应用可能需要在「应用信息 → 右上角菜单 → 允许受限制的设置」中解锁相关权限。部分品牌设备还需允许自启动和后台运行。
 
-- **支付**：微信、支付宝、云闪付
-- **银行**：工商银行、建设银行、农业银行、中国银行、招商银行、交通银行、邮储银行、中信银行、光大银行、民生银行、浦发银行、平安银行、广发银行、兴业银行、华夏银行
-  （短信通道不限上述银行，按号码与签名识别）
-- **电商 / 外卖**：京东、京东支付、京东金融、淘宝、天猫、抖音、美团、美团外卖、饿了么
+## 🔐 隐私与数据
 
-「监听的 App」里可以按应用单独开关：不用的应用关掉即可，不会打扰，也更省电。
+交易数据存储于设备本地的应用私有数据库，应用不上传账本，不提供云同步或第三方统计。联网主要用于检查、下载应用更新。
 
-## 隐私
+通知、页面和短信读取仅服务于对应记账功能，均可按需开启。**卸载应用会删除应用私有目录中的账本数据**，请谨慎操作。
 
-- 账本数据保存在应用私有目录（SQLite），应用自身不上传、不做云同步；卸载应用会删除本机数据。
-- 没有账号体系、没有云同步、没有广告、没有第三方统计。
-- 应用唯一联网用途是检查与下载更新，只访问 GitHub（及其镜像）。
-- 通知内容与页面文字只在本机解析和留存，不截图、不上传。
-- 每项权限只服务于对应功能：通知使用权读动账通知、无障碍读支付页面、短信读银行动账、悬浮窗弹确认卡。
+---
 
-## 安装与更新
+## 🛠 开发者指南
 
-1. 从 [Releases](https://github.com/ArrogHie/ControlECO/releases) 下载最新 APK 并安装。
-2. 首次打开按引导开启需要的权限：通知使用权、无障碍（页面采集）、悬浮窗、短信（可选）。
-3. 安卓 13 及以上：侧载应用需先到「应用信息 → 右上角 ⋯ → 允许受限制的设置」解锁，才能开启无障碍与通知使用权。
-4. 小米、华为、荣耀、OPPO、vivo、三星等系统还需自启动与后台保活设置，应用内有分品牌图文引导。
-5. 应用内「检查更新」可自动下载并安装新版本，也可以回到 Releases 手动更新。
+### 技术栈与环境
 
-**系统要求**：Android 8.0（API 26）及以上。
+| 项目 | 配置 |
+| --- | --- |
+| 开发语言 | **Kotlin 2.0.21** |
+| UI | **Jetpack Compose · Material 3** |
+| 导航与状态 | Navigation Compose · Lifecycle ViewModel |
+| 数据存储 | Room 2.6.1 · SQLite · KSP |
+| 构建系统 | Gradle 8.10.2 · Android Gradle Plugin 8.7.3 · Kotlin DSL |
+| 开发环境 | **JDK 17** · Android Studio · Android SDK 35 |
+| Android 配置 | `minSdk 26` · `targetSdk 35` · `compileSdk 35` |
 
-## 已知限制
+> 依赖版本以 [`gradle/libs.versions.toml`](gradle/libs.versions.toml) 和 [`app/build.gradle.kts`](app/build.gradle.kts) 为准。
 
-- 微信、支付宝改版后，页面识别规则可能需要随版本适配；更新到最新版通常即可恢复。
-- 银行短信通道受银行政策影响（部分银行小额交易不再发短信），可改用银行 App 推送或云闪付动账提醒。
-- 系统的「支付保护 / 支付保险箱」可能拦截页面读取与悬浮卡，按应用内引导关闭对本应用的限制。
-- 不同厂商的省电策略可能杀掉后台，导致自动记账时好时坏；按保活引导设置，并定期查看权限状态。
+### 本地构建
 
-## 反馈
+使用 Android Studio 打开仓库根目录，配置好 JDK 17 与 Android SDK 35，等待 Gradle 同步完成。也可以从命令行执行：
 
-- 问题与建议：[GitHub Issues](https://github.com/ArrogHie/ControlECO/issues)
-- 源码与版本记录：[ArrogHie/ControlECO](https://github.com/ArrogHie/ControlECO)
+```bash
+git clone https://github.com/ArrogHie/ControlECO.git
+cd ControlECO
+
+# 构建 Debug APK
+./gradlew :app:assembleDebug
+
+# 运行本地单元测试
+./gradlew :app:testDebugUnitTest
+```
+
+Debug APK 输出位置：`app/build/outputs/apk/debug/app-debug.apk`。
+
+Windows 可将 `./gradlew` 换为 `.\gradlew.bat`。
+
+### 项目结构
+
+```text
+ControlECO/
+├── app/
+│   ├── src/main/             # Android 源码、资源与 Manifest
+│   ├── schemas/              # Room Schema（数据库迁移校验）
+│   └── build.gradle.kts      # 应用模块与 Android 配置
+├── docs/                     # 文档及 README 图片
+├── gradle/
+│   ├── libs.versions.toml    # 依赖和插件版本
+│   └── wrapper/              # Gradle Wrapper
+├── tools/                    # 项目辅助工具
+├── build.gradle.kts          # 根项目插件配置
+└── settings.gradle.kts       # 模块与 Maven 仓库配置
+```
+
+> **构建说明**：当前 `release` 构建沿用 debug 签名以兼容既有侧载安装包。若调整签名方案，请先评估应用升级和本地账本数据迁移，避免用户因卸载重装丢失数据。
+
+## 🤝 参与项目
+
+欢迎通过 [Issues](https://github.com/ArrogHie/ControlECO/issues) 提交 Bug、功能建议或适配反馈，也欢迎发起 [Pull Request](https://github.com/ArrogHie/ControlECO/pulls)。
+
+自动识别会受到支付 App 改版及不同手机厂商后台策略影响，反馈时可附 Android 版本、机型及复现步骤（**请勿公开真实交易短信、支付信息等敏感数据**）。
+
+---
+
+<div align="center">
+<sub>ControlECO · Keep expenses clear, keep life simple.</sub>
+</div>
