@@ -14,6 +14,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -21,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -31,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.controleco.app.R
 import com.controleco.app.ui.common.EcoIcons
+import com.controleco.app.ui.common.HelpOnboarding
 import com.controleco.app.ui.common.SettingsNote
 import com.controleco.app.ui.common.SettingsPage
 import com.controleco.app.ui.common.SettingsSection
@@ -60,6 +63,10 @@ private val INLINE_MARK = Regex("""\*\*(.+?)\*\*|`([^`]+)`""")
 
 @Composable
 fun SettingsHelpScreen(onBack: () -> Unit) {
+    // 只要进过本页就记「看过」：首次使用引导弹窗（HelpIntroDialog）因此不再出现
+    val context = LocalContext.current
+    LaunchedEffect(Unit) { HelpOnboarding.markViewed(context) }
+
     SettingsPage(micro = "HELP", title = "帮助", onBack = onBack) {
         SettingsSection(title = "预算", aside = "BUDGET")
         HelpEntryBlock(

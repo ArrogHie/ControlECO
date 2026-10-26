@@ -44,6 +44,7 @@ import com.controleco.app.data.LedgerViewModel
 import com.controleco.app.ui.accounts.AccountsScreen
 import com.controleco.app.ui.accounts.CategoriesScreen
 import com.controleco.app.ui.common.PermissionReminderDialog
+import com.controleco.app.ui.common.HelpOnboarding
 import com.controleco.app.ui.debug.CaptureLogScreen
 import com.controleco.app.ui.debug.CaptureTraceScreen
 import com.controleco.app.ui.home.HomeScreen
@@ -62,6 +63,7 @@ import com.controleco.app.ui.settings.SettingsPermissionScreen
 import com.controleco.app.ui.settings.SettingsMerchantRulesScreen
 import com.controleco.app.ui.settings.SettingsScreen
 import com.controleco.app.ui.settings.SettingsWatchedAppsScreen
+import com.controleco.app.ui.settings.HelpIntroDialog
 import com.controleco.app.ui.eco.EcoBackdrop
 import com.controleco.app.ui.eco.EcoBottomNav
 import com.controleco.app.ui.eco.EcoFab
@@ -124,6 +126,19 @@ fun AccBookNav(
             )
         }
         Unit
+    }
+
+    // 首次使用引导：从没看过帮助页时，冷启动问一次要不要看（HelpOnboarding 只认「没看过且没问过」）
+    // rememberSaveable：旋转/重建后弹窗不消失
+    var helpPrompt by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        // 与冷启动权限提醒撞车时让权限提醒优先：缺权限的这一轮不问帮助，留到下次启动
+        if (promptPermissions && navEvent.second == null && permissionMissing.isEmpty() &&
+            HelpOnboarding.shouldPrompt(context)
+        ) {
+            HelpOnboarding.markPrompted(context)
+            helpPrompt = true
+        }
     }
 
     // 系统通知点击跳转（MainActivity 传入 route 事件；既有路由名是捕获层的对外契约，勿改）
@@ -302,6 +317,17 @@ fun AccBookNav(
                 navController.navigate("settings/permissions")
             },
             onDismiss = { permissionMissing = emptyList() },
+        )
+    }
+
+    // 首次使用引导：只问一次；进过帮助页（SettingsHelpScreen 写 help_viewed）就不再弹
+    if (helpPrompt) {
+        HelpIntroDialog(
+            onOpenHelp = {
+                helpPrompt = false
+                navController.navigate("settings/help")
+            },
+            onDismiss = { helpPrompt = false },
         )
     }
 }
