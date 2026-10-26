@@ -63,6 +63,7 @@ import kotlin.coroutines.resume
  * - 异源（微信/支付宝/云闪付 ⇄ 银行短信/推送，±130s，仅支出，见 CrossChannelDedup）：
  *   同一笔卡支付被两侧同时捕获时归并成一条。**两个方向都做**——银行侧后到时并入支付条目
  *   （[findCrossChannelPending]），支付侧后到时回头并入银行条目（[findBankPendingForPayment]）；
+ *   **微信侧读不到所用银行卡，只按金额 + 时间归并**；支付宝/云闪付仍要求银行名/卡尾号等线索；
  *   两个支付渠道之间、两家银行之间不归并。
  * 捕获后的处置由三个设置开关决定（见各开关的注释）：
  * - 「入账提醒」：捕获时发横幅通知（也是卡片弹不出时的兜底）；
@@ -1462,7 +1463,7 @@ object CaptureCenter {
                     )
                 }
                 // 银行动账 ⇄ 支付渠道（仅支出）：银行短信/推送先到时，本通知并入银行侧条目，
-                // 不能因为包名不同就记成第二笔。必须有可核对线索（银行名/卡尾号 ⇄ 渠道名）。
+                // 不能因为包名不同就记成第二笔。微信只按金额+时间；支付宝/云闪付还要有线索。
                 val bankRelated = findBankPendingForPayment(
                     packageName = packageName,
                     type = parsed.type,
@@ -1723,7 +1724,7 @@ object CaptureCenter {
         }
 
         // 跨通道归并（±130s）：支付侧已捕获同笔 → 银行侧只补充账户线索，
-        // 不再产生第二条。跨应用关联必须有页面披露的银行卡线索，金额+时间不够。
+        // 不再产生第二条。微信只按金额+时间；支付宝/云闪付还要有线索（见 CrossChannelDedup.payBankLink）。
         val related = findCrossChannelPending(ledger, sourceAt, bankIdentity)
         if (related != null) {
             mergeBankInfoIntoPending(related, ledger, bankIdentity)
@@ -1852,13 +1853,15 @@ object CaptureCenter {
     }
 
     /**
-     * 跨通道归并候选：只在有**可核对线索**时认作同一笔。
+     * 跨通道归并候选（银行侧后到）：认作同一笔的条件见 [CrossChannelDedup.payBankLink]。
      *
      * - 电商/外卖页面：页面支付方式必须能对上银行名/卡尾号（[CrossAppLinker]）；
-     * - 微信/支付宝/云闪付条目：条目备注或支付方式里出现该银行名/卡尾号，
+     * - **微信条目：只按金额 + 时间**（微信页面/通知读不到所用银行卡，用户规则 2026-10-26）；
+     * - 支付宝/云闪付条目：条目备注或支付方式里出现该银行名/卡尾号，
      *   或银行侧文本点名了该渠道（"在【财付通-微信支付-微信转账】发生快捷支付扣款"）；
-     * - 金额相同、时间接近但没有任何渠道线索 → 不归并（两笔真实交易并成一笔 = 丢记录）。
-     * 多个候选同时命中视为证据不足，保持独立记录。
+     * - 支付宝/云闪付：金额相同、时间接近但没有任何渠道线索 → 不归并
+     *   （两笔真实交易并成一笔 = 丢记录）。
+     * 多条同额候选同时命中视为证据不足，保持独立记录（对微信同样适用）。
      */
     private suspend fun findCrossChannelPending(
         ledger: BankLedgerRules.BankLedger,
@@ -1892,8 +1895,8 @@ object CaptureCenter {
             source = ledger.sourceKey,
             time = eventTime,
         )
-        val payCandidates = mergeable.filter { candidate ->
-            CrossChannelDedup.isSameTransaction(
+        val payCandidates = mergeable.mapNotNull { candidate ->
+            val sameClock = CrossChannelDedup.isSameTransaction(
                 CrossChannelDedup.signatureOf(
                     amountCents = candidate.amountCents,
                     type = candidate.type,
@@ -1902,32 +1905,45 @@ object CaptureCenter {
                     time = candidate.timestamp,
                 ),
                 incoming,
-            ) && payEntryLinksBank(candidate, ledger)
+            )
+            if (!sameClock) return@mapNotNull null
+            val reason = payEntryLinkReason(candidate, ledger) ?: return@mapNotNull null
+            candidate to reason
         }
-        if (payCandidates.size == 1) return payCandidates.single()
+        if (payCandidates.size == 1) {
+            val (hit, reason) = payCandidates.single()
+            AppLog.i(
+                "Dedup",
+                "bank side merged into payment #${hit.id} (${reason.name}) " +
+                    "${ledger.ruleName} ${Money.formatYuan(ledger.amountCents)}",
+            )
+            return hit
+        }
         if (payCandidates.size > 1) {
             AppLog.w("Sms", "bank link ambiguous (${payCandidates.size} payment entries), keep separate ${ledger.ruleName}")
         } else if (mergeable.any { it.amountCents == ledger.amountCents && it.type == ledger.type }) {
-            AppLog.i("Sms", "bank entry kept separate (no bank/card evidence) ${ledger.ruleName}")
+            AppLog.i("Sms", "bank entry kept separate (no link evidence / not a pay channel) ${ledger.ruleName}")
         }
         return null
     }
 
     /**
-     * 支付类条目里是否出现了可核对线索：支付侧写了银行名/卡尾号，
-     * **或**银行侧文本点名了该支付渠道（"在【财付通-微信支付-微信转账】发生快捷支付扣款"）。
-     * 两个方向任一命中即可认定是同一笔卡支付，见 [CrossChannelDedup.payBankLinked]。
+     * 支付类条目与这条银行动账之间的归并依据（null = 不配对）。
+     *
+     * 判定在 [CrossChannelDedup.payBankLink]：**微信只按金额 + 时间**（微信读不到所用银行卡），
+     * 支付宝/云闪付仍需线索——支付侧写了银行名/卡尾号，**或**银行侧文本点名了该支付渠道
+     * （"在【财付通-微信支付-微信转账】发生快捷支付扣款"）。
      */
-    private fun payEntryLinksBank(
+    private fun payEntryLinkReason(
         candidate: PendingTransactionEntity,
         ledger: BankLedgerRules.BankLedger,
-    ): Boolean {
-        if (!CrossChannelDedup.isPayChannelSide(candidate.sourcePackage)) return false
+    ): CrossChannelDedup.LinkReason? {
+        if (!CrossChannelDedup.isPayChannelSide(candidate.sourcePackage)) return null
         val payText = listOf(candidate.paymentInstrument, candidate.counterparty, candidate.note, candidate.ruleName)
             .filter { it.isNotBlank() }.joinToString(" ")
         val bankText = listOf(ledger.note, ledger.merchant, ledger.ruleName)
             .filter { it.isNotBlank() }.joinToString(" ")
-        return CrossChannelDedup.payBankLinked(
+        return CrossChannelDedup.payBankLink(
             paymentText = payText,
             bankText = bankText,
             bankName = ledger.bankName,
@@ -1960,7 +1976,7 @@ object CaptureCenter {
      * （真实事故：微信转账 ¥200 支付成功页 + 招行「快捷支付扣款 200.00」）。
      *
      * 只处理**支出**（收入方向微信/支付宝收的是零钱/余额，不会同时产生银行入账）；
-     * 且必须有可核对线索（[CrossChannelDedup.payBankLinked]）。
+     * 归并依据见 [CrossChannelDedup.payBankLink]：**微信只按金额 + 时间**，支付宝/云闪付仍需线索。
      */
     private fun findBankPendingForPayment(
         packageName: String,
@@ -1981,8 +1997,8 @@ object CaptureCenter {
             source = packageName,
             time = eventTime,
         )
-        val candidates = mergeable.filter { entry ->
-            CrossChannelDedup.isSameTransaction(
+        val candidates = mergeable.mapNotNull { entry ->
+            val sameClock = CrossChannelDedup.isSameTransaction(
                 CrossChannelDedup.signatureOf(
                     amountCents = entry.amountCents,
                     type = entry.type,
@@ -1991,16 +2007,18 @@ object CaptureCenter {
                     time = entry.timestamp,
                 ),
                 incoming,
-            ) &&
-                flowCompatible(entry, incomingIdentity, packageName) &&
-                CrossChannelDedup.payBankLinked(
-                    paymentText = paymentText,
-                    bankText = bankEntryText(entry),
-                    bankName = bankEntryName(entry),
-                    cardTail = com.controleco.app.capture.page.PaymentInstrumentParser
-                        .tailOf(entry.paymentInstrument).takeIf { it.isNotEmpty() },
-                    paySource = packageName,
-                )
+            )
+            if (!sameClock) return@mapNotNull null
+            if (!flowCompatible(entry, incomingIdentity, packageName)) return@mapNotNull null
+            val reason = CrossChannelDedup.payBankLink(
+                paymentText = paymentText,
+                bankText = bankEntryText(entry),
+                bankName = bankEntryName(entry),
+                cardTail = com.controleco.app.capture.page.PaymentInstrumentParser
+                    .tailOf(entry.paymentInstrument).takeIf { it.isNotEmpty() },
+                paySource = packageName,
+            ) ?: return@mapNotNull null
+            entry to reason
         }
         if (candidates.size > 1) {
             AppLog.w(
@@ -2011,7 +2029,15 @@ object CaptureCenter {
             return null
         }
         val hit = candidates.singleOrNull()
-        if (hit == null && mergeable.any {
+        if (hit != null) {
+            AppLog.i(
+                "Dedup",
+                "payment merged into bank entry #${hit.first.id} (${hit.second.name}) " +
+                    "$packageName ${Money.formatYuan(amountCents)}",
+            )
+            return hit.first
+        }
+        if (mergeable.any {
                 it.type == type && it.amountCents == amountCents &&
                     CrossChannelDedup.isBankLedgerSide(it.sourcePackage)
             }
@@ -2022,7 +2048,7 @@ object CaptureCenter {
                     "$packageName ${Money.formatYuan(amountCents)}",
             )
         }
-        return hit
+        return null
     }
 
     /**

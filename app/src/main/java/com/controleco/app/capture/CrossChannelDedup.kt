@@ -26,7 +26,9 @@ import kotlin.math.abs
  *
  * 130 秒窗口比常规的 60 秒预检略宽，因为银行短信的到达延迟通常大于推送。
  *
- * 光有 ①~④ 还不够——还必须有可核对线索才允许合并（见 [payBankLinked]）。
+ * 光有 ①~④ 还不够——还必须有可核对线索才允许合并（见 [payBankLinked]），
+ * **唯一例外是微信**：微信页面/通知都不披露所用银行卡（读不到银行名与卡尾号），
+ * 按用户规则（2026-10-26）「微信 ⇄ 银行」只按金额 + 时间判定（见 [payBankLink]）。
  */
 internal object CrossChannelDedup {
 
@@ -148,6 +150,9 @@ internal object CrossChannelDedup {
     /**
      * 两侧之间是否存在可核对线索：支付侧文本写了银行名/卡尾号，**或**银行侧文本点名了支付渠道。
      * 两个方向各缺一条线索时都算"证据不足"，保持独立记录（见 docs/通知规则维护指南.md 第六节）。
+     *
+     * ⚠️ 微信没有例外通道：微信读不到银行卡，本函数对它恒为 false。
+     * 判定入口请用 [payBankLink]（它对微信走"仅金额 + 时间"档），不要直接调本函数。
      */
     fun payBankLinked(
         paymentText: String,
@@ -158,4 +163,41 @@ internal object CrossChannelDedup {
     ): Boolean =
         hasBankEvidence(paymentText, bankName, cardTail) ||
             bankTextMentionsPayChannel(bankText, paySource)
+
+    /** 归并依据（调用方只用来打日志区分路径，判定以非空为准） */
+    enum class LinkReason {
+        /** 微信：读不到所用银行卡，按用户规则只认金额 + 时间（[WECHAT_AMOUNT_ONLY]） */
+        WECHAT_AMOUNT_ONLY,
+
+        /** 支付宝 / 云闪付：必须有可核对线索（[payBankLinked]） */
+        EVIDENCE,
+    }
+
+    /**
+     * 「支付渠道 ⇄ 银行」能否认作同一笔的**唯一入口**（金额/方向/时间由 [isSameTransaction] 判定）。
+     *
+     * - **微信**：微信的支付页面与支付通知都不披露所用银行卡（既没有银行名也没有卡尾号），
+     *   线索闸门对它恒不成立，等于永远不归并——而"微信扣款 + 银行短信/推送到账"恰恰是最常见的一对。
+     *   用户规则（2026-10-26）：**微信 ⇄ 银行仅按金额 + 时间 + 方向 + 退款标记判定**。
+     *   代价：同一时段（[WINDOW_MS]）内两笔真实同额微信付款 + 一条同额银行动账，可能被并成一笔；
+     *   用户已知并接受，且"同额候补不唯一"时仍保持独立（见 `CaptureCenter` 的 ambiguous 分支）。
+     * - **支付宝 / 云闪付**：保持线索闸门（[payBankLinked]）——支付宝页面能读到"花呗/余额宝/银行卡(尾号)"，
+     *   云闪付本身就是卡组织通道，线索可得，不必放宽。
+     * - 不属于支付渠道侧（[isPayChannelSide]）的来源一律不配对。
+     */
+    fun payBankLink(
+        paymentText: String,
+        bankText: String,
+        bankName: String,
+        cardTail: String?,
+        paySource: String,
+    ): LinkReason? {
+        if (!isPayChannelSide(paySource)) return null
+        if (paySource == NotificationRules.WECHAT) return LinkReason.WECHAT_AMOUNT_ONLY
+        return if (payBankLinked(paymentText, bankText, bankName, cardTail, paySource)) {
+            LinkReason.EVIDENCE
+        } else {
+            null
+        }
+    }
 }

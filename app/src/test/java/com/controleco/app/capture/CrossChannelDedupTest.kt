@@ -4,6 +4,7 @@ import com.controleco.app.data.db.RefundMark
 import com.controleco.app.data.db.TxType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -12,8 +13,10 @@ import org.junit.Test
  * 这是账目翻倍的头号来源（微信支付 ¥50 + 工行卡扣款短信 ¥50）。
  * 反向同样重要：**不该并的绝不能并**（两笔真实交易并成一笔 = 丢记录）。
  *
- * 口径（2026-10-22 用户规则）：
+ * 口径（2026-10-22 用户规则，2026-10-26 增补微信例外）：
  * - 只认「微信/支付宝/云闪付 ⇄ 银行短信/推送」这一种配对，且**仅支出**；
+ * - **微信读不到所用银行卡 → 微信 ⇄ 银行只按金额 + 时间判定**（见 [CrossChannelDedup.payBankLink]）；
+ *   支付宝/云闪付仍要求银行名/卡尾号等可核对线索；
  * - 两个支付渠道之间、两家银行之间不归并。
  */
 class CrossChannelDedupTest {
@@ -303,7 +306,8 @@ class CrossChannelDedupTest {
                 paySource = NotificationRules.WECHAT,
             ),
         )
-        // 两侧都没有线索 → 证据不足，不配对
+        // 两侧都没有线索 → 本函数不成立；微信走 payBankLink 的金额档（见"微信与银行无需线索即可配对"），
+        // 支付宝/云闪付则保持独立记录
         assertFalse(
             CrossChannelDedup.payBankLinked(
                 paymentText = "微信·支付成功页",
@@ -313,6 +317,96 @@ class CrossChannelDedupTest {
                 paySource = NotificationRules.WECHAT,
             ),
         )
+    }
+
+    // ---------- 微信例外：读不到银行卡，只按金额 + 时间 ----------
+
+    @Test
+    fun `微信与银行无需线索即可配对`() {
+        // 微信页面/通知都不披露所用银行卡 → 两侧都没有线索，仍应认作同一笔
+        assertEquals(
+            CrossChannelDedup.LinkReason.WECHAT_AMOUNT_ONLY,
+            CrossChannelDedup.payBankLink(
+                paymentText = "微信支付 · 已支付¥50.00",
+                bankText = "招商银行 您账户2532于10月21日16:54消费50.00元",
+                bankName = "招商银行",
+                cardTail = "2532",
+                paySource = NotificationRules.WECHAT,
+            ),
+        )
+        // 空文本也不会挡住微信档（金额/方向/时间由 isSameTransaction 判定）
+        assertEquals(
+            CrossChannelDedup.LinkReason.WECHAT_AMOUNT_ONLY,
+            CrossChannelDedup.payBankLink("", "", "", null, NotificationRules.WECHAT),
+        )
+    }
+
+    @Test
+    fun `支付宝与云闪付仍要求线索`() {
+        // 支付宝能读到"花呗/余额宝/银行卡(尾号)"，云闪付本身就是卡通道，不放宽
+        assertNull(
+            CrossChannelDedup.payBankLink(
+                paymentText = "支付宝·付款成功 50.00",
+                bankText = "您尾号1234的账户消费50.00元",
+                bankName = "工商银行",
+                cardTail = "1234",
+                paySource = NotificationRules.ALIPAY,
+            ),
+        )
+        assertNull(
+            CrossChannelDedup.payBankLink(
+                "云闪付 支付成功 50.00", "您尾号1234的账户消费50.00元", "工商银行", "1234",
+                NotificationRules.UNIONPAY,
+            ),
+        )
+        // 有线索时照常成立
+        assertEquals(
+            CrossChannelDedup.LinkReason.EVIDENCE,
+            CrossChannelDedup.payBankLink(
+                paymentText = "支付宝 花呗 招商银行储蓄卡(2532)",
+                bankText = "您尾号2532的账户消费50.00元",
+                bankName = "招商银行",
+                cardTail = "2532",
+                paySource = NotificationRules.ALIPAY,
+            ),
+        )
+    }
+
+    @Test
+    fun `非支付渠道侧不参与微信金额档`() {
+        // 电商/外卖页面 ⇄ 银行仍走 CrossAppLinker（必须有页面银行卡线索），不因微信档放宽
+        assertNull(
+            CrossChannelDedup.payBankLink(
+                "美团 50.00", "您尾号1234的账户消费50.00元", "工商银行", "1234",
+                "com.sankuai.meituan",
+            ),
+        )
+        assertNull(CrossChannelDedup.payBankLink("", "", "", null, "com.jingdong.app.mall"))
+    }
+
+    @Test
+    fun `微信金额档仍需金额方向时间一致`() {
+        // payBankLink 只回答"线索是否足够"；同笔判定还要 isSameTransaction 全部命中
+        val bankSig = CrossChannelDedup.signatureOf(
+            amountCents = 5000,
+            type = TxType.EXPENSE,
+            refundMark = RefundMark.NONE,
+            source = "SMS:工商银行",
+            time = t0,
+        )
+        val wechatSig = sig(5000, source = NotificationRules.WECHAT, time = t0 + 60_000)
+        assertTrue(CrossChannelDedup.isSameTransaction(bankSig, wechatSig))
+        // 金额不同 → 不并
+        assertFalse(CrossChannelDedup.isSameTransaction(bankSig, wechatSig.copy(amountCents = 5001)))
+        // 超过 130 秒 → 不并
+        assertFalse(
+            CrossChannelDedup.isSameTransaction(
+                bankSig,
+                wechatSig.copy(time = t0 + CrossChannelDedup.WINDOW_MS + 1),
+            ),
+        )
+        // 收入方向 → 不并（微信收款进零钱，不会产生银行入账）
+        assertFalse(CrossChannelDedup.isSameTransaction(bankSig, wechatSig.copy(type = TxType.INCOME)))
     }
 
     // ---------- 真实样本端到端（银行解析 → 签名 → 同笔判定） ----------
