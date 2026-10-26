@@ -56,6 +56,7 @@ import com.controleco.app.ui.refund.RefundLinkScreen
 import com.controleco.app.ui.settings.SettingsAboutScreen
 import com.controleco.app.ui.settings.SettingsAccountScreen
 import com.controleco.app.ui.settings.SettingsDeveloperScreen
+import com.controleco.app.ui.settings.SettingsHelpScreen
 import com.controleco.app.ui.settings.SettingsImportScreen
 import com.controleco.app.ui.settings.SettingsPermissionScreen
 import com.controleco.app.ui.settings.SettingsMerchantRulesScreen
@@ -229,6 +230,7 @@ fun AccBookNav(
                 onOpenKeepAlive = { navController.navigate("keepAlive") },
                 onOpenDeveloper = { navController.navigate("settings/developer") },
                 onOpenAbout = { navController.navigate("settings/about") },
+                onOpenHelp = { navController.navigate("settings/help") },
             )
         }
         composable("settings/account") {
@@ -269,6 +271,10 @@ fun AccBookNav(
         }
         composable("settings/about") {
             SettingsAboutScreen(onBack = { navController.popBackStack() })
+        }
+        // 帮助页：内容源 docs/说明/软件说明.md（设置 → 关于 → 帮助 进入，入口在「关于易控钱包」行之上）
+        composable("settings/help") {
+            SettingsHelpScreen(onBack = { navController.popBackStack() })
         }
 
         composable("keepAlive") {

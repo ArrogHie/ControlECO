@@ -91,6 +91,7 @@ fun SettingsScreen(
     onOpenKeepAlive: () -> Unit,
     onOpenDeveloper: () -> Unit,
     onOpenAbout: () -> Unit,
+    onOpenHelp: () -> Unit,
 ) {
     LaunchedEffect(Unit) { AppLog.i("settings", "hub opened") }
 
@@ -247,6 +248,16 @@ fun SettingsScreen(
 
         SettingsSection(title = "关于", aside = "ABOUT / 关于")
         SettingsPane {
+            // 帮助在「关于易控钱包」之上：说明属于使用指南，先于版本信息出现
+            SettingsRow(
+                title = "帮助",
+                subtitle = "预算口径 / 自动记账 / 常见问题",
+                icon = EcoIcons.Book,
+                iconTint = MaterialTheme.eco.blue,
+                showChevron = true,
+                onClick = onOpenHelp,
+            )
+            SettingsDivider()
             SettingsRow(
                 title = "关于易控钱包",
                 icon = EcoIcons.Info,
