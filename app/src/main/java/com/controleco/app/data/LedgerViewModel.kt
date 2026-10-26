@@ -322,8 +322,8 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
      * **不再做「支出 − 退款到账」的相减**——那是账单还没有退款标记时的旧做法。
      * 剩余/建议日花/状态由 UI 用 Budget.compute 纯函数计算。
      *
-     * 注意这是**预算口径**：统计页「实际支出」用 [periodSpendingTotal]（账面金额），两者在有
-     * 「不计入预算 / AA」账单时会不同——这是设计口径，不是数据不一致。
+     * 注意这是**预算口径**：统计页「实际支出」用 [periodSpendingTotal]（AA 折算，但「不计入预算」
+     * 仍按全额算），两者在有「不计入预算」账单时会不同——这是设计口径，不是数据不一致。
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val homeSpent: StateFlow<Long?> = currentPeriod.flatMapLatest { period ->
@@ -436,8 +436,8 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
-     * 本期各支出分类的**账面支出**（未被标「已退款」）：统计页分类圆环（占比）用它。
-     * 预算对比清单用 [periodBudgetCategorySums]（计入预算的金额）。
+     * 本期各支出分类的**实际支出**（AA 按 m ÷ n 折算，「不计入预算」不影响）：统计页分类圆环（占比）用它。
+     * 预算对比清单用 [periodBudgetCategorySums]（计入预算的金额，再把「不计入预算」算 0）。
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val periodCategorySums: StateFlow<List<CategorySumRow>?> =
@@ -454,8 +454,9 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
-     * 本期「实际支出」= 未被标记「已退款」的支出之和（**账面金额，不扣 AA**）。
-     * 统计页 `02` 的总支出、结余封面与分类圆环用它；首页预算卡是预算口径（[homeSpent]）。
+     * 本期「实际支出」= 未被标记「已退款」的支出，**AA 按 m ÷ n 折算、「不计入预算」按全额**
+     * （钱确实花了，只是不进预算额度）。统计页 `02` 的总支出与分类圆环用它；
+     * 首页预算卡是预算口径（[homeSpent]）。
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val periodSpendingTotal: StateFlow<Long?> = periodRange.flatMapLatest { (start, end) ->

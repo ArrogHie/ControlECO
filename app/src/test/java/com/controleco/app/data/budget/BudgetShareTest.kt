@@ -6,16 +6,29 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 「不计入预算 / AA 支出」的口径换算（[BudgetShare]）。
+ * 「不计入预算 / AA 支出」的金额换算（[BudgetShare]）。
  *
  * 这里的期望值同时也是 DAO 里 SQL 表达式的对照口径：
- * ```
- * CASE WHEN budgetExcluded = 1 THEN 0
- *      WHEN aaShares >= 2 THEN (amountCents + aaShares / 2) / aaShares
- *      ELSE amountCents END
- * ```
+ * - AA 折算（统计页实际支出）：`CASE WHEN aaShares >= 2 THEN (amountCents + aaShares / 2) / aaShares ELSE amountCents END`
+ * - 计入预算：`CASE WHEN budgetExcluded = 1 THEN 0 WHEN aaShares >= 2 THEN (amountCents + aaShares / 2) / aaShares ELSE amountCents END`
  */
 class BudgetShareTest {
+
+    @Test
+    fun `AA 折算后的支出不看是否计入预算`() {
+        // 统计页口径：不计入预算的账单仍按全额（AA 仍折算）
+        assertEquals(12_34L, BudgetShare.aaSplitCents(12_34L, aaShares = 0))
+        assertEquals(10_00L, BudgetShare.aaSplitCents(30_00L, aaShares = 3))
+        assertEquals(3_33L, BudgetShare.aaSplitCents(10_00L, aaShares = 3))
+        assertEquals(1L, BudgetShare.aaSplitCents(1L, aaShares = 2))
+        // 与「计入预算」的差别只在不计入预算那一种情况
+        assertEquals(
+            BudgetShare.contributionCents(10_00L, budgetExcluded = false, aaShares = 3),
+            BudgetShare.aaSplitCents(10_00L, aaShares = 3),
+        )
+        assertEquals(0L, BudgetShare.contributionCents(10_00L, budgetExcluded = true, aaShares = 3))
+        assertEquals(3_33L, BudgetShare.aaSplitCents(10_00L, aaShares = 3))
+    }
 
     @Test
     fun `普通支出全部计入预算`() {

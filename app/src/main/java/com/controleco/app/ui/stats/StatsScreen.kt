@@ -90,12 +90,12 @@ import kotlin.math.roundToInt
  * 月视角每日一柱、年视角每月一柱；柱状图与圆环都是自绘 Canvas，不引第三方图表库。
  *
  * 口径：
- * - 「实际支出」（`02` 总额、分类占比圆环、结余封面、支出节奏）= **未被标记「已退款」的支出账面金额**
- *   （[LedgerViewModel.periodSpendingTotal] / [LedgerViewModel.periodCategorySums]），
- *   不扣「不计入预算 / AA」——钱确实花出去了；
- * - 「预算对比」= **计入预算的金额**（[LedgerViewModel.periodBudgetCategorySums]），
- *   与首页「本月支出」同一口径（不计入预算算 0、AA 按 金额 ÷ n）；
- * - 封面与支出节奏仍按账面（含已退款的原支出），两者用途不同。
+ * - 「实际支出」（`02` 总额、分类占比圆环）= **未被标记「已退款」的支出，AA 按 m ÷ n 折算**，
+ *   「不计入预算」仍按全额（[LedgerViewModel.periodSpendingTotal] /
+ *   [LedgerViewModel.periodCategorySums]）——钱确实花出去了；
+ * - 结余封面与 `01` 支出节奏 = **账面**（含已退款的原支出、不折算 AA），用途不同；
+ * - 「预算对比」= **计入预算的金额**（[LedgerViewModel.periodBudgetCategorySums]）：
+ *   不计入预算算 0、AA 按 m ÷ n，与首页预算卡同一口径。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -179,7 +179,7 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
     }
     var selectedBar by remember(bars) { mutableIntStateOf(defaultBarIndex) }
 
-    // 分类切片：实际支出（本期，已排除被标「已退款」的支出）+ 分类预算（年视角按 12 个月合计）
+    // 分类切片：实际支出（本期，已排除被标「已退款」的支出，AA 按 m ÷ n 折算）+ 分类预算（年视角按 12 个月合计）
     val slices = remember(byCategoryReady, categoryBudgets, categories, mode) {
         val actual = byCategoryReady.map { it.categoryName to it.totalCents }
         val budget = categoryBudgets.entries.mapNotNull { (id, cents) ->
@@ -205,7 +205,7 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
     }
 
     // 预算对比：分类预算（年视角 ×12）与**计入预算的支出**对齐（不计入预算算 0、AA 按 金额÷n），
-    // 与首页预算卡同一口径；圆环「分类占比」仍用账面实际支出（byCategoryReady）。
+    // 与首页预算卡同一口径；圆环「分类占比」用实际支出（AA 按 m÷n，「不计入预算」仍是全额）。
     val ratioRows = remember(categoryBudgets, categories, byBudgetCategoryReady, mode) {
         buildRatioRows(categoryBudgets, categories, byBudgetCategoryReady, mode)
     }
