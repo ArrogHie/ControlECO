@@ -27,6 +27,10 @@ data class TransactionRow(
     val refundPending: Boolean = false,
     /** 入库时间：待确认列表把捕获条目与退款条目按这个排（而不是业务时间） */
     val createdAt: Long = 0,
+    /** 不计入预算（只影响预算口径，不影响余额与「实际支出」；见 `data/budget/BudgetShare.kt`） */
+    val budgetExcluded: Boolean = false,
+    /** AA 支出人数（0 = 未开启；≥ 2 时计入预算 = 金额 ÷ n） */
+    val aaShares: Int = 0,
 )
 
 data class TypeTotalRow(
@@ -60,6 +64,7 @@ interface TransactionDao {
            c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon,
            a.id AS accountId, a.name AS accountName,
            t.refundMark AS refundMark, t.refundPending AS refundPending,
+           t.budgetExcluded AS budgetExcluded, t.aaShares AS aaShares,
            t.createdAt AS createdAt
            FROM transactions t
            JOIN categories c ON t.categoryId = c.id
@@ -77,11 +82,12 @@ interface TransactionDao {
     fun observeTypeTotals(startMillis: Long, endMillis: Long): Flow<List<TypeTotalRow>>
 
     /**
-     * 本期「实际支出」：**未被标记「已退款」的支出账单**之和。
+     * 本期「实际支出」：**未被标记「已退款」的支出账单**之和（**账面金额 m，不扣 AA / 不计入预算**）。
      *
      * 退款收入只作为收入存在，**不再从支出里相减**——退款是成对的记录：
      * 原支出被标「已退款」后直接不计入支出，退款那笔照常计入收入。
-     * 首页「本月支出」与统计页「分类预算与占比」的实际支出都用这一条口径。
+     * 统计页「02 实际支出」与分类占比用这一条口径；
+     * 预算类读数（首页预算卡 / 分类剩余预算 / 统计页预算对比）用 [observeBudgetSpendingTotal]。
      */
     @Query(
         """SELECT COALESCE(SUM(amountCents), 0) FROM transactions
@@ -103,6 +109,43 @@ interface TransactionDao {
            ORDER BY totalCents DESC"""
     )
     fun observeSpendingCategorySums(startMillis: Long, endMillis: Long): Flow<List<CategorySumRow>>
+
+    /**
+     * 本期**计入预算的支出**：与 [observeSpendingTotal] 同一批账单，但金额按预算口径折算
+     * （规则见 [com.controleco.app.data.budget.BudgetShare]，SQL 与 Kotlin 逐字一致）：
+     * 不计入预算 → 0；AA n 人 → 金额 ÷ n（四舍五入到分）；普通账单 → 原金额。
+     *
+     * 首页预算卡（本月支出 / 剩余 / 建议日花 / 本日剩余）与个人页预算卡读它；
+     * 账户余额、账单列表、统计页「实际支出」仍读 [observeSpendingTotal]。
+     */
+    @Query(
+        """SELECT COALESCE(SUM(
+             CASE WHEN budgetExcluded = 1 THEN 0
+                  WHEN aaShares >= 2 THEN (amountCents + aaShares / 2) / aaShares
+                  ELSE amountCents END), 0)
+           FROM transactions
+           WHERE timestamp >= :startMillis AND timestamp < :endMillis
+             AND type = 'EXPENSE' AND refundMark != 'REFUNDED_EXPENSE'"""
+    )
+    fun observeBudgetSpendingTotal(startMillis: Long, endMillis: Long): Flow<Long>
+
+    /**
+     * 本期**计入预算的分类支出**：口径同 [observeBudgetSpendingTotal]，按分类分组。
+     * 首页「分类剩余预算」条与统计页「预算对比」读它；分类圆环（占比）仍读
+     * [observeSpendingCategorySums]（实际账面支出）。
+     */
+    @Query(
+        """SELECT c.id AS categoryId, c.name AS categoryName,
+             SUM(CASE WHEN t.budgetExcluded = 1 THEN 0
+                      WHEN t.aaShares >= 2 THEN (t.amountCents + t.aaShares / 2) / t.aaShares
+                      ELSE t.amountCents END) AS totalCents
+           FROM transactions t JOIN categories c ON t.categoryId = c.id
+           WHERE t.timestamp >= :startMillis AND t.timestamp < :endMillis
+             AND t.type = 'EXPENSE' AND t.refundMark != 'REFUNDED_EXPENSE'
+           GROUP BY c.id, c.name
+           ORDER BY totalCents DESC"""
+    )
+    fun observeBudgetCategorySums(startMillis: Long, endMillis: Long): Flow<List<CategorySumRow>>
 
     @Query(
         """SELECT a.id AS accountId, a.initialBalanceCents AS initialBalanceCents,
@@ -155,6 +198,7 @@ interface TransactionDao {
            c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon,
            a.id AS accountId, a.name AS accountName,
            t.refundMark AS refundMark, t.refundPending AS refundPending,
+           t.budgetExcluded AS budgetExcluded, t.aaShares AS aaShares,
            t.createdAt AS createdAt
            FROM transactions t
            JOIN categories c ON t.categoryId = c.id
@@ -176,6 +220,7 @@ interface TransactionDao {
            c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon,
            a.id AS accountId, a.name AS accountName,
            t.refundMark AS refundMark, t.refundPending AS refundPending,
+           t.budgetExcluded AS budgetExcluded, t.aaShares AS aaShares,
            t.createdAt AS createdAt
            FROM transactions t
            JOIN categories c ON t.categoryId = c.id
@@ -199,6 +244,7 @@ interface TransactionDao {
            c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon,
            a.id AS accountId, a.name AS accountName,
            t.refundMark AS refundMark, t.refundPending AS refundPending,
+           t.budgetExcluded AS budgetExcluded, t.aaShares AS aaShares,
            t.createdAt AS createdAt
            FROM transactions t
            JOIN categories c ON t.categoryId = c.id

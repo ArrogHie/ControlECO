@@ -97,6 +97,19 @@ data class TransactionEntity(
      */
     @ColumnInfo(defaultValue = "")
     val flowId: String = "",
+    /**
+     * 「不计入预算」：该笔金额**不进本期预算支出**（首页预算卡 / 分类剩余预算 / 统计页预算对比），
+     * 但仍照常计入账户余额、账单列表与统计页「实际支出」——钱确实花出去了，只是不算进预算额度。
+     * 只对支出有意义；收入行恒为 false。
+     */
+    @ColumnInfo(defaultValue = "0")
+    val budgetExcluded: Boolean = false,
+    /**
+     * 「AA 支出」人数 n（0 = 未开启）：计入预算的金额 = 金额 ÷ n（四舍五入到分）。
+     * 同时勾了「不计入预算」时以不计入优先（计入 0）。n 的合法区间见 [com.controleco.app.data.budget.BudgetShare]。
+     */
+    @ColumnInfo(defaultValue = "0")
+    val aaShares: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
 )
 

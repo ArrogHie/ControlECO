@@ -34,6 +34,7 @@ import com.controleco.app.data.db.TypeTotalRow
 import com.controleco.app.data.db.TxSource
 import com.controleco.app.data.db.TxType
 import com.controleco.app.data.budget.Budget
+import com.controleco.app.data.budget.BudgetShare
 import com.controleco.app.data.budget.CategoryBudgetMath
 import com.controleco.app.data.budget.CategoryBudgetMode
 import com.controleco.app.data.budget.MonthPeriod
@@ -315,25 +316,29 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * 首页「本月支出（本月已花）」：固定取**当前会计月**（不随流水页翻月变化；区间随月首日滚动）。
      *
-     * 口径 = **未被标记「已退款」的支出账单之和**。
+     * 口径 = **计入预算的支出**（[com.controleco.app.data.budget.BudgetShare]）：
+     * 未被标记「已退款」的支出账单，勾了「不计入预算」的算 0、AA 支出按 金额 ÷ n 折算。
      * 退款是成对记录：原支出标了「已退款」就不再计入支出，退款那笔照常计入收入；
      * **不再做「支出 − 退款到账」的相减**——那是账单还没有退款标记时的旧做法。
      * 剩余/建议日花/状态由 UI 用 Budget.compute 纯函数计算。
+     *
+     * 注意这是**预算口径**：统计页「实际支出」用 [periodSpendingTotal]（账面金额），两者在有
+     * 「不计入预算 / AA」账单时会不同——这是设计口径，不是数据不一致。
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val homeSpent: StateFlow<Long?> = currentPeriod.flatMapLatest { period ->
         val (start, end) = period.toMillisRange(zone)
-        txDao.observeSpendingTotal(start, end)
+        txDao.observeBudgetSpendingTotal(start, end)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
-     * 首页"分类剩余预算"预览：本期各支出分类的**未退款支出**之和。
+     * 首页"分类剩余预算"预览：本期各支出分类**计入预算**的金额（同 [homeSpent] 口径）。
      * 与「本月支出」同一口径（各分类相加 = 本月支出）。
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val homeCategorySums: StateFlow<List<CategorySumRow>?> = currentPeriod.flatMapLatest { period ->
         val (start, end) = period.toMillisRange(zone)
-        txDao.observeSpendingCategorySums(start, end)
+        txDao.observeBudgetCategorySums(start, end)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
@@ -347,17 +352,17 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
-     * 首页"本日剩余"用：**今日未退款支出**（同 [homeSpent] 口径，只是范围是今天）。
+     * 首页"本日剩余"用：**今日计入预算的支出**（同 [homeSpent] 口径，只是范围是今天）。
      *
      * 工资/红包这类收入不参与（收入进来不会让今天的额度变多）；
-     * 被标「已退款」的支出不算花掉。范围跟着"今天"走（[refreshToday]），
-     * 跨零点或从后台回来时刷新一次，否则零点后还会一直算昨天的账。
+     * 被标「已退款」的支出不算花掉；「不计入预算」不计入；AA 支出按 金额 ÷ n 折算。
+     * 范围跟着"今天"走（[refreshToday]），跨零点或从后台回来时刷新一次，否则零点后还会一直算昨天的账。
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val homeTodaySpent: StateFlow<Long?> = todayRef.flatMapLatest { day ->
         val start = day.atStartOfDay(zone).toInstant().toEpochMilli()
         val end = day.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
-        txDao.observeSpendingTotal(start, end)
+        txDao.observeBudgetSpendingTotal(start, end)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // ---------- 月份 ----------
@@ -430,15 +435,27 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         periodRange.flatMapLatest { (start, end) -> txDao.observeTypeTotals(start, end) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    /** 本期各支出分类的**未退款支出**：统计页圆环与预算对比共用（与 [periodSpendingTotal] 同口径） */
+    /**
+     * 本期各支出分类的**账面支出**（未被标「已退款」）：统计页分类圆环（占比）用它。
+     * 预算对比清单用 [periodBudgetCategorySums]（计入预算的金额）。
+     */
     @OptIn(ExperimentalCoroutinesApi::class)
     val periodCategorySums: StateFlow<List<CategorySumRow>?> =
         periodRange.flatMapLatest { (start, end) -> txDao.observeSpendingCategorySums(start, end) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
-     * 本期「实际支出」= 未被标记「已退款」的支出之和。
-     * 统计页 `02` 的总支出用它，与首页「本月支出」是同一个数。
+     * 本期各支出分类**计入预算**的金额：「不计入预算」算 0、AA 按 金额 ÷ n 折算。
+     * 统计页「预算对比」用它（预算的对照对象必须与首页预算卡同一口径）。
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val periodBudgetCategorySums: StateFlow<List<CategorySumRow>?> =
+        periodRange.flatMapLatest { (start, end) -> txDao.observeBudgetCategorySums(start, end) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * 本期「实际支出」= 未被标记「已退款」的支出之和（**账面金额，不扣 AA**）。
+     * 统计页 `02` 的总支出、结余封面与分类圆环用它；首页预算卡是预算口径（[homeSpent]）。
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val periodSpendingTotal: StateFlow<Long?> = periodRange.flatMapLatest { (start, end) ->
@@ -470,7 +487,14 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         note: String,
         /** 商户/收款方：通知捕获自带，手动记录可自定义（账单列表标题优先显示它） */
         counterparty: String = "",
+        /** 不计入预算（只对支出生效；收入行强制 false） */
+        budgetExcluded: Boolean = false,
+        /** AA 人数（0 = 未开启；只对支出生效，超出 2..99 会被归一化为 0） */
+        aaShares: Int = 0,
     ) {
+        // 收入没有预算口径：统一按 0 落库，避免「先勾支出再切收入」把隐形标记写进库里
+        val excluded = type == TxType.EXPENSE && budgetExcluded
+        val shares = if (type == TxType.EXPENSE) BudgetShare.normalizeShares(aaShares) else 0
         viewModelScope.launch(Dispatchers.IO) {
             if (id > 0) {
                 txDao.getById(id)?.let { old ->
@@ -479,6 +503,7 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                             type = type, amountCents = amountCents, categoryId = categoryId,
                             accountId = accountId, timestamp = timestamp, note = note,
                             counterparty = counterparty,
+                            budgetExcluded = excluded, aaShares = shares,
                         )
                     )
                     // 编辑的是捕获来的交易 → 学习这次归类（"越用越准"；手动记账不学习）
@@ -492,6 +517,7 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                         type = type, amountCents = amountCents, categoryId = categoryId,
                         accountId = accountId, timestamp = timestamp, note = note,
                         counterparty = counterparty,
+                        budgetExcluded = excluded, aaShares = shares,
                     )
                 )
             }

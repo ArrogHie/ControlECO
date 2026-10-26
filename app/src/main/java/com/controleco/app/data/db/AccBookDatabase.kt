@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CaptureTraceEntity::class,
         MerchantRuleEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = true,
 )
 abstract class AccBookDatabase : RoomDatabase() {
@@ -267,6 +267,20 @@ abstract class AccBookDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v14：支出账单的预算口径——`budgetExcluded`（不计入预算）/ `aaShares`（AA 人数，0 = 未开启）。
+         *
+         * 两列只影响**预算类读数**（首页预算卡、分类剩余预算、统计页预算对比），
+         * 账户余额、账单列表金额与统计页「实际支出」仍按账面金额算（见 [TransactionEntity.budgetExcluded]）。
+         * 历史账单默认「计入预算、非 AA」，升级后预算读数不变。
+         */
+        private val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE transactions ADD COLUMN budgetExcluded INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE transactions ADD COLUMN aaShares INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile
         private var instance: AccBookDatabase? = null
 
@@ -280,7 +294,7 @@ abstract class AccBookDatabase : RoomDatabase() {
                     .addMigrations(
                         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6,
                         MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
-                        MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
+                        MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14,
                     )
                     .build().also { instance = it }
             }
