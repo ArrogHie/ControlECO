@@ -1,6 +1,7 @@
 package com.controleco.app.capture.overlay
 
 import com.controleco.app.capture.CaptureDefaults
+import com.controleco.app.capture.GuardedField
 
 /**
  * 悬浮确认卡的显示决策与关闭处置（纯函数，便于单测）与时间常量。
@@ -25,8 +26,12 @@ internal data class DismissSnapshot(
     val categoryId: Long?,
     val accountId: Long?,
     val counterparty: String,
+    /** 备注（卡片第二输入框；用户没改过时就是自动富化出来的原值） */
+    val note: String = "",
     /** 用户在卡片里改过任何字段（没有改动就不必回写数据库） */
     val edited: Boolean = false,
+    /** 用户改过的**具体字段**：只有这些字段在后续重复捕获时不被覆盖 */
+    val editedFields: Set<GuardedField> = emptySet(),
 )
 
 /**

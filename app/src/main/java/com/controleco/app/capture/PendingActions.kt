@@ -35,6 +35,7 @@ internal object PendingActions {
         accountId: Long,
         counterparty: String = item.counterparty,
         amountCents: Long = item.amountCents,
+        note: String = item.note,
     ): Long? {
         val externalId = "NTF:${item.dedupKey}"
         val counterpartyValue = counterparty.trim().ifBlank { item.counterparty }
@@ -47,7 +48,7 @@ internal object PendingActions {
                         categoryId = categoryId,
                         accountId = accountId,
                         timestamp = item.timestamp,
-                        note = item.note.ifBlank { item.ruleName },
+                        note = note.ifBlank { item.ruleName },
                         counterparty = counterpartyValue,
                         source = CaptureDefaults.txSource(item.sourcePackage),
                         externalId = externalId,
@@ -89,8 +90,8 @@ internal object PendingActions {
      * 已入账条目的编辑同步（悬浮卡"先入账、后修改"）：卡内当前值写回交易与 AUTO 条目，
      * 并学习商户归类（与 [confirm] 同一口径）。
      *
-     * 同时给条目打上"用户已手改"标记：此后页面/银行侧的自动富化不再覆盖金额/商户/时间——
-     * 用户输入优先于自动解析（见 CaptureMerge.mergePageInfo）。
+     * **不再**给条目打整条 `userEdited`：用户只改了哪几个字段，由调用方交给
+     * [OverlayFieldGuards] 逐字段登记，后续富化只跳过这些字段（2026-10-27 用户口径）。
      * 返回 false = 找不到该笔交易（可能已被撤销），调用方只需静默收场。
      */
     suspend fun updateEntered(
@@ -103,6 +104,7 @@ internal object PendingActions {
         accountId: Long,
         counterparty: String,
         amountCents: Long,
+        note: String = item.note,
     ): Boolean {
         val externalId = "NTF:${item.dedupKey}"
         val txId = txDao.findIdByExternalId(externalId) ?: return false
@@ -111,12 +113,11 @@ internal object PendingActions {
         // 不能拿打开卡片时的旧快照把后到的富化结果覆盖回去
         val fresh = pendingDao.getById(item.id) ?: item
         db.withTransaction {
-            txDao.updateEnteredFields(txId, amountCents, categoryId, accountId, counterpartyValue)
-            // AUTO 条目同步：页面/银行通道后续富化以它为准，不能留旧值；并置位"用户已手改"
+            txDao.updateEnteredFields(txId, amountCents, categoryId, accountId, counterpartyValue, note)
+            // AUTO 条目同步：页面/银行通道后续富化以它为准，不能留旧值
             pendingDao.updateFromPage(
-                item.id, amountCents, fresh.timestamp, counterpartyValue, fresh.note, fresh.ruleName,
+                item.id, amountCents, fresh.timestamp, counterpartyValue, note, fresh.ruleName,
             )
-            pendingDao.markUserEdited(item.id)
         }
         merchantRuleDao?.let {
             MerchantRules.learn(it, item.type, categoryId, accountId, counterpartyValue, item.note)

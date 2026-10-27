@@ -557,6 +557,7 @@ object CaptureCenter {
                 .onFailure { AppLog.w("Ntf", "undo entry delete failed", it) }
             if (dedupKey.isNotBlank()) {
                 pendingDao.deleteByDedupKey(dedupKey)
+                OverlayFieldGuards.clear(dedupKey)
                 if (dedupKey.isNotBlank()) AppLog.d("pending", "entry removed key=$dedupKey")
                 cancelCaptureNotification(entryNotifId(dedupKey))
                 if (ConfirmCardWindow.showingPendingId > 0 &&
@@ -583,6 +584,7 @@ object CaptureCenter {
                 pendingDao.deleteByDedupKey(dedupKey)
             }
             // 条目已丢弃：释放去重键，同分钟桶里的下一笔真实交易可以复用
+            OverlayFieldGuards.clear(dedupKey)
             if (dedupKey.isNotBlank()) AppLog.d("pending", "pending removed key=$dedupKey")
             cancelCaptureNotification(pendingNotifId(dedupKey))
             if (ConfirmCardWindow.showingPendingId == pendingId) {
@@ -855,14 +857,17 @@ object CaptureCenter {
                 learnedRules = learned,
                 alreadyEntered = alreadyEntered,
                 askMode = askMode,
-                onConfirm = { amountCents, categoryId, accountId, counterpartyText ->
+                onConfirm = { amountCents, categoryId, accountId, counterpartyText, noteText, editedFields ->
                     // 已入账模式：「保存」= 同步修改（细条可撤销整笔）；待确认模式：「记一笔」= 入账
                     mainHandler.post { ConfirmCardWindow.dismissConfirm() }
                     scope.launch {
                         if (alreadyEntered) {
-                            saveEnteredEdits(pending, amountCents, categoryId, accountId, counterpartyText, withStrip = true)
+                            saveEnteredEdits(
+                                pending, amountCents, categoryId, accountId, counterpartyText, noteText,
+                                editedFields, withStrip = true,
+                            )
                         } else {
-                            confirmFromOverlay(pending, amountCents, categoryId, accountId, counterpartyText)
+                            confirmFromOverlay(pending, amountCents, categoryId, accountId, counterpartyText, noteText)
                         }
                     }
                 },
@@ -881,7 +886,12 @@ object CaptureCenter {
                         // 关闭 = 保留这笔已入账；用户改过的字段同步回去（没改过就不写库）
                         if (snapshot.edited && canSyncOverlayEdits(snapshot) && catId != null && accId != null) {
                             AppLog.i("Overlay", "card dismissed -> sync edits #${pending.id} ${Money.formatYuan(snapshot.amountCents)}")
-                            scope.launch { saveEnteredEdits(pending, snapshot.amountCents, catId, accId, snapshot.counterparty, withStrip = true) }
+                            scope.launch {
+                                saveEnteredEdits(
+                                    pending, snapshot.amountCents, catId, accId, snapshot.counterparty,
+                                    snapshot.note, snapshot.editedFields, withStrip = true,
+                                )
+                            }
                         } else {
                             AppLog.i("Overlay", "card dismissed -> entry kept #${pending.id} (edited=${snapshot.edited})")
                         }
@@ -891,7 +901,11 @@ object CaptureCenter {
                     } else if (dismissOutcome(snapshot) == DismissOutcome.ENTER && catId != null && accId != null) {
                         // 待确认条目：关闭 = 视为入账（旧语义）
                         AppLog.i("Overlay", "card dismissed -> enter #${pending.id} ${Money.formatYuan(snapshot.amountCents)}")
-                        scope.launch { confirmFromOverlay(pending, snapshot.amountCents, catId, accId, snapshot.counterparty) }
+                        scope.launch {
+                            confirmFromOverlay(
+                                pending, snapshot.amountCents, catId, accId, snapshot.counterparty, snapshot.note,
+                            )
+                        }
                     } else {
                         AppLog.i("Overlay", "card dismissed -> keep pending #${pending.id} (amount/category/account incomplete)")
                         scope.launch {
@@ -904,22 +918,31 @@ object CaptureCenter {
         }
     }
 
-    /** 已入账卡片的「保存」/关闭同步：卡内当前值写回交易与 AUTO 条目（细条可撤销整笔） */
+    /**
+     * 已入账卡片的「保存」/关闭同步：卡内当前值写回交易与 AUTO 条目（细条可撤销整笔）。
+     * [editedFields] 里列出的字段登记为"用户改过"，后续重复捕获不再改写它们。
+     */
     private suspend fun saveEnteredEdits(
         pending: PendingTransactionEntity,
         amountCents: Long,
         categoryId: Long,
         accountId: Long,
         counterparty: String,
+        note: String,
+        editedFields: Set<GuardedField>,
         withStrip: Boolean,
     ) {
         val ok = runCatching {
-            PendingActions.updateEntered(db, txDao, pendingDao, merchantRuleDao, pending, categoryId, accountId, counterparty, amountCents)
+            PendingActions.updateEntered(
+                db, txDao, pendingDao, merchantRuleDao, pending, categoryId, accountId, counterparty, amountCents, note,
+            )
         }.onFailure { AppLog.e("Overlay", "sync entered edits failed", it) }.getOrDefault(false)
         if (!ok) {
             toast("这笔已被撤销，未更新")
             return
         }
+        // 用户改过的字段：后续页面/银行侧富化跳过（未改过的字段照旧自动富化）
+        OverlayFieldGuards.mark(pending.dedupKey, editedFields)
         cancelCaptureNotification(entryNotifId(pending.dedupKey))
         toast("已更新")
         if (withStrip) {
@@ -938,6 +961,7 @@ object CaptureCenter {
     private suspend fun ignoreEntered(pending: PendingTransactionEntity) {
         val removed = PendingActions.undoEntered(db, txDao, pendingDao, pending.dedupKey)
         pendingDao.deleteById(pending.id)
+        OverlayFieldGuards.clear(pending.dedupKey)
         cancelCaptureNotification(entryNotifId(pending.dedupKey))
         toast(if (removed) "已忽略，这笔未记账" else "这笔已被撤销")
         AppLog.i("Overlay", "ignored (entry deleted=$removed) #${pending.id} key=${pending.dedupKey}")
@@ -950,14 +974,19 @@ object CaptureCenter {
         categoryId: Long,
         accountId: Long,
         counterparty: String,
+        note: String = pending.note,
     ) {
         val txId = try {
-            PendingActions.confirm(db, txDao, pendingDao, merchantRuleDao, pending, categoryId, accountId, counterparty, amountCents)
+            PendingActions.confirm(
+                db, txDao, pendingDao, merchantRuleDao, pending, categoryId, accountId, counterparty, amountCents, note,
+            )
         } catch (e: Exception) {
             AppLog.e("Overlay", "confirm from overlay failed", e)
             toast("入账失败：${e.message ?: "未知错误"}")
             return
         }
+        // 条目已入账（待确认条目被删除），登记簿里的字段锁一并清理
+        OverlayFieldGuards.clear(pending.dedupKey)
         cancelCaptureNotification(pendingNotifId(pending.dedupKey))
         val kindType = pending.type
         toast("已记入")
@@ -977,6 +1006,7 @@ object CaptureCenter {
     /** 卡片「忽略」：丢弃待确认条目（误报纠错，一条点击） */
     private suspend fun ignoreFromOverlay(pendingId: Long, dedupKey: String) {
         PendingActions.discard(pendingDao, pendingId)
+        OverlayFieldGuards.clear(dedupKey)
         if (dedupKey.isNotBlank()) AppLog.d("Overlay", "pending ignored key=$dedupKey")
         cancelCaptureNotification(pendingNotifId(dedupKey))
         AppLog.i("Overlay", "ignored from card #$pendingId")
@@ -1025,7 +1055,7 @@ object CaptureCenter {
                     accounts = accounts,
                     learnedRules = emptyList(),
                     alreadyEntered = true, // 样例按真实形态展示（"已记入一笔支出"，改/删都只是 Toast）
-                    onConfirm = { _, _, _, _ ->
+                    onConfirm = { _, _, _, _, _, _ ->
                         mainHandler.post { ConfirmCardWindow.dismissConfirm() }
                         toast("测试卡片：保存（样例不入账）")
                     },
@@ -2148,14 +2178,18 @@ object CaptureCenter {
         ledger: BankLedgerRules.BankLedger,
         bankIdentity: String,
     ) {
+        val guards = OverlayFieldGuards.fieldsOf(existing.dedupKey)
+        val lockNote = existing.userEdited || GuardedField.NOTE in guards
+        val lockCounterparty = existing.userEdited || GuardedField.COUNTERPARTY in guards
         val extra = "银行 ${ledger.accountLabel}"
         val note = when {
-            existing.userEdited -> existing.note
+            lockNote -> existing.note
             existing.note.contains(ledger.accountLabel) -> existing.note
             existing.note.isBlank() -> extra
             else -> "${existing.note} · $extra".take(300)
         }
-        val counterparty = existing.counterparty.ifBlank { ledger.merchant }
+        val counterparty = if (lockCounterparty) existing.counterparty
+        else existing.counterparty.ifBlank { ledger.merchant }
         val instrument = existing.paymentInstrument.ifBlank { ledger.accountLabel }
         db.withTransaction {
             pendingDao.updateFromPage(
@@ -2170,7 +2204,8 @@ object CaptureCenter {
                 pendingDao.updatePaymentInstrument(existing.id, instrument)
             }
             pendingDao.updateBankInstanceIfBlank(existing.id, bankIdentity)
-            if (existing.status == PendingStatus.AUTO && !existing.userEdited) {
+            // 已入账条目同步回交易：备注/商户已在上面按字段锁算过，锁定字段写回的是原值（幂等）
+            if (existing.status == PendingStatus.AUTO) {
                 txDao.updateCapturedByExternalId(
                     "NTF:${existing.dedupKey}",
                     existing.amountCents,
@@ -2178,7 +2213,9 @@ object CaptureCenter {
                     counterparty,
                     note,
                 )
-                syncAutoEntryAccount(existing, instrument)
+                if (GuardedField.ACCOUNT !in guards && !existing.userEdited) {
+                    syncAutoEntryAccount(existing, instrument)
+                }
             }
         }
         AppLog.i(
@@ -2186,7 +2223,8 @@ object CaptureCenter {
             "merged bank info into " +
                 (if (existing.status == PendingStatus.AUTO) "auto entry" else "pending") +
                 " #${existing.id} ${ledger.ruleName} 账户=${ledger.accountLabel}" +
-                (if (existing.userEdited) " [用户已手改，仅记录银行身份]" else ""),
+                (if (guards.isNotEmpty()) " [用户改过 $guards，仅补其余字段]"
+                else if (existing.userEdited) " [用户已手改，仅记录银行身份]" else ""),
         )
     }
 
@@ -2918,6 +2956,8 @@ object CaptureCenter {
         crossApp: Boolean = false,
     ) {
         val existing = related.pending
+        // 用户在悬浮卡里改过的字段：合并时保持用户值（其余字段照旧按页面优先富化）
+        val guarded = OverlayFieldGuards.fieldsOf(existing.dedupKey)
         val merged = mergePageInfo(
             existing = existing,
             pageAmountCents = candidate.amountCents,
@@ -2927,6 +2967,7 @@ object CaptureCenter {
             pagePaymentMethod = candidate.paymentMethod,
             pageRuleName = candidate.ruleName,
             pageInstrument = candidate.instrument?.label.orEmpty(),
+            guarded = guarded,
         )
         val autoEntered = existing.status == PendingStatus.AUTO
         db.withTransaction {
@@ -2950,7 +2991,9 @@ object CaptureCenter {
                     merged.note,
                 )
                 txDao.updateFlowIdByExternalId("NTF:${existing.dedupKey}", pageFlowIdentity)
-                if (merged.paymentInstrument.isNotBlank()) {
+                if (merged.paymentInstrument.isNotBlank() &&
+                    GuardedField.ACCOUNT !in guarded
+                ) {
                     syncAutoEntryAccount(existing, merged.paymentInstrument)
                 }
             }

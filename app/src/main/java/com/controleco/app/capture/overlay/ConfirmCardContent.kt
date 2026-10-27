@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.controleco.app.capture.CaptureDefaults
+import com.controleco.app.capture.GuardedField
 import com.controleco.app.capture.MerchantRules
 import com.controleco.app.data.db.AccountEntity
 import com.controleco.app.data.db.CategoryEntity
@@ -117,6 +118,7 @@ internal class ConfirmCardState {
 
     private var amountUserEdited = false
     private var counterpartyUserEdited = false
+    private var noteUserEdited = false
     private var categoryUserEdited = false
     private var accountUserEdited = false
 
@@ -125,7 +127,21 @@ internal class ConfirmCardState {
 
     /** 用户是否改过任何字段：关闭卡片时没有改动就不必回写数据库 */
     val userEdited: Boolean
-        get() = amountUserEdited || counterpartyUserEdited || categoryUserEdited || accountUserEdited
+        get() = amountUserEdited || counterpartyUserEdited || noteUserEdited ||
+            categoryUserEdited || accountUserEdited
+
+    /**
+     * 用户改过的字段集合：落库后交给 [com.controleco.app.capture.OverlayFieldGuards] 登记，
+     * 后续重复捕获不再改写这些字段（没改过的照旧按自动富化处理）。
+     */
+    val editedFields: Set<GuardedField>
+        get() = buildSet {
+            if (amountUserEdited) add(GuardedField.AMOUNT)
+            if (counterpartyUserEdited) add(GuardedField.COUNTERPARTY)
+            if (noteUserEdited) add(GuardedField.NOTE)
+            if (categoryUserEdited) add(GuardedField.CATEGORY)
+            if (accountUserEdited) add(GuardedField.ACCOUNT)
+        }
 
     /** 首次绑定（新的待确认条目） */
     fun bind(
@@ -136,6 +152,7 @@ internal class ConfirmCardState {
     ) {
         amountUserEdited = false
         counterpartyUserEdited = false
+        noteUserEdited = false
         categoryUserEdited = false
         accountUserEdited = false
         pendingId = pending.id
@@ -184,7 +201,9 @@ internal class ConfirmCardState {
         if (!counterpartyUserEdited && pending.counterparty.isNotBlank()) {
             counterparty = pending.counterparty
         }
-        note = pending.note
+        if (!noteUserEdited) {
+            note = pending.note
+        }
         ruleName = pending.ruleName
         timestamp = pending.timestamp
         this.categories = categories
@@ -215,6 +234,11 @@ internal class ConfirmCardState {
     fun updateCounterparty(text: String) {
         counterparty = text
         counterpartyUserEdited = true
+    }
+
+    fun updateNote(text: String) {
+        note = text
+        noteUserEdited = true
     }
 
     fun selectCategory(id: Long) {
@@ -250,7 +274,14 @@ internal fun ConfirmCardContent(
     state: ConfirmCardState,
     alreadyEntered: Boolean = false,
     askMode: Boolean = false,
-    onConfirm: (amountCents: Long, categoryId: Long, accountId: Long, counterparty: String) -> Unit,
+    onConfirm: (
+        amountCents: Long,
+        categoryId: Long,
+        accountId: Long,
+        counterparty: String,
+        note: String,
+        editedFields: Set<GuardedField>,
+    ) -> Unit,
     onIgnore: () -> Unit,
     onDismiss: () -> Unit,
     onUserActivity: () -> Unit = {},
@@ -536,9 +567,9 @@ internal fun ConfirmCardContent(
                     )
                 }
 
-                // 商户 / 备注
+                // 商户
                 EcoField(
-                    label = "商户 / 备注",
+                    label = "商户",
                     value = state.counterparty,
                     onValueChange = {
                         state.updateCounterparty(it)
@@ -547,7 +578,23 @@ internal fun ConfirmCardContent(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 10.dp),
-                    placeholder = "商户名称或备注",
+                    placeholder = "商户名称",
+                    minHeight = 38.dp,
+                    textStyle = EcoType.Input,
+                )
+
+                // 备注
+                EcoField(
+                    label = "备注",
+                    value = state.note,
+                    onValueChange = {
+                        state.updateNote(it)
+                        onUserActivity()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    placeholder = "备注（可选）",
                     minHeight = 38.dp,
                     textStyle = EcoType.Input,
                 )
@@ -702,6 +749,8 @@ internal fun ConfirmCardContent(
                                     state.categoryId!!,
                                     state.accountId!!,
                                     state.counterparty,
+                                    state.note,
+                                    state.editedFields,
                                 )
                             } else {
                                 showInvalid = true

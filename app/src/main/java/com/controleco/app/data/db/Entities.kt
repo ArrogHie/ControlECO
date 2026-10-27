@@ -264,8 +264,11 @@ data class PendingTransactionEntity(
     @ColumnInfo(defaultValue = "")
     val paymentInstrument: String = "",
     /**
-     * 用户是否手动改过这笔（悬浮卡保存 / 待确认确认时置位）：
-     * 置位后页面与银行侧的后续富化不再覆盖金额/商户/时间——用户输入优先于自动解析。
+     * 用户是否手动改过这笔（历史语义：置位后整条锁定，页面/银行侧富化不再覆盖）。
+     *
+     * 2026-10-27 起悬浮卡的编辑**不再**置位本列——改为按字段登记在
+     * [com.controleco.app.capture.OverlayFieldGuards]，未改过的字段仍会被富化。
+     * 本列保留给升级前已置位的旧条目（继续整条锁定，不做迁移）。
      */
     @ColumnInfo(defaultValue = "0")
     val userEdited: Boolean = false,

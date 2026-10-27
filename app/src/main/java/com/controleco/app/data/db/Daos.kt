@@ -191,14 +191,21 @@ interface TransactionDao {
     @Query("UPDATE transactions SET flowId = :flowId WHERE externalId = :externalId AND flowId = ''")
     suspend fun updateFlowIdByExternalId(externalId: String, flowId: String)
 
-    /** 悬浮卡编辑同步：金额/分类/账户/商户回写已入账的交易（「忽略」与「撤销」走删除） */
+    /** 悬浮卡编辑同步：金额/分类/账户/商户/备注回写已入账的交易（「忽略」与「撤销」走删除） */
     @Query(
         """UPDATE transactions
            SET amountCents = :amountCents, categoryId = :categoryId,
-               accountId = :accountId, counterparty = :counterparty
+               accountId = :accountId, counterparty = :counterparty, note = :note
            WHERE id = :id"""
     )
-    suspend fun updateEnteredFields(id: Long, amountCents: Long, categoryId: Long, accountId: Long, counterparty: String)
+    suspend fun updateEnteredFields(
+        id: Long,
+        amountCents: Long,
+        categoryId: Long,
+        accountId: Long,
+        counterparty: String,
+        note: String,
+    )
 
     /** 登记退款的候选：近 60 天还没标「已退款」的支出（供"无金额退款通知→选被退款的账单"使用） */
     @Query(

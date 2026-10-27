@@ -19,7 +19,8 @@ import kotlin.math.abs
  * - 命中后**页面信息优先**：页面侧有商户口/支付方式/金额/时间，覆盖通知侧的稀疏值。
  * - **同金额的两笔独立交易不能被并成一笔**：页面候选带"支付流程标识"、通知候选带"通知实例标识"，
  *   同类标识不同即视为两笔；不同通道之间的标识（页面 p: / 通知 n:）不互相阻塞。
- * - **用户手改过的字段不被覆盖**（[PendingTransactionEntity.userEdited]）。
+ * - **用户手改过的字段不被覆盖**：悬浮卡里改过的字段按 [GuardedField] 逐个锁定，
+ *   旧条目按 [PendingTransactionEntity.userEdited] 整条锁定。
  */
 
 /** 两通道"同时捕获到一笔"的判定窗口：捕获时刻相差 ≤ 10s */
@@ -34,6 +35,22 @@ internal const val MEITUAN_RECAPTURE_WINDOW_MS = 180_000L
 
 /** 通知侧时间对页面侧兜底时间的修正窗口：页面把捕获时刻当交易时间时，用通知的发布时间校正 */
 internal const val NOTIFICATION_TIME_FIX_WINDOW_MS = 300_000L
+
+/**
+ * 用户在悬浮确认卡里手动改过的字段。
+ *
+ * 语义：**用户动过的字段，后续重复捕获不再改写；没动过的字段仍按原逻辑被页面/银行侧富化。**
+ * 与 [PendingTransactionEntity.userEdited]（整条锁定）的关系：`userEdited` 只保留给升级前
+ * 就已经置位的旧条目（行为不变），新的一次编辑不再整条锁定，只锁定真正改过的字段。
+ * 登记在内存里（[OverlayFieldGuards]），进程被杀后失效——2026-10-27 用户口径。
+ */
+internal enum class GuardedField {
+    AMOUNT,
+    COUNTERPARTY,
+    NOTE,
+    CATEGORY,
+    ACCOUNT,
+}
 
 /** 命中结果：既有条目 + 金额是否一致（不一致 = 页面金额覆盖通知金额） */
 internal data class RelatedPending(
@@ -308,8 +325,9 @@ internal fun dedupKeyWithAmount(key: String, amountCents: Long): String? {
  * 两道防护：
  * 1. **纯金额不能覆盖已有商户**——页面解析偶发把金额节点当商户
  *    （真实事故：碰一碰支付页"￥"与"20.06"分节点渲染，合并回填把"鸿润福连锁超市"改成了"20.06"）；
- * 2. **用户手改过（userEdited）时所有可见字段保持既有值**，只补空白支付工具——
- *    用户输入优先于自动解析，且不允许自动拼装备注导致两处不一致。
+ * 2. **用户手改过的字段保持既有值**：旧条目按 [PendingTransactionEntity.userEdited] 整条锁定，
+ *    新编辑按 [guarded] 逐字段锁定（金额/商户/备注各自独立），未锁定的字段照旧被页面覆盖。
+ *    锁定备注时不再用页面内容重新拼装备注，避免正式账单与待确认条目备注不一致。
  */
 internal fun mergePageInfo(
     existing: PendingTransactionEntity,
@@ -320,7 +338,15 @@ internal fun mergePageInfo(
     pagePaymentMethod: String?,
     pageRuleName: String,
     pageInstrument: String = "",
+    /** 用户在悬浮卡里改过的字段（[OverlayFieldGuards] 登记）；空 = 全部按自动富化处理 */
+    guarded: Set<GuardedField> = emptySet(),
 ): PageMerge {
+    // 升级前置过 userEdited 的旧条目：整条锁定，行为与升级前一致（用户口径：旧条目不迁移）
+    val legacyLock = existing.userEdited
+    val lockAmount = legacyLock || GuardedField.AMOUNT in guarded
+    val lockCounterparty = legacyLock || GuardedField.COUNTERPARTY in guarded
+    val lockNote = legacyLock || GuardedField.NOTE in guarded
+
     val baseNote = pageNote.ifBlank { existing.note }
     val mergedNote = buildString {
         append(baseNote)
@@ -328,29 +354,21 @@ internal fun mergePageInfo(
             if (isNotEmpty()) append(" · ")
             append("支付方式 $pagePaymentMethod")
         }
-    }.take(300)
-    if (existing.userEdited) {
-        // 用户改过：金额/时间/商户/备注/规则名都保持既有值，只补空白字段。
-        // 备注不能再用页面内容重新拼装——否则正式账单与待确认条目的备注会不一致。
-        return PageMerge(
-            amountCents = existing.amountCents,
-            timestamp = existing.timestamp,
-            counterparty = existing.counterparty,
-            note = existing.note,
-            ruleName = existing.ruleName,
-            paymentInstrument = existing.paymentInstrument.ifBlank { pageInstrument },
-        )
-    }
+    }.take(300).ifBlank { existing.note }
     val usableCounterparty = pageCounterparty.takeIf {
         it.isNotBlank() && !PageParseSupport.isAmountLikeNode(it)
     }
     return PageMerge(
-        amountCents = pageAmountCents,
-        timestamp = pageTxTime ?: existing.timestamp,
-        counterparty = usableCounterparty ?: existing.counterparty,
-        note = mergedNote,
-        ruleName = pageRuleName.ifBlank { existing.ruleName },
-        paymentInstrument = pageInstrument.ifBlank { existing.paymentInstrument },
+        amountCents = if (lockAmount) existing.amountCents else pageAmountCents,
+        timestamp = if (legacyLock) existing.timestamp else (pageTxTime ?: existing.timestamp),
+        counterparty = if (lockCounterparty) existing.counterparty else (usableCounterparty ?: existing.counterparty),
+        note = if (lockNote) existing.note else mergedNote,
+        ruleName = if (legacyLock) existing.ruleName else pageRuleName.ifBlank { existing.ruleName },
+        paymentInstrument = if (legacyLock) {
+            existing.paymentInstrument.ifBlank { pageInstrument }
+        } else {
+            pageInstrument.ifBlank { existing.paymentInstrument }
+        },
     )
 }
 

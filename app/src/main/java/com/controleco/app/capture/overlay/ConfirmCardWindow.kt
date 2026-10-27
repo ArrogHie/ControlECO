@@ -77,7 +77,14 @@ internal object ConfirmCardWindow {
         learnedRules: List<com.controleco.app.data.db.MerchantRuleEntity> = emptyList(),
         alreadyEntered: Boolean = false,
         askMode: Boolean = false,
-        onConfirm: (amountCents: Long, categoryId: Long, accountId: Long, counterparty: String) -> Unit,
+        onConfirm: (
+            amountCents: Long,
+            categoryId: Long,
+            accountId: Long,
+            counterparty: String,
+            note: String,
+            editedFields: Set<com.controleco.app.capture.GuardedField>,
+        ) -> Unit,
         onIgnore: () -> Unit,
         onDismiss: (DismissSnapshot) -> Unit,
     ): Boolean {
@@ -93,8 +100,8 @@ internal object ConfirmCardWindow {
                 state = state,
                 alreadyEntered = alreadyEntered,
                 askMode = askMode,
-                onConfirm = { amountCents, categoryId, accountId, counterparty ->
-                    onConfirm(amountCents, categoryId, accountId, counterparty)
+                onConfirm = { amountCents, categoryId, accountId, counterparty, note, editedFields ->
+                    onConfirm(amountCents, categoryId, accountId, counterparty, note, editedFields)
                 },
                 onIgnore = onIgnore,
                 onDismiss = { handleDismiss() },
@@ -236,7 +243,9 @@ internal object ConfirmCardWindow {
             categoryId = state.categoryId,
             accountId = state.accountId,
             counterparty = state.counterparty,
+            note = state.note,
             edited = state.userEdited,
+            editedFields = state.editedFields,
         )
         if (dismissConfirm()) cb(snapshot)
     }

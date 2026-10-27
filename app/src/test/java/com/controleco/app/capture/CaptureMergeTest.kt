@@ -394,6 +394,111 @@ class CaptureMergeTest {
     }
 
     @Test
+    fun `字段级保护_只改了商户时_备注和规则名仍按页面富化`() {
+        // 用户在悬浮卡里只改了商户（2026-10-27 口径：没动过的字段照旧自动富化）
+        val existing = pending(
+            amount = 1290,
+            counterparty = "我改的店名",
+            note = "支付方式 零钱",
+            ruleName = "微信·支付成功页",
+            timestamp = base,
+            createdAt = base,
+        )
+        val merged = mergePageInfo(
+            existing = existing,
+            pageAmountCents = 1290,
+            pageTxTime = base + 5_000,
+            pageCounterparty = "淘宝·某某旗舰店",
+            pageNote = "支付方式 微信支付",
+            pagePaymentMethod = "微信支付",
+            pageRuleName = "淘宝·支付结果页",
+            pageInstrument = "微信支付",
+            guarded = setOf(GuardedField.COUNTERPARTY),
+        )
+        assertEquals("我改的店名", merged.counterparty) // 用户改过 → 保留
+        assertEquals("支付方式 微信支付", merged.note) // 没改过 → 页面覆盖
+        assertEquals("淘宝·支付结果页", merged.ruleName)
+        assertEquals(base + 5_000, merged.timestamp)
+    }
+
+    @Test
+    fun `字段级保护_只改了备注时_商户仍按页面富化`() {
+        val existing = pending(
+            amount = 1290,
+            counterparty = "美团",
+            note = "我写的备注",
+            timestamp = base,
+            createdAt = base,
+        )
+        val merged = mergePageInfo(
+            existing = existing,
+            pageAmountCents = 1290,
+            pageTxTime = base + 5_000,
+            pageCounterparty = "肯德基",
+            pageNote = "支付方式 零钱",
+            pagePaymentMethod = "零钱",
+            pageRuleName = "淘宝·支付结果页",
+            pageInstrument = "零钱",
+            guarded = setOf(GuardedField.NOTE),
+        )
+        assertEquals("我写的备注", merged.note) // 用户改过 → 保留
+        assertEquals("肯德基", merged.counterparty) // 没改过 → 页面覆盖
+    }
+
+    @Test
+    fun `字段级保护_金额被用户改过时_保留用户金额`() {
+        val existing = pending(amount = 1180, counterparty = "", note = "支付方式 零钱")
+        val merged = mergePageInfo(
+            existing = existing,
+            pageAmountCents = 1290,
+            pageTxTime = null,
+            pageCounterparty = "肯德基",
+            pageNote = "",
+            pagePaymentMethod = "零钱",
+            pageRuleName = "支付宝·付款成功页",
+            pageInstrument = "零钱",
+            guarded = setOf(GuardedField.AMOUNT),
+        )
+        assertEquals(1180L, merged.amountCents)
+        assertEquals("肯德基", merged.counterparty)
+    }
+
+    @Test
+    fun `没有登记受保护字段时_全部按页面优先富化`() {
+        val existing = pending(amount = 1290, counterparty = "美团", note = "支付方式 零钱")
+        val merged = mergePageInfo(
+            existing = existing,
+            pageAmountCents = 1290,
+            pageTxTime = base + 5_000,
+            pageCounterparty = "肯德基",
+            pageNote = "支付方式 微信支付",
+            pagePaymentMethod = "微信支付",
+            pageRuleName = "淘宝·支付结果页",
+            pageInstrument = "微信支付",
+            guarded = emptySet(),
+        )
+        assertEquals("肯德基", merged.counterparty)
+        assertEquals("支付方式 微信支付", merged.note)
+    }
+
+    @Test
+    fun `页面备注为空且既有备注也为空时_不回写空串`() {
+        val existing = pending(note = "")
+        val merged = mergePageInfo(
+            existing = existing,
+            pageAmountCents = 1290,
+            pageTxTime = null,
+            pageCounterparty = "肯德基",
+            pageNote = "",
+            pagePaymentMethod = null,
+            pageRuleName = "微信·支付成功页",
+            pageInstrument = "",
+        )
+        assertEquals("", merged.note)
+    }
+
+
+    @Test
     fun `既有商户为空时_纯金额的页面商户同样不写入`() {
         val merged = mergePageInfo(
             existing = pending(counterparty = ""),
