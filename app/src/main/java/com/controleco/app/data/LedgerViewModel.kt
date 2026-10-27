@@ -24,6 +24,7 @@ import com.controleco.app.data.db.CaptureChannel
 import com.controleco.app.data.db.CaptureTraceRow
 import com.controleco.app.data.db.CapturedNotificationEntity
 import com.controleco.app.data.db.CategoryEntity
+import com.controleco.app.data.db.CategoryRules
 import com.controleco.app.data.db.CategorySumRow
 import com.controleco.app.data.db.PendingTransactionEntity
 import com.controleco.app.data.db.RefundCategory
@@ -289,6 +290,22 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         loadCardImage(_cardImageUri.value)
         // 顺手清一次历史遗留图片（编辑器里没走完流程就退出的那几张）
         pruneCardImages()
+        // 「退款」收入分类是退款入账的固定去向：老版本可能被改名/删除过，启动时补回一个
+        // （用户不能改名/改类型/删除它，所以补回后不会再消失；已有则不重复插入）
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val all = categoryDao.getAll()
+                if (all.none { CategoryRules.isRefundIncome(it.type, it.name) }) {
+                    categoryDao.insert(
+                        CategoryEntity(
+                            name = RefundCategory.NAME,
+                            type = TxType.INCOME,
+                            sortOrder = REFUND_INCOME_SORT_ORDER,
+                        ),
+                    )
+                }
+            }.onFailure { AppLog.e("category", "restore refund category failed", it) }
+        }
     }
 
     fun setCardTransform(transform: CardTransform) {
@@ -630,16 +647,14 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val all = categoryDao.getAll()
                 val current = all.firstOrNull { it.id == id }
-                // 「其他」是删除分类时的兜底，改名/改类型会让兜底失效
-                if (current != null && current.name == "其他" &&
-                    (trimmed != "其他" || type != current.type)
-                ) {
-                    withContext(Dispatchers.Main) { onResult(0L, "「其他」不能改名或修改类型") }
+                // 保留名（「其他」/ 收入「退款」）不能改名或改类型——规则见 CategoryRules
+                CategoryRules.editError(current, trimmed, type)?.let { err ->
+                    withContext(Dispatchers.Main) { onResult(0L, err) }
                     return@launch
                 }
                 // 同类型下不允许同名（支出与收入各自可以有一个「其他」）
-                if (all.any { it.id != id && it.type == type && it.name.trim() == trimmed }) {
-                    withContext(Dispatchers.Main) { onResult(0L, "已存在同名分类") }
+                CategoryRules.duplicateNameError(all, id, trimmed, type)?.let { err ->
+                    withContext(Dispatchers.Main) { onResult(0L, err) }
                     return@launch
                 }
                 val savedId = if (id > 0) {
@@ -662,7 +677,7 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 删除分类：其下流水改挂到同类型的「其他」；「其他」本身不可删 */
+    /** 删除分类：其下流水改挂到同类型的「其他」；「其他」与收入「退款」不可删 */
     fun deleteCategory(id: Long, onResult: (String?) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -672,13 +687,15 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                     withContext(Dispatchers.Main) { onResult("分类不存在") }
                     return@launch
                 }
-                if (target.name == "其他") {
-                    withContext(Dispatchers.Main) { onResult("「其他」不能删除") }
+                CategoryRules.deleteError(target)?.let { err ->
+                    withContext(Dispatchers.Main) { onResult(err) }
                     return@launch
                 }
-                var fallback = all.firstOrNull { it.type == target.type && it.name == "其他" }
+                var fallback = all.firstOrNull { it.type == target.type && it.name == CategoryRules.FALLBACK_NAME }
                 if (fallback == null) {
-                    val newId = categoryDao.insert(CategoryEntity(name = "其他", type = target.type))
+                    val newId = categoryDao.insert(
+                        CategoryEntity(name = CategoryRules.FALLBACK_NAME, type = target.type),
+                    )
                     fallback = categoryDao.getAll().firstOrNull { it.id == newId }
                 }
                 if (fallback == null) {
@@ -1404,5 +1421,8 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         const val KEY_CAT_BUDGET_MODE = "category_budget_mode"
         const val MODE_PERCENT = "percent"
         const val MODE_AMOUNT = "amount"
+
+        /** 补回「退款」收入分类时的排序位（默认收入分类里排在「红包」之后、「其他」之前） */
+        const val REFUND_INCOME_SORT_ORDER = 3
     }
 }
