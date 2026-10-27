@@ -9,6 +9,7 @@ import java.math.RoundingMode
 import java.time.Instant
 import java.time.YearMonth
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import kotlin.math.floor
 import kotlin.math.log10
 import kotlin.math.pow
@@ -83,18 +84,30 @@ object ChartMath {
         }
     }
 
-    /** 年视角：每月一根柱，横轴标 1–12 月 */
+    /**
+     * 年视角：每**会计月**一根柱，横轴标 1–12 月。
+     *
+     * 会计年区间是 `MonthPeriod.year(year, startDay)`（y 年 1 月首日 → 次年 1 月首日）；
+     * 首日 ≠ 1 时区间尾部会带上次年 1 月 1 日到首日前的账单，它们属于**最后一个会计月**（12 月桶）。
+     * 所以按 `MonthPeriod.of(date, startDay).start` 的自然月归属分桶，而不是按 `date.monthValue`，
+     * 否则这些账单会被静默丢掉、柱子合计小于封面/实际支出。`startDay = 1` 时与自然年完全一致。
+     */
     fun yearBars(
         rows: List<TransactionRow>,
         month: YearMonth,
+        startDay: Int = 1,
         zone: ZoneId = ZoneId.systemDefault(),
     ): List<BarPoint> {
+        val period = MonthPeriod.year(month.year, startDay)
+        val baseMonth = YearMonth.of(month.year, 1)
         val cents = LongArray(12)
         val counts = IntArray(12)
         rows.filter { it.type == TxType.EXPENSE }.forEach { r ->
             val d = Instant.ofEpochMilli(r.timestamp).atZone(zone).toLocalDate()
-            if (d.year == month.year) {
-                val i = d.monthValue - 1
+            if (!period.contains(d)) return@forEach
+            val accountingMonth = YearMonth.from(MonthPeriod.of(d, startDay).start)
+            val i = ChronoUnit.MONTHS.between(baseMonth, accountingMonth).toInt()
+            if (i in 0..11) {
                 cents[i] += r.amountCents
                 counts[i]++
             }

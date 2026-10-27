@@ -95,7 +95,7 @@ class ChartMathTest {
             row(TxType.EXPENSE, 5_000, LocalDateTime.of(2026, 12, 31, 23, 0)),
             row(TxType.EXPENSE, 7_000, LocalDateTime.of(2025, 12, 31, 23, 0)),
         )
-        val bars = ChartMath.yearBars(rows, month, zone)
+        val bars = ChartMath.yearBars(rows, month, zone = zone)
 
         assertEquals(12, bars.size)
         assertEquals(3_000L, bars[0].cents)
@@ -104,6 +104,40 @@ class ChartMathTest {
         assertEquals(0L, bars[5].cents)
         assertEquals(listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"), bars.map { it.axisLabel })
         assertTrue(bars[11].tip.startsWith("12月"))
+    }
+
+    @Test
+    fun `年柱子按会计年分桶_首日不为1时次年1月初归入12月桶`() {
+        // 会计年首日 = 5：2026 会计年 = 2026-01-05 ~ 2027-01-05（左闭右开）
+        val month = YearMonth.of(2026, 6)
+        val rows = listOf(
+            row(TxType.EXPENSE, 1_000, LocalDateTime.of(2026, 1, 3, 12, 0)),   // 上一年度，排除
+            row(TxType.EXPENSE, 2_000, LocalDateTime.of(2026, 1, 5, 12, 0)),   // 会计年第一天 → 1 月桶
+            row(TxType.EXPENSE, 3_000, LocalDateTime.of(2026, 12, 31, 23, 0)), // 12 月桶
+            row(TxType.EXPENSE, 4_000, LocalDateTime.of(2027, 1, 4, 23, 0)),   // 次年 1 月初 → 12 月桶
+            row(TxType.EXPENSE, 9_000, LocalDateTime.of(2027, 1, 5, 0, 0)),    // 会计年外，排除
+        )
+        val bars = ChartMath.yearBars(rows, month, startDay = 5, zone = zone)
+
+        assertEquals(12, bars.size)
+        assertEquals(2_000L, bars[0].cents)              // 1 月只算本会计年的 1-05
+        assertEquals(7_000L, bars[11].cents)             // 12 月桶 = 12-31 + 次年 1-04
+        assertEquals(2, bars[11].count)
+        assertEquals(9_000L, bars.sumOf { it.cents })    // 区间内的支出全部落到柱子上，不丢
+    }
+
+    @Test
+    fun `年柱子首日为1时与自然年一致`() {
+        val month = YearMonth.of(2026, 3)
+        val rows = listOf(
+            row(TxType.EXPENSE, 1_000, LocalDateTime.of(2026, 1, 1, 0, 30)),
+            row(TxType.EXPENSE, 2_000, LocalDateTime.of(2026, 12, 31, 23, 0)),
+            row(TxType.EXPENSE, 9_000, LocalDateTime.of(2027, 1, 1, 0, 0)), // 会计年外，排除
+        )
+        val bars = ChartMath.yearBars(rows, month, startDay = 1, zone = zone)
+        assertEquals(1_000L, bars[0].cents)
+        assertEquals(2_000L, bars[11].cents)
+        assertEquals(3_000L, bars.sumOf { it.cents })
     }
 
     // ---------- 坐标轴 ----------
