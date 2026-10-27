@@ -13,6 +13,9 @@ import org.junit.Test
  *
  * 关键回归（用户反馈）：只列设过预算的分类时，"有账单但没设预算"的分类整行消失；
  * 现在它们必须出现，预算记 0、占比 0%。
+ *
+ * `byCategory` 传的是**实际支出**（AA 折算、不计入预算仍全额），与圆环同一口径；
+ * 清单各行「实际」之和恒等于总额，行占比加起来是 100%。
  */
 class BudgetRatioRowsTest {
 
@@ -121,5 +124,22 @@ class BudgetRatioRowsTest {
 
         // 实际同为 100.00 → 购物（有预算）在前，其余预算都是 0 → 按分类名升序（UTF-16：交 < 餐）
         assertEquals(listOf("购物", "交通", "餐饮"), rows.map { it.name })
+    }
+
+    @Test
+    fun `整笔不计入预算的分类按全额出现在清单里`() {
+        // 实际支出口径：不计入预算的账单仍按全额求和（此前预算口径会把它算 0、整行消失）
+        val rows = buildRatioRows(
+            categoryBudgets = emptyMap(),
+            categories = categories,
+            byCategory = listOf(sum(1, "餐饮", 50_000), sum(2, "交通", 20_000)),
+            mode = PeriodMode.MONTH,
+        )
+
+        assertEquals(listOf("餐饮", "交通"), rows.map { it.name })
+        assertEquals(50_000L, rows[0].actualCents)
+        assertEquals(20_000L, rows[1].actualCents)
+        assertEquals(70_000L, rows.sumOf { it.actualCents }) // 各行之和 = 实际支出总额
+        assertTrue(rows.all { it.budgetCents == 0L })
     }
 }

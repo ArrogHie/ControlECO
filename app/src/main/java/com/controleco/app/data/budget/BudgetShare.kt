@@ -4,9 +4,9 @@ package com.controleco.app.data.budget
  * 「不计入预算 / AA 支出」的金额换算——纯函数，可单测。
  *
  * 一笔支出账单的**账面金额 m** 永远不变（账户余额、账单列表用原值），但下游有两个折算口径：
- * 1. **AA 折算后的支出**（[aaSplitCents]，统计页「实际支出」与分类占比用）：
+ * 1. **AA 折算后的支出**（[aaSplitCents]，统计页「实际支出」、分类占比圆环与预算对比清单用）：
  *    AA n 人 → m ÷ n（四舍五入到分）；普通账单 → m。**「不计入预算」不影响它**——钱确实花了。
- * 2. **计入本期预算的金额**（[contributionCents]，首页预算卡 / 分类剩余预算 / 统计页预算对比用）：
+ * 2. **计入本期预算的金额**（[contributionCents]，首页预算卡 / 分类剩余预算用）：
  *    不计入预算 → 0；否则同 1（AA → m ÷ n）。
  *
  * 两者同时勾选时：统计口径按 AA 折算，预算口径为 0（不计入优先）。
@@ -45,7 +45,7 @@ object BudgetShare {
 
     /**
      * **计入预算的金额**（分）：不计入预算 → 0，否则同 [aaSplitCents]。
-     * 首页预算卡、分类剩余预算、统计页预算对比用它。
+     * 首页预算卡、分类剩余预算用它。
      */
     fun contributionCents(amountCents: Long, budgetExcluded: Boolean, aaShares: Int): Long =
         if (budgetExcluded) 0L else aaSplitCents(amountCents, aaShares)

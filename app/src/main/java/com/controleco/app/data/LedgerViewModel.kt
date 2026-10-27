@@ -436,21 +436,13 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
-     * 本期各支出分类的**实际支出**（AA 按 m ÷ n 折算，「不计入预算」不影响）：统计页分类圆环（占比）用它。
-     * 预算对比清单用 [periodBudgetCategorySums]（计入预算的金额，再把「不计入预算」算 0）。
+     * 本期各支出分类的**实际支出**（AA 按 m ÷ n 折算，「不计入预算」不影响）：
+     * 统计页分类圆环（占比）与**预算对比清单**都用它——两者同一口径，
+     * 所以清单各行之恒等于 [periodSpendingTotal]、行占比加起来是 100%。
      */
     @OptIn(ExperimentalCoroutinesApi::class)
     val periodCategorySums: StateFlow<List<CategorySumRow>?> =
         periodRange.flatMapLatest { (start, end) -> txDao.observeSpendingCategorySums(start, end) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    /**
-     * 本期各支出分类**计入预算**的金额：「不计入预算」算 0、AA 按 金额 ÷ n 折算。
-     * 统计页「预算对比」用它（预算的对照对象必须与首页预算卡同一口径）。
-     */
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val periodBudgetCategorySums: StateFlow<List<CategorySumRow>?> =
-        periodRange.flatMapLatest { (start, end) -> txDao.observeBudgetCategorySums(start, end) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**

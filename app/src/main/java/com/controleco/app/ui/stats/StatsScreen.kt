@@ -79,6 +79,7 @@ import com.controleco.app.util.Money
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -94,8 +95,9 @@ import kotlin.math.roundToInt
  *   「不计入预算」仍按全额（[LedgerViewModel.periodSpendingTotal] /
  *   [LedgerViewModel.periodCategorySums]）——钱确实花出去了；
  * - 结余封面与 `01` 支出节奏 = **账面**（含已退款的原支出、不折算 AA），用途不同；
- * - 「预算对比」= **计入预算的金额**（[LedgerViewModel.periodBudgetCategorySums]）：
- *   不计入预算算 0、AA 按 m ÷ n，与首页预算卡同一口径。
+ * - 「预算对比」= **实际支出**（[LedgerViewModel.periodCategorySums]，与 `02` 圆环同一口径）：
+ *   不计入预算仍按全额、AA 按 m ÷ n——头部合计 = 各行之和 = 实际支出总额，与清单不会对不上。
+ *   注意首页预算卡/分类剩余预算是**另一套**预算口径（不计入预算算 0），两者刻意不同。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -108,7 +110,6 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
     var showPicker by remember { mutableStateOf(false) }
     val totals by vm.periodTotals.collectAsStateWithLifecycle()
     val byCategory by vm.periodCategorySums.collectAsStateWithLifecycle()
-    val byBudgetCategory by vm.periodBudgetCategorySums.collectAsStateWithLifecycle()
     val rows by vm.periodRows.collectAsStateWithLifecycle()
     val spendingTotal by vm.periodSpendingTotal.collectAsStateWithLifecycle()
     val categoryBudgets by vm.categoryBudgets.collectAsStateWithLifecycle()
@@ -123,7 +124,6 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
     val rowsReady = rows ?: return
     val totalsReady = totals ?: return
     val byCategoryReady = byCategory ?: return
-    val byBudgetCategoryReady = byBudgetCategory ?: return
     val spendingReady = spendingTotal ?: return
 
     val expense = totalsReady.firstOrNull { it.type == TxType.EXPENSE }?.totalCents ?: 0L
@@ -137,12 +137,12 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
         month.year == currentAccountingMonth.year
     }
 
-    // 柱状图数据：月视角每日一根、年视角每月一根（月视角按会计月分桶）
+    // 柱状图数据：月视角每日一根、年视角每会计月一根（两者都按会计月分桶）
     val bars = remember(rowsReady, month, mode, monthStartDay) {
         if (mode == PeriodMode.MONTH) {
             ChartMath.monthBars(rowsReady, month, monthStartDay)
         } else {
-            ChartMath.yearBars(rowsReady, month)
+            ChartMath.yearBars(rowsReady, month, monthStartDay)
         }
     }
     // 柱状图入场进度**由页面持有**：`ExpenseBarChart` 是 LazyColumn 的一个 item，滑出屏幕就被销毁，
@@ -170,7 +170,12 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
             val raw = if (mode == PeriodMode.MONTH) {
                 MonthPeriod.of(month, monthStartDay).dayIndexOf(today) - 1
             } else {
-                today.monthValue - 1
+                // 年视角：默认选中"今天"所属的**会计月**。首日≠1 时今天的会计月可能落在 12 月桶
+                // （例如首日=5、今天=1 月 3 日），不能直接用 today.monthValue - 1。
+                ChronoUnit.MONTHS.between(
+                    YearMonth.of(month.year, 1),
+                    YearMonth.from(MonthPeriod.of(today, monthStartDay).start),
+                ).toInt()
             }
             raw.coerceIn(0, bars.lastIndex)
         } else {
@@ -204,10 +209,10 @@ fun StatsScreen(vm: LedgerViewModel, scrollToTopTick: Int = 0) {
         sliceColorsOf(palette, slices, iconByName)
     }
 
-    // 预算对比：分类预算（年视角 ×12）与**计入预算的支出**对齐（不计入预算算 0、AA 按 金额÷n），
-    // 与首页预算卡同一口径；圆环「分类占比」用实际支出（AA 按 m÷n，「不计入预算」仍是全额）。
-    val ratioRows = remember(categoryBudgets, categories, byBudgetCategoryReady, mode) {
-        buildRatioRows(categoryBudgets, categories, byBudgetCategoryReady, mode)
+    // 预算对比：分类预算（年视角 ×12）与**实际支出**对齐（不计入预算仍全额、AA 按 金额÷n），
+    // 与 `02` 圆环同一口径；头部 actualTotal 用 spendingReady，恰好等于各行之和。
+    val ratioRows = remember(categoryBudgets, categories, byCategoryReady, mode) {
+        buildRatioRows(categoryBudgets, categories, byCategoryReady, mode)
     }
     val ratioBudget = ratioRows.sumOf { it.budgetCents }
 
@@ -994,8 +999,9 @@ private fun RatioListRow(
 /**
  * 预算对比的行数据 = **设了预算的支出分类** ∪ **本期有账单记录的支出分类**（按分类名去重）。
  *
- * [byCategory] 传的是**计入预算的金额**（`periodBudgetCategorySums`：不计入预算算 0、AA 按 金额÷n），
- * 所以这里的「实际」不是账面金额，而是预算口径。
+ * [byCategory] 传的是**实际支出**（`periodCategorySums`：不计入预算仍按全额、AA 按 金额÷n），
+ * 与 `02` 圆环同一口径；因此头部合计（`spendingReady`）恰好等于各行「实际」之和，
+ * 行占比加起来是 100%。预算对比不再使用预算口径的分类金额。
  *
  * - 只设了预算、本期没花的分也保留（预算 0 实际，点名"预算没用上"）；
  * - 本期有支出但**没设预算**的分类同样要出现（预算记 0、占比 0%），否则用户看不到这笔钱花在哪

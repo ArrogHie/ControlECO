@@ -89,8 +89,8 @@ interface TransactionDao {
      * 退款收入只作为收入存在，**不再从支出里相减**——退款是成对的记录：
      * 原支出被标「已退款」后直接不计入支出，退款那笔照常计入收入。
      *
-     * 统计页「02 实际支出」与分类占比用这一条口径；
-     * 预算类读数（首页预算卡 / 分类剩余预算 / 统计页预算对比）用 [observeBudgetSpendingTotal]。
+     * 统计页「02 实际支出」、分类占比圆环与**预算对比清单**都用这一条口径；
+     * 预算类读数（首页预算卡 / 分类剩余预算）用 [observeBudgetSpendingTotal]。
      */
     @Query(
         """SELECT COALESCE(SUM(
@@ -104,7 +104,8 @@ interface TransactionDao {
 
     /**
      * 本期分类支出：同一口径按分类分组（排除已退款的支出，**AA 按 m ÷ n 折算**、
-     * 「不计入预算」不影响）。各分类之和恒等于 [observeSpendingTotal]，圆环与清单不会互相对不上。
+     * 「不计入预算」不影响）。各分类之和恒等于 [observeSpendingTotal]，
+     * 统计页圆环与预算对比清单都读它，所以环、清单、总额三者不会互相对不上。
      */
     @Query(
         """SELECT c.id AS categoryId, c.name AS categoryName,
@@ -123,8 +124,9 @@ interface TransactionDao {
      * （规则见 [com.controleco.app.data.budget.BudgetShare]，SQL 与 Kotlin 逐字一致）：
      * 不计入预算 → 0；AA n 人 → 金额 ÷ n（四舍五入到分）；普通账单 → 原金额。
      *
-     * 首页预算卡（本月支出 / 剩余 / 建议日花 / 本日剩余）与个人页预算卡读它；
-     * 账户余额与账单列表仍按账面金额；统计页「实际支出」读 [observeSpendingTotal]
+     * 首页预算卡（本月支出 / 剩余 / 建议日花 / 本日剩余）、个人页预算卡与首页「分类剩余预算」
+     * 读它（[observeBudgetCategorySums] 是它的分类版）；账户余额与账单列表仍按账面金额；
+     * 统计页「实际支出」与预算对比读 [observeSpendingTotal] / [observeSpendingCategorySums]
      * （AA 折算，但**不**扣「不计入预算」——两者口径不同是刻意的）。
      */
     @Query(
@@ -140,7 +142,7 @@ interface TransactionDao {
 
     /**
      * 本期**计入预算的分类支出**：口径同 [observeBudgetSpendingTotal]，按分类分组。
-     * 首页「分类剩余预算」条与统计页「预算对比」读它；分类圆环（占比）读
+     * 首页「分类剩余预算」条读它；统计页的分类圆环与预算对比清单读
      * [observeSpendingCategorySums]（AA 折算后的实际支出，「不计入预算」不影响）。
      */
     @Query(

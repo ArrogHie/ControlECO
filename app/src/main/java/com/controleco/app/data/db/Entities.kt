@@ -98,9 +98,9 @@ data class TransactionEntity(
     @ColumnInfo(defaultValue = "")
     val flowId: String = "",
     /**
-     * 「不计入预算」：该笔金额**不进本期预算支出**（首页预算卡 / 分类剩余预算 / 统计页预算对比），
-     * 但仍照常计入账户余额、账单列表与统计页「实际支出」——钱确实花出去了，只是不算进预算额度。
-     * 只对支出有意义；收入行恒为 false。
+     * 「不计入预算」：该笔金额**不进本期预算支出**（首页预算卡 / 分类剩余预算），
+     * 但仍照常计入账户余额、账单列表、统计页「实际支出」与预算对比清单——钱确实花出去了，
+     * 只是不算进预算额度。只对支出有意义；收入行恒为 false。
      */
     @ColumnInfo(defaultValue = "0")
     val budgetExcluded: Boolean = false,

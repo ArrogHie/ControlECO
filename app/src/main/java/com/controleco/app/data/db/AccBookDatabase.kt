@@ -270,7 +270,7 @@ abstract class AccBookDatabase : RoomDatabase() {
         /**
          * v14：支出账单的预算口径——`budgetExcluded`（不计入预算）/ `aaShares`（AA 人数，0 = 未开启）。
          *
-         * 两列只影响**预算类读数**（首页预算卡、分类剩余预算、统计页预算对比），
+         * 两列只影响**预算类读数**（首页预算卡、分类剩余预算），
          * 账户余额、账单列表金额与统计页「实际支出」仍按账面金额算（见 [TransactionEntity.budgetExcluded]）。
          * 历史账单默认「计入预算、非 AA」，升级后预算读数不变。
          */
