@@ -1269,6 +1269,11 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun discardPending(id: Long) {
         viewModelScope.launch(Dispatchers.IO) {
+            // 条目消失 → 一并清掉"已弹过卡"与"字段锁"登记，避免去重键复用时该弹却不弹
+            pendingDao.getById(id)?.let {
+                com.controleco.app.capture.OverlayPromptLog.clear(it.dedupKey)
+                com.controleco.app.capture.OverlayFieldGuards.clear(it.dedupKey)
+            }
             PendingActions.discard(pendingDao, id)
         }
     }
@@ -1311,6 +1316,9 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch(Dispatchers.IO) {
             PendingActions.confirm(db, txDao, pendingDao, merchantRuleDao, item, categoryId, accountId, counterparty)
+            // 条目已入账（行被删除）→ 清理登记
+            com.controleco.app.capture.OverlayPromptLog.clear(item.dedupKey)
+            com.controleco.app.capture.OverlayFieldGuards.clear(item.dedupKey)
         }
     }
 
@@ -1357,6 +1365,11 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                 val ids = txDao.insertAllIgnore(entities)
                 items.forEach { pendingDao.deleteById(it.id) }
                 ids.count { it != -1L }
+            }
+            // 条目已入账（行被删除）→ 清理"已弹过卡"与"字段锁"登记
+            items.forEach {
+                com.controleco.app.capture.OverlayPromptLog.clear(it.dedupKey)
+                com.controleco.app.capture.OverlayFieldGuards.clear(it.dedupKey)
             }
             AppLog.i("pending", "confirmAll: ${items.size} items, inserted=$inserted")
         }

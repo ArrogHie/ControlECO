@@ -137,6 +137,8 @@ internal object ConfirmCardWindow {
             showingPendingId = pending.id
             dismissCallback = onDismiss
             scheduleAutoDismiss()
+            // 记下"这条已经成功打扰过一次"：后续富化不再为同一笔新弹卡片（见 OverlayPromptLog）
+            com.controleco.app.capture.OverlayPromptLog.markShown(pending.dedupKey)
             AppLog.i(TAG, "confirm card shown pending=#${pending.id} ${pending.ruleName}")
             true
         } catch (e: Exception) {

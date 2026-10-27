@@ -558,6 +558,7 @@ object CaptureCenter {
             if (dedupKey.isNotBlank()) {
                 pendingDao.deleteByDedupKey(dedupKey)
                 OverlayFieldGuards.clear(dedupKey)
+                OverlayPromptLog.clear(dedupKey)
                 if (dedupKey.isNotBlank()) AppLog.d("pending", "entry removed key=$dedupKey")
                 cancelCaptureNotification(entryNotifId(dedupKey))
                 if (ConfirmCardWindow.showingPendingId > 0 &&
@@ -585,6 +586,7 @@ object CaptureCenter {
             }
             // 条目已丢弃：释放去重键，同分钟桶里的下一笔真实交易可以复用
             OverlayFieldGuards.clear(dedupKey)
+            OverlayPromptLog.clear(dedupKey)
             if (dedupKey.isNotBlank()) AppLog.d("pending", "pending removed key=$dedupKey")
             cancelCaptureNotification(pendingNotifId(dedupKey))
             if (ConfirmCardWindow.showingPendingId == pendingId) {
@@ -814,12 +816,22 @@ object CaptureCenter {
 
     /**
      * 富化后补一次"卡片优先"提醒：同笔被后续通道捕获（页面合并/跨通道归并）时，
-     * 若卡片没在展示就重新判定一次——首次尝试可能因当时的系统弹层/时机被拒，
+     * 若卡片没在展示就重新判定一次——首次尝试可能因当时的系统弹层/支付保护被拒，
      * 而此刻用户往往已回到结果页。卡片成功则撤销早先的横幅通知（同一笔不重复打扰）。
+     *
+     * **同一笔只打扰一次**（用户口径 2026-10-27）：这条条目曾经成功弹过卡片（[OverlayPromptLog]），
+     * 后续富化就只静默补信息、不再新弹。否则用户在电商结果页会看到"第二张卡"，
+     * 误以为又抓了一笔而点「忽略」——那会把唯一那笔已入账的账删掉。
+     * 只刷新正在显示的那张卡（[refreshCardIfShowing]）不受此限制。
      */
     private suspend fun retryCardIfNoCard(pendingId: Long) {
         if (ConfirmCardWindow.showingPendingId == pendingId) return
         val pending = pendingDao.getById(pendingId) ?: return
+        // 已经成功打扰过：静默富化即可，不再第二次弹卡（只剩"首次被拦截"的条目允许补试）
+        if (OverlayPromptLog.wasShown(pending.dedupKey)) {
+            AppLog.d("Overlay", "skip re-prompt (already shown once) #$pendingId")
+            return
+        }
         val alreadyEntered = pending.status == PendingStatus.AUTO
         val shown = tryShowConfirmCard(
             pending = pending,
@@ -962,6 +974,7 @@ object CaptureCenter {
         val removed = PendingActions.undoEntered(db, txDao, pendingDao, pending.dedupKey)
         pendingDao.deleteById(pending.id)
         OverlayFieldGuards.clear(pending.dedupKey)
+        OverlayPromptLog.clear(pending.dedupKey)
         cancelCaptureNotification(entryNotifId(pending.dedupKey))
         toast(if (removed) "已忽略，这笔未记账" else "这笔已被撤销")
         AppLog.i("Overlay", "ignored (entry deleted=$removed) #${pending.id} key=${pending.dedupKey}")
@@ -987,6 +1000,7 @@ object CaptureCenter {
         }
         // 条目已入账（待确认条目被删除），登记簿里的字段锁一并清理
         OverlayFieldGuards.clear(pending.dedupKey)
+        OverlayPromptLog.clear(pending.dedupKey)
         cancelCaptureNotification(pendingNotifId(pending.dedupKey))
         val kindType = pending.type
         toast("已记入")
