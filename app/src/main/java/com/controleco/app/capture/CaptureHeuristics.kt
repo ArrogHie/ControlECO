@@ -130,3 +130,30 @@ internal fun directEntryEnabled(
     overlayConfirm: Boolean,
     captureNotify: Boolean,
 ): Boolean = autoEntry || overlayConfirm || captureNotify
+
+/**
+ * 银行动账推送的候选闸门（纯函数，便于单测）。
+ *
+ * 2026-10-27 用户规则：**只认银行 App 的包名**（[BankLedgerRules.bankNameOfPackage] 短名单），
+ * 目录外 App 的通知一律不入账。
+ *
+ * 为什么要改：旧口径是「正文出现银行名」也算候选，于是任何没收录的 App 只要推送里写了
+ * "招商银行/工行…"（营销、资讯、甚至别的记账软件）都会走银行解析链路。银行名是全文别名扫描，
+ * 挡不住"招商银行 您本月消费100元"这类文案，会被记成一笔假账；且这类来源不在「监听的 App」
+ * 目录里，用户**没有任何开关可以关掉它**。改为只认包名后，新增银行只需把包名加进白名单。
+ *
+ * 另两条保持原样：命中的包名仍受「监听的 App」开关约束（[watchedOrUnknown]），
+ * 且必须在银行动账推送与自动记账总开关都打开时才工作。
+ */
+internal fun isBankPushCandidate(
+    packageName: String,
+    interested: Boolean,
+    bankPushEnabled: Boolean,
+    captureEnabled: Boolean,
+    watchedOrUnknown: Boolean,
+): Boolean =
+    !interested &&
+        bankPushEnabled &&
+        captureEnabled &&
+        watchedOrUnknown &&
+        BankLedgerRules.bankNameOfPackage(packageName) != null

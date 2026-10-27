@@ -133,6 +133,12 @@ object CaptureCenter {
     /** 稳定页面去重：带页面交易时间的结果页在短 TTL 内只处理一次（跨流程重置也有效） */
     private val recentPageCache = RecentPageCache()
 
+    /**
+     * 同一家银行的多通道归属登记（短信 / 推送 / 页面）：见 [BankEventDedup]。
+     * 只存内存：配对窗口 130 秒，窗口外本就不再合并，不需要落库（用户 2026-10-27 决定）。
+     */
+    private val bankClaims = BankEventClaims()
+
     private lateinit var appContext: Context
     private lateinit var db: AccBookDatabase
     private lateinit var txDao: TransactionDao
@@ -1327,13 +1333,17 @@ object CaptureCenter {
         val interested = NotificationRules.isInterested(packageName) &&
             CaptureAppCatalog.isWatched(appContext, packageName)
         val captureAll = isDebugCaptureAll(isDebugBuild)
-        // 银行 App 动账推送：不在支付白名单里，走「正文【银行名】签名 / 银行包名短名单」两道线索。
-        // 是否真的入库要在解析通过后决定（银行 App 的营销/通知类推送极密集，未命中不入库）。
-        // 与 debug 全量记录无关：签名线索在就尝试解析，避免采样模式下银行通道失效。
-        val bankCandidate = !interested && isBankPushEnabled() && isCaptureEnabled() &&
-            CaptureAppCatalog.isWatchedOrUnknown(appContext, packageName) &&
-            (BankLedgerRules.detectBankName("$title $text $bigText") != null ||
-                BankLedgerRules.bankNameOfPackage(packageName) != null)
+        // 银行 App 动账推送：**只认银行 App 包名**（BankLedgerRules 的 15 家短名单）。
+        // 2026-10-27 用户规则：目录外 App 的通知一律不入账——旧口径"正文含银行名即解析"会让
+        // 任意 App 的营销/资讯推送被记成假账，且这类来源没有开关可关（见 isBankPushCandidate）。
+        // 与 debug 全量记录无关：未命中白名单时只在 debug 下留原始快照（见下方分支）。
+        val bankCandidate = isBankPushCandidate(
+            packageName = packageName,
+            interested = interested,
+            bankPushEnabled = isBankPushEnabled(),
+            captureEnabled = isCaptureEnabled(),
+            watchedOrUnknown = CaptureAppCatalog.isWatchedOrUnknown(appContext, packageName),
+        )
         if (!interested && !captureAll && !bankCandidate) {
             AppLog.d("Ntf", "skip (not interested) pkg=$packageName title=[$title]")
             return
@@ -1723,11 +1733,63 @@ object CaptureCenter {
             return
         }
 
+        // 同一家银行的多通道去重（短信 ⇄ 银行推送 ⇄ 银行页面，2026-10-27 用户规则）。
+        // 一笔卡消费在同家银行侧常留下短信与 App 推送两条消息，二者 dedupKey 与 bankInstanceId
+        // 都含来源键（`SMS:招商银行` / `cmb.pb`）→ 天然不同，不归并就是两条账单。
+        // 1:1 配对（BankEventClaims）：同一条目对每个通道最多吸收一条，两笔真实同额不会被并成一条。
+        val bankChannel = if (channel == CaptureChannel.SMS) {
+            BankEventDedup.Channel.SMS
+        } else {
+            BankEventDedup.Channel.PUSH
+        }
+        val bankKey = BankEventDedup.keyOf(
+            bankName = ledger.bankName,
+            amountCents = ledger.amountCents,
+            type = ledger.type,
+            isRefund = ledger.isRefund,
+            cardTail = ledger.cardTail,
+        )
+        if (bankKey != null) {
+            val peerId = bankClaims.find(bankKey, bankChannel, sourceAt)
+            val peer = peerId?.let { pendingDao.getById(it) }
+            if (peer != null) {
+                mergeBankInfoIntoPending(peer, ledger, bankIdentity)
+                bankClaims.claim(peer.id, bankKey, bankChannel, sourceAt)
+                refreshCardIfShowing(peer.id)
+                retryCardIfNoCard(peer.id)
+                captureDao.updateMatch(rawId, ledger.ruleName + "·并入同银行条目", true)
+                AppLog.i(
+                    "Dedup",
+                    "same-bank merge: ${ledger.ruleName} ${Money.formatYuan(ledger.amountCents)} " +
+                        "${ledger.accountLabel} -> #${peer.id} (${bankChannel.name})",
+                )
+                traceCapture(
+                    channel = channel,
+                    packageName = ledger.sourceKey,
+                    title = if (channel == CaptureChannel.SMS) "银行短信" else "银行推送",
+                    text = ledger.note,
+                    bigText = "",
+                    capturedAt = sourceAt,
+                    matchedRule = ledger.ruleName,
+                    type = ledger.type,
+                    amountCents = ledger.amountCents,
+                    counterparty = ledger.merchant,
+                    note = ledger.note,
+                    dedupKey = peer.dedupKey,
+                    outcome = TraceOutcome.MERGED_CROSS,
+                )
+                return
+            }
+            // 目标条目已被确认/丢弃（从库中消失）→ 清掉登记，按新条目处理
+            peerId?.let { bankClaims.forget(it) }
+        }
+
         // 跨通道归并（±130s）：支付侧已捕获同笔 → 银行侧只补充账户线索，
         // 不再产生第二条。微信只按金额+时间；支付宝/云闪付还要有线索（见 CrossChannelDedup.payBankLink）。
         val related = findCrossChannelPending(ledger, sourceAt, bankIdentity)
         if (related != null) {
             mergeBankInfoIntoPending(related, ledger, bankIdentity)
+            if (bankKey != null) bankClaims.claim(related.id, bankKey, bankChannel, sourceAt)
             // 同笔的悬浮卡正在展示时同步刷新（银行侧只补账户线索）；没在展示就补试一次弹卡
             refreshCardIfShowing(related.id)
             retryCardIfNoCard(related.id)
@@ -1767,6 +1829,7 @@ object CaptureCenter {
                 notificationInstanceId = bankIdentity,
             )
             if (entered != null) {
+                if (bankKey != null) bankClaims.claim(entered.pendingId, bankKey, bankChannel, sourceAt)
                 captureDao.updateMatch(rawId, ledger.ruleName, true)
                 AppLog.i(
                     "Sms",
@@ -1816,6 +1879,7 @@ object CaptureCenter {
                 notificationInstanceId = bankIdentity,
             ),
         )
+        if (bankKey != null) bankClaims.claim(bankPendingId, bankKey, bankChannel, sourceAt)
         captureDao.updateMatch(rawId, ledger.ruleName, true)
         AppLog.i(
             "Sms",
@@ -1925,6 +1989,28 @@ object CaptureCenter {
             AppLog.i("Sms", "bank entry kept separate (no link evidence / not a pay channel) ${ledger.ruleName}")
         }
         return null
+    }
+
+    /**
+     * 银行 App 页面候选的"银行事件特征"（非银行包名返回 null）。
+     *
+     * 银行页面走 [com.controleco.app.capture.page.GenericPageParser] 兜底解析，支付工具里通常带着
+     * "招商银行(2532)" 这类卡信息；取不到尾号时按通配处理（与短信/推送的
+     * [BankEventDedup.tailsCompatible] 口径一致）。
+     */
+    private fun bankPageKeyOf(
+        packageName: String,
+        candidate: PageCandidate,
+    ): BankEventDedup.Key? {
+        val bankName = BankLedgerRules.bankNameOfPackage(packageName) ?: return null
+        return BankEventDedup.keyOf(
+            bankName = bankName,
+            amountCents = candidate.amountCents,
+            type = candidate.type,
+            isRefund = candidate.isRefund,
+            cardTail = com.controleco.app.capture.page.PaymentInstrumentParser
+                .tailOf(candidate.instrument?.label.orEmpty()).takeIf { it.isNotEmpty() },
+        )
     }
 
     /**
@@ -2557,6 +2643,32 @@ object CaptureCenter {
             )
             return
         }
+        val pageEventTime = candidate.txTime ?: capturedAt
+        // 银行 App 页面 ⇄ 同银行的短信/推送（2026-10-27 用户规则）：同一笔动账只留一条。
+        // 页面信息最全（商户/支付工具/时间），所以并入既有银行侧条目，而不是另记一笔。
+        val pageBankKey = bankPageKeyOf(packageName, candidate)
+        if (pageBankKey != null) {
+            val peerId = bankClaims.find(pageBankKey, BankEventDedup.Channel.PAGE, pageEventTime)
+            val peer = peerId?.let { pendingDao.getById(it) }
+            if (peer != null) {
+                bankClaims.claim(peer.id, pageBankKey, BankEventDedup.Channel.PAGE, pageEventTime)
+                AppLog.i(
+                    "Dedup",
+                    "same-bank page merge: ${candidate.ruleName} " +
+                        "${Money.formatYuan(candidate.amountCents)} -> #${peer.id} (PAGE)",
+                )
+                // 银行侧条目保留自己的正文（渠道线索在里面），页面信息追加在后面
+                mergePageIntoExisting(
+                    RelatedPending(peer, sameAmount = true),
+                    candidate.copy(note = combineNotes(candidate.note, peer.note)),
+                    rawId, snapshotText, capturedAt, flowIdentity,
+                    crossApp = true,
+                )
+                return
+            }
+            peerId?.let { bankClaims.forget(it) }
+        }
+
         nearbyAmountConflict(
             mergeable, packageName, candidate.type, candidate.amountCents, capturedAt,
         )?.let { conflict ->
@@ -2597,6 +2709,9 @@ object CaptureCenter {
                 orderId = candidate.orderId.orEmpty(),
             )
             if (entered != null) {
+                if (pageBankKey != null) {
+                    bankClaims.claim(entered.pendingId, pageBankKey, BankEventDedup.Channel.PAGE, pageEventTime)
+                }
                 captureDao.updateMatch(rawId, candidate.ruleName, true)
                 AppLog.i(
                     "Page",
@@ -2651,6 +2766,9 @@ object CaptureCenter {
                 orderId = candidate.orderId.orEmpty(),
             ),
         )
+        if (pageBankKey != null) {
+            bankClaims.claim(pendingId, pageBankKey, BankEventDedup.Channel.PAGE, pageEventTime)
+        }
         captureDao.updateMatch(rawId, candidate.ruleName, true)
         AppLog.i(
             "Page",

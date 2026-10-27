@@ -49,4 +49,49 @@ class CaptureHeuristicsTest {
             ),
         )
     }
+
+    // ---------- 银行动账推送的候选闸门（2026-10-27：只认银行 App 包名） ----------
+
+    private fun candidate(
+        packageName: String,
+        interested: Boolean = false,
+        bankPushEnabled: Boolean = true,
+        captureEnabled: Boolean = true,
+        watchedOrUnknown: Boolean = true,
+    ) = isBankPushCandidate(
+        packageName = packageName,
+        interested = interested,
+        bankPushEnabled = bankPushEnabled,
+        captureEnabled = captureEnabled,
+        watchedOrUnknown = watchedOrUnknown,
+    )
+
+    @Test
+    fun `已知银行包名_纳入银行通道`() {
+        assertTrue(candidate("cmb.pb"))
+        assertTrue(candidate("com.icbc"))
+        assertTrue(candidate("com.chinamworld.main"))
+    }
+
+    @Test
+    fun `目录外App一律不纳入_即使正文含银行名`() {
+        // 旧口径"正文出现银行名即候选"会让任意 App（营销/资讯/别的记账软件）被记成假账；
+        // 现在闸门只看包名，正文内容根本不参与判定
+        assertFalse(candidate("com.example.shopping"))
+        assertFalse(candidate("com.example.news"))
+        assertFalse(candidate("com.unknown.bank"))   // 未收录的银行 App 也要先加白名单
+    }
+
+    @Test
+    fun `支付渠道包名不走银行通道`() {
+        assertFalse(candidate(NotificationRules.WECHAT, interested = true))
+        assertFalse(candidate(NotificationRules.ALIPAY, interested = true))
+    }
+
+    @Test
+    fun `用户关掉该应用或总开关关闭_不采集`() {
+        assertFalse(candidate("cmb.pb", watchedOrUnknown = false))
+        assertFalse(candidate("cmb.pb", bankPushEnabled = false))
+        assertFalse(candidate("cmb.pb", captureEnabled = false))
+    }
 }
