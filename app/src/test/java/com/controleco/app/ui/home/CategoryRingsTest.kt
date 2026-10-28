@@ -27,7 +27,7 @@ class CategoryRingsTest {
         )
         assertEquals(1, rings.size)
         assertTrue(rings[0].isOther)
-        assertEquals("其他", rings[0].name)
+        assertEquals(NO_BUDGET_BUCKET_NAME, rings[0].name)
         assertEquals(4_600_00, rings[0].remainingCents)
     }
 
@@ -57,7 +57,7 @@ class CategoryRingsTest {
             totalSpentCents = 900_00, // 餐饮 400 + 交通 200 + 其他 300
         )
         val other = rings.first { it.isOther }
-        assertEquals("其他", other.name)
+        assertEquals(NO_BUDGET_BUCKET_NAME, other.name)
         // 其他预算 = 3000 − 1000 − 500 = 1500；其他支出 = 900 − 400 − 200 = 300
         assertEquals(1_200_00, other.remainingCents)
         // 分类剩余 + 其他剩余 = 月总剩余（模式①口径）
@@ -137,14 +137,14 @@ class CategoryRingsTest {
             monthlyBudgetCents = 1_000_00,
             totalSpentCents = 100_00,
         )
-        assertEquals(listOf("餐饮", "其他"), rings.sortedBy { it.isOther }.map { it.name })
+        assertEquals(listOf("餐饮", NO_BUDGET_BUCKET_NAME), rings.sortedBy { it.isOther }.map { it.name })
         val other = rings.first { it.isOther }
         // 其他预算 = 1000 − 200（收入/已删分类的预算不计入已分配）
         assertEquals(800_00 - 100_00, other.remainingCents)
     }
 
     @Test
-    fun `分类预算超过总预算时无其他环`() {
+    fun `分类预算超过总预算且无支出时无合成环`() {
         val rings = buildCategoryRings(
             budgets = mapOf(1L to 1_500_00),
             sums = emptyList(),
@@ -154,6 +154,22 @@ class CategoryRingsTest {
         )
         assertEquals(listOf("餐饮"), rings.map { it.name })
         assertTrue(rings.none { it.isOther })
+    }
+
+    @Test
+    fun `分类预算超过总预算但有未设预算支出时_合成环剩余为负`() {
+        val rings = buildCategoryRings(
+            budgets = mapOf(1L to 1_200_00),
+            sums = listOf(sum(1, "餐饮", 500_00), sum(2, "医疗", 700_00)),
+            categories = listOf(category(1, "餐饮"), category(2, "医疗")),
+            monthlyBudgetCents = 1_000_00,
+            totalSpentCents = 1_200_00,
+        )
+        assertTrue(rings.none { it.name == "医疗" })
+        val bucket = rings.first { it.isOther }
+        assertEquals(NO_BUDGET_BUCKET_NAME, bucket.name)
+        assertEquals(-700_00, bucket.remainingCents)
+        assertEquals(Budget.Tone.LOW, bucket.tone)
     }
 
     // ---------- 超支警示强度（心跳/摇晃幅度与红色饱和度） ----------

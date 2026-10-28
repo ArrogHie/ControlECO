@@ -124,7 +124,24 @@ private const val DRAG_FLIP_THRESHOLD_DEG = 45f
 private const val DRAG_FULL_TURN_WIDTH_FRACTION = 0.3f
 private const val FLICK_WIDTHS_PER_SECOND = 1.1f
 
-/** 分类条数据：预算/已花/剩余 + 图标规格 + 分类色 */
+/**
+ * 分类模式里合成聚合条的名称：兜住**没有设预算的支出分类**的支出。
+ *
+ * 与分类管理里那个**真实分类**「其他」不是一回事：真实「其他」设了预算就自己占一条，
+ * 本条的金额是"月预算 − 各分类预算"的残值（残值为 0 时只显示花掉的钱）。
+ */
+internal const val NO_BUDGET_BUCKET_NAME = "未设预算分类"
+
+/**
+ * 无预算合成条的剩余比例占位值。预算为 0 时"剩余 ÷ 预算"没有定义（0 除），
+ * 取 −1（= 预算已用完并超出 100%）参与排序与档位：排在正常分类之前，但不越过超支超过 100% 的分类。
+ */
+private const val NO_BUDGET_RATIO = -1f
+
+/**
+ * 分类条数据：预算/已花/剩余 + 图标规格 + 分类色。
+ * 合成条（[isOther]）的 [budgetCents] 可能是 0（月预算残值被分完），此时剩余 = −已花、[ratio] 为占位值。
+ */
 internal data class CategoryBarData(
     val name: String,
     val icon: String,
@@ -140,7 +157,7 @@ private data class HomeTrend(val spent: List<Float>, val deposit: List<Float>)
 
 /**
  * 分类环数据（旧首页模式①的纯计算，保留给单测与历史口径）。
- * 新分类条 UI 用 [CategoryBarData]；两者口径一致（含"其他"聚合）。
+ * 新分类条 UI 用 [CategoryBarData]；两者口径一致（含「未设预算分类」聚合）。
  */
 internal data class CategoryRingData(
     val name: String,
@@ -765,7 +782,9 @@ private fun CategoryBarRow(bar: CategoryBarData, index: Int, compact: Boolean, d
                 maxLines = 1,
                 modifier = Modifier.weight(1f),
             )
-            if (bar.budgetCents <= 0) {
+            // 无预算的合成条也要把金额显示出来（剩余 = −已花），否则"没设预算却花了钱"只剩底行小字；
+            // 无预算的真实分类已在 buildCategoryBars 里被过滤，这里的分支只作兜底。
+            if (bar.budgetCents <= 0 && !bar.isOther) {
                 Text("未设预算", style = EcoType.Pill.copy(fontSize = 11.sp), color = c.quiet)
             } else {
                 EcoCountUpMoney(
@@ -1096,9 +1115,11 @@ internal fun buildCategoryRings(
 
     val allocatedBudget = budgeted.sumOf { it.second }
     val allocatedSpent = budgeted.sumOf { (category, _) -> spentById[category.id] ?: 0L }
-    val otherBudget = monthlyBudgetCents - allocatedBudget
-    if (monthlyBudgetCents > 0L && otherBudget > 0L) {
-        rings += ringOf("其他", otherBudget, totalSpentCents - allocatedSpent, thresholds, isOther = true)
+    val unbudgetedBudget = (monthlyBudgetCents - allocatedBudget).coerceAtLeast(0L)
+    val unbudgetedSpent = totalSpentCents - allocatedSpent
+    // 与 [buildCategoryBars] 同一口径：残值 > 0 或有支出就出「未设预算分类」环
+    if (unbudgetedBudget > 0L || unbudgetedSpent > 0L) {
+        rings += ringOf(NO_BUDGET_BUCKET_NAME, unbudgetedBudget, unbudgetedSpent, thresholds, isOther = true)
     }
     return rings.sortedBy { it.ratio }
 }
@@ -1111,13 +1132,13 @@ private fun ringOf(
     isOther: Boolean,
 ): CategoryRingData {
     val remaining = budgetCents - spentCents
-    val ratio = remaining.toDouble() / budgetCents.toDouble()
+    val ratio = if (budgetCents > 0L) (remaining.toDouble() / budgetCents).toFloat() else NO_BUDGET_RATIO
     return CategoryRingData(
         name = name,
         remainingCents = remaining,
-        ratio = ratio.toFloat(),
-        tone = Budget.tone(ratio.toFloat(), thresholds),
-        severity = Budget.warningSeverity(ratio.toFloat(), thresholds.redBelow),
+        ratio = ratio,
+        tone = Budget.tone(ratio, thresholds),
+        severity = Budget.warningSeverity(ratio, thresholds.redBelow),
         isOther = isOther,
     )
 }
@@ -1149,13 +1170,18 @@ internal fun buildCategoryBars(
     }.toMutableList()
     val allocatedBudget = budgeted.sumOf { it.second }
     val allocatedSpent = budgeted.sumOf { (category, _) -> spentById[category.id] ?: 0L }
-    val otherBudget = monthlyBudgetCents - allocatedBudget
-    if (monthlyBudgetCents > 0L && otherBudget > 0L) {
+    // 未设预算分类：预算 = 月预算的残值（分类预算之和 ≥ 月预算时残值为 0，不再给负预算）；
+    // 支出 = 总支出 − 已分配分类支出（只会是没设预算的那些分类，不可能为负）。
+    val unbudgetedBudget = (monthlyBudgetCents - allocatedBudget).coerceAtLeast(0L)
+    val unbudgetedSpent = totalSpentCents - allocatedSpent
+    // 残值 > 0 → 照常占位；残值被分完时，只要这些分类确实花过钱仍然出这一条（剩余为负），
+    // 否则这部分支出在分类模式上没有任何落点。
+    if (unbudgetedBudget > 0L || unbudgetedSpent > 0L) {
         rows += barOf(
-            name = "其他",
+            name = NO_BUDGET_BUCKET_NAME,
             icon = "",
-            budgetCents = otherBudget,
-            spentCents = totalSpentCents - allocatedSpent,
+            budgetCents = unbudgetedBudget,
+            spentCents = unbudgetedSpent,
             thresholds = thresholds,
             isOther = true,
         )
@@ -1172,15 +1198,16 @@ private fun barOf(
     isOther: Boolean = false,
 ): CategoryBarData {
     val remaining = budgetCents - spentCents
-    val ratio = remaining.toDouble() / budgetCents.toDouble()
+    // 无预算合成条（budget = 0）没有比例基准：用占位值，避免 0 除得到 Infinity/NaN
+    val ratio = if (budgetCents > 0L) (remaining.toDouble() / budgetCents).toFloat() else NO_BUDGET_RATIO
     return CategoryBarData(
         name = name,
         icon = icon,
         budgetCents = budgetCents,
         spentCents = spentCents,
         remainingCents = remaining,
-        ratio = ratio.toFloat(),
-        tone = Budget.tone(ratio.toFloat(), thresholds),
+        ratio = ratio,
+        tone = Budget.tone(ratio, thresholds),
         isOther = isOther,
     )
 }
