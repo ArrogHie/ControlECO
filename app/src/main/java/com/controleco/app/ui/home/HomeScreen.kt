@@ -799,9 +799,17 @@ private fun CategoryBarRow(bar: CategoryBarData, index: Int, compact: Boolean, d
             }
         }
         Spacer(Modifier.height(5.dp))
-        if (bar.budgetCents > 0) {
+        // 无预算基准的合成条（残值 0）没有"进度"可言：它只要有支出就是超支，
+        // 画满 + clay，与"超支分类"表现一致（空轨会让人误以为没花钱）。
+        // 其余无预算情形（真实分类，已被 buildCategoryBars 过滤）仍走空轨兜底。
+        if (bar.budgetCents > 0 || bar.isOther) {
+            val progress = when {
+                bar.budgetCents > 0 -> (bar.spentCents.toFloat() / bar.budgetCents).coerceIn(0f, 1f)
+                bar.spentCents > 0 -> 1f
+                else -> 0f
+            }
             EcoProgressBar(
-                progress = (bar.spentCents.toFloat() / bar.budgetCents).coerceIn(0f, 1f),
+                progress = progress,
                 height = 9.dp,
                 track = c.track,
                 fill = Brush.horizontalGradient(
