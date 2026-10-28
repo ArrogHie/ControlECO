@@ -124,10 +124,18 @@ fun EcoTopBar(
     }
 }
 
-/** 首页/账单右上角的设置入口：只有一个齿轮图标，无底、无边框、无文字 */
+/**
+ * 主页面右上角的图标入口：40dp 热区，**只有图标**（无底色、无边框、无文字、无投影）。
+ * 设置齿轮、账单页搜索入口都用它，保证两个入口的尺寸与按压反馈完全一致。
+ */
 @Composable
-fun EcoSettingsPill(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val c = MaterialTheme.eco
+fun EcoTopBarIcon(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    tint: Color = MaterialTheme.eco.blueDeep,
+) {
     Box(
         modifier
             .size(40.dp)
@@ -136,12 +144,18 @@ fun EcoSettingsPill(onClick: () -> Unit, modifier: Modifier = Modifier) {
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            EcoIcons.Gear,
-            contentDescription = "设置",
-            tint = c.blueDeep,
+            icon,
+            contentDescription = contentDescription,
+            tint = tint,
             modifier = Modifier.size(21.dp),
         )
     }
+}
+
+/** 首页/账单右上角的设置入口：只有一个齿轮图标，无底、无边框、无文字 */
+@Composable
+fun EcoSettingsPill(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    EcoTopBarIcon(icon = EcoIcons.Gear, contentDescription = "设置", onClick = onClick, modifier = modifier)
 }
 
 // ---------- 底部导航 ----------

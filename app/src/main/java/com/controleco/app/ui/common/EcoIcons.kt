@@ -662,6 +662,27 @@ object EcoIcons {
             ),
         )
     }
+
+    /** search（放大镜）：账单页右上角搜索入口、搜索页输入框 */
+    val Search: ImageVector by lazy {
+        ecoIcon(
+            "search",
+            listOf(
+            "M4 10.5A6.5 6.5 0 1 0 17 10.5A6.5 6.5 0 1 0 4 10.5Z",
+            "M15.2 15.2 20.5 20.5",
+            ),
+        )
+    }
+
+    /** filter（漏斗）：账单页工具条的「按分类筛选」 */
+    val Filter: ImageVector by lazy {
+        ecoIcon(
+            "filter",
+            listOf(
+            "M4 5h16l-6.4 7.4v7.1l-3.2-1.9v-5.2Z",
+            ),
+        )
+    }
 }
 
 private fun ecoIcon(name: String, paths: List<String>): ImageVector {

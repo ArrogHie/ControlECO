@@ -74,6 +74,7 @@ import com.controleco.app.ui.stats.StatsScreen
 import com.controleco.app.ui.transactions.EditTransactionScreen
 import com.controleco.app.ui.transactions.QuickAddScreen
 import com.controleco.app.ui.transactions.TransactionListScreen
+import com.controleco.app.ui.transactions.TransactionSearchScreen
 
 @Composable
 fun AccBookNav(
@@ -207,11 +208,20 @@ fun AccBookNav(
                 onOpenAccount = { navController.navigate("settings/account") },
                 onOpenImport = { navController.navigate("settings/import") },
                 onOpenSettings = { navController.navigate("settings") },
+                onOpenSearch = { navController.navigate("search") },
                 onOpenCategories = { navController.navigate("categories") },
                 onOpenReward = { navController.navigate("reward") },
             )
         }
         composable("quickAdd") { QuickAddScreen(vm = vm, onBack = { navController.popBackStack() }) }
+        // 账单搜索页：范围是当前会计周期（与账单页同一份 periodRows），结果点行进编辑页
+        composable("search") {
+            TransactionSearchScreen(
+                vm = vm,
+                onBack = { navController.popBackStack() },
+                onEditTransaction = { id -> navController.navigate("edit/$id") },
+            )
+        }
         composable("edit/{txId}") { entry ->
             val txId = entry.arguments?.getString("txId")?.toLongOrNull() ?: -1L
             EditTransactionScreen(vm = vm, txId = txId, onBack = { navController.popBackStack() })
@@ -346,6 +356,7 @@ private fun MainScaffold(
     onOpenAccount: () -> Unit,
     onOpenImport: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenSearch: () -> Unit,
     onOpenCategories: () -> Unit,
     onOpenReward: () -> Unit,
 ) {
@@ -387,6 +398,7 @@ private fun MainScaffold(
                     onOpenImport = onOpenImport,
                     onOpenPending = onOpenPending,
                     onOpenSettings = onOpenSettings,
+                    onOpenSearch = onOpenSearch,
                     onOpenCategories = onOpenCategories,
                     onOpenReward = onOpenReward,
                 )
@@ -431,6 +443,7 @@ private fun TabPage(
     onOpenImport: () -> Unit,
     onOpenPending: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenSearch: () -> Unit,
     onOpenCategories: () -> Unit,
     onOpenReward: () -> Unit,
 ) {
@@ -444,6 +457,7 @@ private fun TabPage(
             vm = vm,
             onEditTransaction = onEditTransaction,
             onOpenSettings = onOpenSettings,
+            onOpenSearch = onOpenSearch,
             scrollToTopTick = reenterTick,
         )
         2 -> StatsScreen(vm = vm, scrollToTopTick = reenterTick)

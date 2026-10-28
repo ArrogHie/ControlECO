@@ -92,6 +92,7 @@ import com.controleco.app.ui.eco.EcoSheet
 import com.controleco.app.ui.eco.EcoTextAction
 import com.controleco.app.ui.eco.EcoToast
 import com.controleco.app.ui.eco.EcoTopBar
+import com.controleco.app.ui.eco.EcoTopBarIcon
 import com.controleco.app.ui.eco.ecoBottomContentPadding
 import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.accBook
@@ -112,15 +113,8 @@ import kotlinx.coroutines.withContext
 /** 范围/多选删除的二次确认（标题 + 说明 + 执行动作） */
 private data class DeleteConfirm(val title: String, val body: String, val onConfirm: () -> Unit)
 
-/** 收支类型筛选：三段式（全部 / 支出 / 收入） */
-private enum class TxFilter(val label: String) {
-    ALL("全部"),
-    EXPENSE("支出"),
-    INCOME("收入"),
-}
-
-private const val FIRST_PAGE_ROWS = 30
-private const val PAGE_ROWS = 30
+internal const val FIRST_PAGE_ROWS = 30
+internal const val PAGE_ROWS = 30
 private const val MIN_THUMB_FRACTION = 0.12f
 private const val MAX_THUMB_FRACTION = 0.9f
 
@@ -187,6 +181,7 @@ fun TransactionListScreen(
     vm: LedgerViewModel,
     onEditTransaction: (Long) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenSearch: () -> Unit,
     scrollToTopTick: Int = 0,
 ) {
     val rows by vm.periodRows.collectAsStateWithLifecycle()
@@ -195,6 +190,7 @@ fun TransactionListScreen(
     val mode by vm.periodMode.collectAsStateWithLifecycle()
     val currentAccountingMonth by vm.currentAccountingMonth.collectAsStateWithLifecycle()
     val monthStartDay by vm.monthStartDay.collectAsStateWithLifecycle()
+    val categories by vm.categories.collectAsStateWithLifecycle()
     val cardImageUri by vm.cardImageUri.collectAsStateWithLifecycle()
     val cardTransform by vm.cardTransform.collectAsStateWithLifecycle()
     val cardImage by vm.cardImage.collectAsStateWithLifecycle()
@@ -210,10 +206,13 @@ fun TransactionListScreen(
     // 筛选与分页深度都要跨「进详情页再返回」保留：分页深度若回到首页，
     // rememberLazyListState 恢复出来的 index 会被只排了首页的那点内容夹到页尾。
     var filter by rememberSaveable { mutableStateOf(TxFilter.ALL) }
+    // 分类多选筛选（空 = 不筛），与上面的类型筛选是 AND；同样要跨「进详情页再返回」「切 tab」保留
+    var categoryIds by rememberSaveable(stateSaver = CategoryIdSetSaver) { mutableStateOf(emptySet<Long>()) }
     var loadedLimit by rememberSaveable { mutableIntStateOf(FIRST_PAGE_ROWS) }
     var jumpTarget by remember { mutableStateOf<LocalDate?>(null) }
     var pendingJump by remember { mutableStateOf<LocalDate?>(null) }
     var showPicker by remember { mutableStateOf(false) }
+    var showFilterSheet by remember { mutableStateOf(false) }
     var showCoverSheet by remember { mutableStateOf(false) }
     var showImageEditor by remember { mutableStateOf(false) }
     var showBatchSheet by remember { mutableStateOf(false) }
@@ -300,12 +299,8 @@ fun TransactionListScreen(
         }
     }
 
-    val filtered = remember(rowsReady, filter) {
-        when (filter) {
-            TxFilter.ALL -> rowsReady
-            TxFilter.EXPENSE -> rowsReady.filter { it.type == TxType.EXPENSE }
-            TxFilter.INCOME -> rowsReady.filter { it.type == TxType.INCOME }
-        }
+    val filtered = remember(rowsReady, filter, categoryIds) {
+        applyBillFilters(rowsReady, filter, categoryIds)
     }
     val grouped: Map<LocalDate, List<TransactionRow>> = remember(filtered) {
         filtered.groupBy { Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate() }
@@ -349,7 +344,14 @@ fun TransactionListScreen(
         EcoTopBar(
             micro = "LEDGER / ${month.year}",
             title = "账单",
-            action = { EcoSettingsPill(onClick = onOpenSettings) },
+            action = {
+                EcoTopBarIcon(
+                    icon = EcoIcons.Search,
+                    contentDescription = "搜索账单",
+                    onClick = onOpenSearch,
+                )
+                EcoSettingsPill(onClick = onOpenSettings)
+            },
         )
         BalanceCard(
             mode = mode,
@@ -371,10 +373,12 @@ fun TransactionListScreen(
             mode = mode,
             filter = filter,
             count = filtered.size,
+            filterActive = categoryIds.isNotEmpty(),
             onPrev = { vm.prevPeriod() },
             onNext = { vm.nextPeriod() },
             onOpenPicker = { showPicker = true },
             onFilter = { filter = it },
+            onOpenFilter = { showFilterSheet = true },
             onMore = { showBatchSheet = true },
         )
         if (selecting) {
@@ -409,6 +413,11 @@ fun TransactionListScreen(
             rowsReady.isEmpty() -> BillEmpty(
                 title = "${periodScopeLabel(mode)}还没有记录",
                 body = "点右下角「记账」补一笔，或到「个人」页导入账单。",
+                modifier = Modifier.weight(1f),
+            )
+            filtered.isEmpty() && categoryIds.isNotEmpty() -> BillEmpty(
+                title = "${periodScopeLabel(mode)}没有所选分类的记录",
+                body = "换个分类，或点工具条上的筛选按钮重置。",
                 modifier = Modifier.weight(1f),
             )
             filtered.isEmpty() -> BillEmpty(
@@ -541,6 +550,18 @@ fun TransactionListScreen(
         )
     }
 
+    if (showFilterSheet) {
+        CategoryFilterSheet(
+            categories = categories,
+            selected = categoryIds,
+            onApply = {
+                categoryIds = it
+                showFilterSheet = false
+            },
+            onDismiss = { showFilterSheet = false },
+        )
+    }
+
     jumpTarget?.let { day ->
         DayJumpDialog(
             current = day,
@@ -577,10 +598,12 @@ private fun BillToolbar(
     mode: PeriodMode,
     filter: TxFilter,
     count: Int,
+    filterActive: Boolean,
     onPrev: () -> Unit,
     onNext: () -> Unit,
     onOpenPicker: () -> Unit,
     onFilter: (TxFilter) -> Unit,
+    onOpenFilter: () -> Unit,
     onMore: () -> Unit,
 ) {
     val c = MaterialTheme.eco
@@ -618,6 +641,8 @@ private fun BillToolbar(
         }
         ToolbarArrow(EcoIcons.Next, "下一周期", onNext)
         Spacer(Modifier.weight(1f))
+        ToolbarFilterButton(active = filterActive, onClick = onOpenFilter)
+        Spacer(Modifier.width(6.dp))
         EcoFilterStrip(
             options = TxFilter.entries.map { it.label },
             selectedIndex = filter.ordinal,
@@ -639,6 +664,38 @@ private fun ToolbarArrow(icon: androidx.compose.ui.graphics.vector.ImageVector, 
         contentAlignment = Alignment.Center,
     ) {
         Icon(icon, contentDescription = desc, tint = c.muted, modifier = Modifier.size(14.dp))
+    }
+}
+
+/**
+ * 工具条「按分类筛选」入口：与左右箭头同为 26dp 圆形热区，放在「全部/支出/收入」左侧的空白里。
+ * 分类筛选生效时图标转主色并在右上角点一个小圆点——否则用户看到少了的列表会以为账单丢了。
+ */
+@Composable
+private fun ToolbarFilterButton(active: Boolean, onClick: () -> Unit) {
+    val c = MaterialTheme.eco
+    Box(
+        Modifier
+            .size(26.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            EcoIcons.Filter,
+            contentDescription = if (active) "分类筛选（已启用）" else "分类筛选",
+            tint = if (active) c.blueDeep else c.muted,
+            modifier = Modifier.size(14.dp),
+        )
+        if (active) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .size(5.dp)
+                    .clip(CircleShape)
+                    .background(c.blue),
+            )
+        }
     }
 }
 
@@ -675,8 +732,9 @@ private fun BatchBar(
     }
 }
 
+/** 账单/搜索共用的空态：标题 + 一句「下一步做什么」 */
 @Composable
-private fun BillEmpty(title: String, body: String, modifier: Modifier = Modifier) {
+internal fun BillEmpty(title: String, body: String, modifier: Modifier = Modifier) {
     val c = MaterialTheme.eco
     Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(horizontal = 40.dp)) {
@@ -923,8 +981,9 @@ private fun buildScrollMetrics(heights: HashMap<Int, Int>, total: Int): ScrollMe
     return ScrollMetrics(prefix, prefix[total].toFloat())
 }
 
+/** 吸顶日期头（账单页与搜索页共用）：日期胶囊 + 当日收支；[onClickDay] 为 null 时不可点（搜索页不接跳日） */
 @Composable
-private fun DayHeader(day: LocalDate, dayRows: List<TransactionRow>, onClickDay: () -> Unit) {
+internal fun DayHeader(day: LocalDate, dayRows: List<TransactionRow>, onClickDay: (() -> Unit)? = null) {
     val c = MaterialTheme.eco
     val today = LocalDate.now()
     val relative = when (day) {
@@ -954,7 +1013,7 @@ private fun DayHeader(day: LocalDate, dayRows: List<TransactionRow>, onClickDay:
                 .clip(RoundedCornerShape(9.dp))
                 .background(c.blueWash)
                 .border(1.dp, c.rule, RoundedCornerShape(9.dp))
-                .clickable(onClick = onClickDay)
+                .then(if (onClickDay != null) Modifier.clickable(onClick = onClickDay) else Modifier)
                 .padding(horizontal = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -974,9 +1033,10 @@ private fun DayHeader(day: LocalDate, dayRows: List<TransactionRow>, onClickDay:
     }
 }
 
+/** 单笔流水行（账单页与搜索页共用）：勾选框 + 分类图标 + 商户/时间/备注 + 金额 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun BillRow(
+internal fun BillRow(
     row: TransactionRow,
     selecting: Boolean,
     selected: Boolean,
