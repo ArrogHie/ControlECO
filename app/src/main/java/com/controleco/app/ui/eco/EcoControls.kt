@@ -342,13 +342,18 @@ fun EcoSegmented(
     }
 }
 
-/** 筛选条：全部/支出/收入（比分段控件更矮、更轻） */
+/**
+ * 筛选条：全部/支出/收入（比分段控件更矮、更轻）。
+ * [itemPadding] 是每项左右内边距——账单页工具条一行要塞下周期/排序/筛选/更多，
+ * 传小一点（8dp）挤出一格；默认值保持快速记账等其它调用点的原样。
+ */
 @Composable
 fun EcoFilterStrip(
     options: List<String>,
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    itemPadding: Dp = 10.dp,
 ) {
     val c = MaterialTheme.eco
     Row(
@@ -371,7 +376,7 @@ fun EcoFilterStrip(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                     ) { onSelect(index) }
-                    .padding(horizontal = 10.dp),
+                    .padding(horizontal = itemPadding),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(text, style = EcoType.Pill, color = if (on) c.ink else c.muted)

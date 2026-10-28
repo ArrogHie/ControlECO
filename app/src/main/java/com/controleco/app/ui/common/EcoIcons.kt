@@ -683,6 +683,17 @@ object EcoIcons {
             ),
         )
     }
+
+    /** sort（上下双箭头）：账单页/搜索页的「排序方式」 */
+    val Sort: ImageVector by lazy {
+        ecoIcon(
+            "sort",
+            listOf(
+            "M3 9l4-4 4 4M7 5v14",
+            "M21 15l-4 4-4-4M17 19V5",
+            ),
+        )
+    }
 }
 
 private fun ecoIcon(name: String, paths: List<String>): ImageVector {

@@ -4,8 +4,10 @@ import com.controleco.app.data.db.RefundMark
 import com.controleco.app.data.db.TransactionRow
 import com.controleco.app.data.db.TxSource
 import com.controleco.app.data.db.TxType
+import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -243,28 +245,114 @@ class BillFiltersTest {
     fun `搜索键_条件相同则键相同_分类顺序不影响`() {
         val a = BillSearchQuery(keyword = "瑞幸", categoryIds = setOf(1L, 2L))
         val b = BillSearchQuery(keyword = " 瑞幸 ", categoryIds = setOf(2L, 1L))
-        assertEquals(billSearchKey(a), billSearchKey(b))
+        assertEquals(billSearchKey(a, BillSort.TIME_DESC), billSearchKey(b, BillSort.TIME_DESC))
     }
 
     @Test
     fun `搜索键_任一条件变化则键变化`() {
         val base = BillSearchQuery(keyword = "瑞幸", type = TxFilter.EXPENSE)
         val keys = setOf(
-            billSearchKey(base),
-            billSearchKey(base.copy(keyword = "星巴克")),
-            billSearchKey(base.copy(type = TxFilter.ALL)),
-            billSearchKey(base.copy(categoryIds = setOf(1L))),
-            billSearchKey(base.copy(amount = amountQueryOf(AmountMode.EXACT, "1", "", ""))),
-            billSearchKey(base.copy(amount = amountQueryOf(AmountMode.RANGE, "", "1", "2"))),
+            billSearchKey(base, BillSort.TIME_DESC),
+            billSearchKey(base.copy(keyword = "星巴克"), BillSort.TIME_DESC),
+            billSearchKey(base.copy(type = TxFilter.ALL), BillSort.TIME_DESC),
+            billSearchKey(base.copy(categoryIds = setOf(1L)), BillSort.TIME_DESC),
+            billSearchKey(base.copy(amount = amountQueryOf(AmountMode.EXACT, "1", "", "")), BillSort.TIME_DESC),
+            billSearchKey(base.copy(amount = amountQueryOf(AmountMode.RANGE, "", "1", "2")), BillSort.TIME_DESC),
+            billSearchKey(base, BillSort.AMOUNT_DESC),
         )
-        assertEquals(6, keys.size)
+        assertEquals(7, keys.size)
     }
 
     @Test
     fun `搜索键_首次进入不回顶_键变了才回顶`() {
-        val key = billSearchKey(BillSearchQuery(keyword = "瑞幸"))
+        val key = billSearchKey(BillSearchQuery(keyword = "瑞幸"), BillSort.TIME_DESC)
         assertFalse(shouldResetBillList(null, key))
         assertFalse(shouldResetBillList(key, key))
-        assertTrue(shouldResetBillList(key, billSearchKey(BillSearchQuery(keyword = "星巴克"))))
+        assertTrue(shouldResetBillList(key, billSearchKey(BillSearchQuery(keyword = "星巴克"), BillSort.TIME_DESC)))
+        // 只换排序也要回顶
+        assertTrue(shouldResetBillList(key, billSearchKey(BillSearchQuery(keyword = "瑞幸"), BillSort.AMOUNT_ASC)))
+    }
+
+    // ---------- 排序 ----------
+
+    private fun sortRow(id: Long, amountCents: Long, timestamp: Long) = TransactionRow(
+        id = id,
+        type = TxType.EXPENSE,
+        amountCents = amountCents,
+        timestamp = timestamp,
+        note = "",
+        counterparty = "m$id",
+        source = TxSource.MANUAL,
+        categoryId = 1,
+        categoryName = "餐饮",
+        accountId = 1,
+        accountName = "现金",
+        refundMark = RefundMark.NONE,
+    )
+
+    // 时间：3 最旧 → 1 最新；金额：20 / 50 / 30 / 50
+    private val sortable = listOf(
+        sortRow(1, 2000, 3000),
+        sortRow(2, 5000, 2000),
+        sortRow(3, 3000, 1000),
+        sortRow(4, 5000, 500),
+    )
+
+    @Test
+    fun `默认排序原样返回_不重排`() {
+        val rows = listOf(sortRow(1, 100, 3000), sortRow(2, 200, 2000))
+        // 同一个实例：默认排序就是 DAO 的顺序，不做无谓重排
+        assertSame(rows, sortBills(rows, BillSort.TIME_DESC))
+    }
+
+    @Test
+    fun `时间升序_最早在前`() {
+        assertEquals(listOf(4L, 3L, 2L, 1L), sortBills(sortable, BillSort.TIME_ASC).map { it.id })
+    }
+
+    @Test
+    fun `金额降序_同金额按时间倒序`() {
+        // 5000 两笔（时间 2000 / 500）：新的在前；其余 3000 → 2000
+        assertEquals(listOf(2L, 4L, 3L, 1L), sortBills(sortable, BillSort.AMOUNT_DESC).map { it.id })
+    }
+
+    @Test
+    fun `金额升序_同金额按时间倒序`() {
+        assertEquals(listOf(1L, 3L, 2L, 4L), sortBills(sortable, BillSort.AMOUNT_ASC).map { it.id })
+    }
+
+    @Test
+    fun `金额排序取绝对值_历史脏数据里的负数也按大小排`() {
+        val rows = listOf(sortRow(1, -9000, 1000), sortRow(2, 100, 2000))
+        assertEquals(listOf(1L, 2L), sortBills(rows, BillSort.AMOUNT_DESC).map { it.id })
+    }
+
+    @Test
+    fun `时间排序按天分组_金额排序平铺`() {
+        assertTrue(BillSort.TIME_DESC.groupedByDay)
+        assertTrue(BillSort.TIME_ASC.groupedByDay)
+        assertFalse(BillSort.AMOUNT_DESC.groupedByDay)
+        assertFalse(BillSort.AMOUNT_ASC.groupedByDay)
+    }
+
+    @Test
+    fun `按天分组保持入参顺序`() {
+        val rows = listOf(
+            sortRow(1, 100, LocalDate.of(2026, 10, 2).toEpochDay() * 86_400_000L),
+            sortRow(2, 100, LocalDate.of(2026, 10, 1).toEpochDay() * 86_400_000L),
+            sortRow(3, 100, LocalDate.of(2026, 10, 2).toEpochDay() * 86_400_000L),
+        )
+        val grouped = groupRowsByDay(rows)
+        assertEquals(listOf(LocalDate.of(2026, 10, 2), LocalDate.of(2026, 10, 1)), grouped.keys.toList())
+        assertEquals(listOf(1L, 3L), grouped.getValue(LocalDate.of(2026, 10, 2)).map { it.id })
+    }
+
+    @Test
+    fun `账单页列表键_类型或排序变了才回顶`() {
+        val key = billListKey(TxFilter.ALL, BillSort.TIME_DESC)
+        assertFalse(shouldResetBillList(null, key))
+        assertFalse(shouldResetBillList(key, billListKey(TxFilter.ALL, BillSort.TIME_DESC)))
+        assertTrue(shouldResetBillList(key, billListKey(TxFilter.EXPENSE, BillSort.TIME_DESC)))
+        assertTrue(shouldResetBillList(key, billListKey(TxFilter.ALL, BillSort.AMOUNT_DESC)))
     }
 }

@@ -3,6 +3,9 @@ package com.controleco.app.ui.transactions
 import com.controleco.app.data.db.TransactionRow
 import com.controleco.app.data.db.TxType
 import com.controleco.app.util.Money
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.abs
 
@@ -141,8 +144,9 @@ internal fun searchBills(rows: List<TransactionRow>, query: BillSearchQuery): Li
  *
  * 与账单页 [shouldResetBillList] 配合使用——搜索页的 `LaunchedEffect(键)` 在
  * 「从编辑页返回」时也会重跑，无条件回顶会把恢复好的滚动位置抹掉（见 BillListMemory.kt）。
+ * 排序也在键里：换了顺序，旧的滚动位置就没有意义了。
  */
-internal fun billSearchKey(query: BillSearchQuery): String = buildString {
+internal fun billSearchKey(query: BillSearchQuery, sort: BillSort): String = buildString {
     append(query.keyword.trim())
     append('|').append(query.type.name)
     append('|').append(query.amount.mode.name)
@@ -150,4 +154,57 @@ internal fun billSearchKey(query: BillSearchQuery): String = buildString {
     append(':').append(query.amount.minCents)
     append(':').append(query.amount.maxCents)
     append('|').append(query.categoryIds.sorted().joinToString(","))
+    append('|').append(sort.name)
 }
+
+// ---------- 排序 ----------
+
+/**
+ * 排序方式：时间两个方向 + 金额两个方向。
+ *
+ * 金额排序**不按天分组**（要的是整个周期的金额排名，分组会把排名切碎），
+ * 改为平铺 + 行内补日期（见 [BillSort.groupedByDay] / `BillRow(showDate = true)`）。
+ */
+internal enum class BillSort(val title: String, val sub: String) {
+    TIME_DESC("时间（新→旧）", "按天分组，最近的在前"),
+    TIME_ASC("时间（旧→新）", "按天分组，最早的在前"),
+    AMOUNT_DESC("金额（大→小）", "不分天，整个周期从大到小"),
+    AMOUNT_ASC("金额（小→大）", "不分天，整个周期从小到大"),
+}
+
+/** 时间排序保留「按天分组 + 日期头」；金额排序平铺 */
+internal val BillSort.groupedByDay: Boolean
+    get() = this == BillSort.TIME_DESC || this == BillSort.TIME_ASC
+
+/**
+ * 排序。[TransactionRow.amountCents] 收支都存正数（支出只靠 `type` 区分方向），
+ * 所以按金额排就是按「金额大小」排；这里仍取绝对值，避免历史脏数据里出现负数时排到两端。
+ * 同金额按时间倒序（稳定、可预期）。
+ */
+internal fun sortBills(rows: List<TransactionRow>, sort: BillSort): List<TransactionRow> = when (sort) {
+    // DAO 的 ORDER BY 就是 timestamp DESC, id DESC，默认排序原样返回、不做无谓重排
+    BillSort.TIME_DESC -> rows
+    BillSort.TIME_ASC -> rows.sortedWith(compareBy({ it.timestamp }, { it.id }))
+    BillSort.AMOUNT_DESC -> rows.sortedWith(
+        compareByDescending<TransactionRow> { abs(it.amountCents) }.thenByDescending { it.timestamp },
+    )
+    BillSort.AMOUNT_ASC -> rows.sortedWith(
+        compareBy<TransactionRow> { abs(it.amountCents) }.thenByDescending { it.timestamp },
+    )
+}
+
+/** 按本地日期分组；`groupBy` 保持入参顺序，所以「先排序再分组」才能决定天与天内行的顺序 */
+internal fun groupRowsByDay(
+    rows: List<TransactionRow>,
+    zone: ZoneId = ZoneId.systemDefault(),
+): Map<LocalDate, List<TransactionRow>> =
+    rows.groupBy { Instant.ofEpochMilli(it.timestamp).atZone(zone).toLocalDate() }
+
+/**
+ * 账单页列表键：类型筛选或排序变了才回顶/重置分页。
+ *
+ * 分类筛选**刻意不进键**：它只是把列表收窄，用户在 sheet 里点选完回到列表，
+ * 位置保持原样比被弹回顶部更自然（见 03-账单.md）。
+ */
+internal fun billListKey(filter: TxFilter, sort: BillSort): String = "${filter.name}|${sort.name}"
+

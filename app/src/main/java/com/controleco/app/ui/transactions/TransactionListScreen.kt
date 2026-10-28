@@ -123,12 +123,22 @@ private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 /** 账单行文案：标题 + 小行第一行 + 备注行（备注为空时不占位） */
 internal data class BillRowText(val title: String, val subLine1: String, val note: String)
 
-internal fun billRowText(counterparty: String, categoryName: String, time: String, note: String): BillRowText {
+/**
+ * @param datePrefix 平铺列表（金额排序）时补的日期，如「10月28日」；按天分组时传 null（日期头已经写了）
+ */
+internal fun billRowText(
+    counterparty: String,
+    categoryName: String,
+    time: String,
+    note: String,
+    datePrefix: String? = null,
+): BillRowText {
     val merchant = counterparty.trim()
+    val whenText = if (datePrefix.isNullOrBlank()) time else "$datePrefix $time"
     return if (merchant.isNotEmpty()) {
-        BillRowText(title = merchant, subLine1 = "$time  $categoryName", note = note)
+        BillRowText(title = merchant, subLine1 = "$whenText  $categoryName", note = note)
     } else {
-        BillRowText(title = categoryName, subLine1 = time, note = note)
+        BillRowText(title = categoryName, subLine1 = whenText, note = note)
     }
 }
 
@@ -208,11 +218,14 @@ fun TransactionListScreen(
     var filter by rememberSaveable { mutableStateOf(TxFilter.ALL) }
     // 分类多选筛选（空 = 不筛），与上面的类型筛选是 AND；同样要跨「进详情页再返回」「切 tab」保留
     var categoryIds by rememberSaveable(stateSaver = CategoryIdSetSaver) { mutableStateOf(emptySet<Long>()) }
+    // 排序方式；金额排序会取消按天分组（平铺 + 行内补日期）
+    var sort by rememberSaveable { mutableStateOf(BillSort.TIME_DESC) }
     var loadedLimit by rememberSaveable { mutableIntStateOf(FIRST_PAGE_ROWS) }
     var jumpTarget by remember { mutableStateOf<LocalDate?>(null) }
     var pendingJump by remember { mutableStateOf<LocalDate?>(null) }
     var showPicker by remember { mutableStateOf(false) }
     var showFilterSheet by remember { mutableStateOf(false) }
+    var showSortSheet by remember { mutableStateOf(false) }
     var showCoverSheet by remember { mutableStateOf(false) }
     var showImageEditor by remember { mutableStateOf(false) }
     var showBatchSheet by remember { mutableStateOf(false) }
@@ -266,8 +279,9 @@ fun TransactionListScreen(
         listState.scrollToItem(0)
     }
     var lastFilterKey by rememberSaveable { mutableStateOf<String?>(null) }
-    LaunchedEffect(filter) {
-        val key = filter.name
+    // 类型筛选或排序变了才回顶/重置分页（分类筛选刻意不进键，见 BillFilters.billListKey）
+    LaunchedEffect(filter, sort) {
+        val key = billListKey(filter, sort)
         val previous = lastFilterKey
         lastFilterKey = key
         if (!shouldResetBillList(previous, key)) return@LaunchedEffect
@@ -302,17 +316,38 @@ fun TransactionListScreen(
     val filtered = remember(rowsReady, filter, categoryIds) {
         applyBillFilters(rowsReady, filter, categoryIds)
     }
-    val grouped: Map<LocalDate, List<TransactionRow>> = remember(filtered) {
-        filtered.groupBy { Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate() }
+    val sorted = remember(filtered, sort) { sortBills(filtered, sort) }
+    // 时间排序：按天分组（吸顶日期头）；金额排序：平铺（行内补日期），要的是整个周期的金额排名
+    val byDay = sort.groupedByDay
+    val grouped: Map<LocalDate, List<TransactionRow>> = remember(sorted, byDay) {
+        if (byDay) groupRowsByDay(sorted) else emptyMap()
     }
     val allDays = grouped.keys.toList()
-    val (shownDays, shownCount) = remember(allDays, grouped, loadedLimit) {
+    val (shownDays, _) = remember(allDays, grouped, loadedLimit) {
         pageDays(allDays, grouped, loadedLimit)
     }
-    val hasMoreDays = shownDays.size < allDays.size
+    val shownRows = remember(sorted, loadedLimit, byDay) {
+        if (byDay) emptyList() else sorted.take(loadedLimit)
+    }
+    val hasMore = if (byDay) shownDays.size < allDays.size else shownRows.size < sorted.size
 
-    val loadMore by rememberUpdatedState(hasMoreDays)
-    LaunchedEffect(listState, filtered) {
+    // 两种列表形态（按天分组 / 金额平铺）共用同一套点击语义，避免两边改歪
+    val onRowClick: (TransactionRow) -> Unit = { row ->
+        if (selecting) {
+            selected = if (row.id in selected) selected - row.id else selected + row.id
+        } else {
+            onEditTransaction(row.id)
+        }
+    }
+    val onRowLongClick: (TransactionRow) -> Unit = { row ->
+        if (!selecting) {
+            selecting = true
+            selected = setOf(row.id)
+        }
+    }
+
+    val loadMore by rememberUpdatedState(hasMore)
+    LaunchedEffect(listState, sorted) {
         snapshotFlow {
             val info = listState.layoutInfo
             (info.visibleItemsInfo.lastOrNull()?.index ?: -1) to info.totalItemsCount
@@ -374,11 +409,13 @@ fun TransactionListScreen(
             filter = filter,
             count = filtered.size,
             filterActive = categoryIds.isNotEmpty(),
+            sortActive = sort != BillSort.TIME_DESC,
             onPrev = { vm.prevPeriod() },
             onNext = { vm.nextPeriod() },
             onOpenPicker = { showPicker = true },
             onFilter = { filter = it },
             onOpenFilter = { showFilterSheet = true },
+            onOpenSort = { showSortSheet = true },
             onMore = { showBatchSheet = true },
         )
         if (selecting) {
@@ -432,34 +469,33 @@ fun TransactionListScreen(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 96.dp, end = 10.dp),
                     ) {
-                        shownDays.forEach { day ->
-                            val dayRows = grouped[day].orEmpty()
-                            stickyHeader(key = "d${day.toEpochDay()}") {
-                                DayHeader(day = day, dayRows = dayRows, onClickDay = { jumpTarget = day })
+                        if (byDay) {
+                            shownDays.forEach { day ->
+                                val dayRows = grouped[day].orEmpty()
+                                stickyHeader(key = "d${day.toEpochDay()}") {
+                                    DayHeader(day = day, dayRows = dayRows, onClickDay = { jumpTarget = day })
+                                }
+                                items(dayRows, key = { it.id }) { row ->
+                                    BillListItem(
+                                        row = row,
+                                        selecting = selecting,
+                                        selected = row.id in selected,
+                                        showDate = false,
+                                        onClick = { onRowClick(row) },
+                                        onLongClick = { onRowLongClick(row) },
+                                    )
+                                }
                             }
-                            items(dayRows, key = { it.id }) { row ->
-                                BillRow(
+                        } else {
+                            // 金额排序：平铺，行内补日期（没有日期头，看不出是哪天就没法比金额）
+                            items(shownRows, key = { it.id }) { row ->
+                                BillListItem(
                                     row = row,
                                     selecting = selecting,
                                     selected = row.id in selected,
-                                    onClick = {
-                                        if (selecting) {
-                                            selected = if (row.id in selected) selected - row.id else selected + row.id
-                                        } else {
-                                            onEditTransaction(row.id)
-                                        }
-                                    },
-                                    onLongClick = {
-                                        if (!selecting) {
-                                            selecting = true
-                                            selected = setOf(row.id)
-                                        }
-                                    },
-                                )
-                                HorizontalDivider(
-                                    color = MaterialTheme.eco.rule,
-                                    thickness = 1.dp,
-                                    modifier = Modifier.padding(start = 55.dp),
+                                    showDate = true,
+                                    onClick = { onRowClick(row) },
+                                    onLongClick = { onRowLongClick(row) },
                                 )
                             }
                         }
@@ -562,6 +598,17 @@ fun TransactionListScreen(
         )
     }
 
+    if (showSortSheet) {
+        BillSortSheet(
+            current = sort,
+            onSelect = {
+                sort = it
+                showSortSheet = false
+            },
+            onDismiss = { showSortSheet = false },
+        )
+    }
+
     jumpTarget?.let { day ->
         DayJumpDialog(
             current = day,
@@ -599,11 +646,13 @@ private fun BillToolbar(
     filter: TxFilter,
     count: Int,
     filterActive: Boolean,
+    sortActive: Boolean,
     onPrev: () -> Unit,
     onNext: () -> Unit,
     onOpenPicker: () -> Unit,
     onFilter: (TxFilter) -> Unit,
     onOpenFilter: () -> Unit,
+    onOpenSort: () -> Unit,
     onMore: () -> Unit,
 ) {
     val c = MaterialTheme.eco
@@ -616,8 +665,9 @@ private fun BillToolbar(
     ) {
         ToolbarArrow(EcoIcons.Back, "上一周期", onPrev)
         Column(
+            // 78dp：1.25 字体下「2026.10」约 61dp，留 17dp 余量；再宽就挤掉右侧的排序/筛选/更多
             Modifier
-                .width(82.dp)
+                .width(78.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .clickable(onClick = onOpenPicker)
                 .padding(vertical = 2.dp),
@@ -641,12 +691,25 @@ private fun BillToolbar(
         }
         ToolbarArrow(EcoIcons.Next, "下一周期", onNext)
         Spacer(Modifier.weight(1f))
-        ToolbarFilterButton(active = filterActive, onClick = onOpenFilter)
+        ToolbarIconAction(
+            icon = EcoIcons.Sort,
+            description = if (sortActive) "排序方式（非默认）" else "排序方式",
+            active = sortActive,
+            onClick = onOpenSort,
+        )
+        Spacer(Modifier.width(6.dp))
+        ToolbarIconAction(
+            icon = EcoIcons.Filter,
+            description = if (filterActive) "分类筛选（已启用）" else "分类筛选",
+            active = filterActive,
+            onClick = onOpenFilter,
+        )
         Spacer(Modifier.width(6.dp))
         EcoFilterStrip(
             options = TxFilter.entries.map { it.label },
             selectedIndex = filter.ordinal,
             onSelect = { onFilter(TxFilter.entries[it]) },
+            itemPadding = 8.dp,
         )
         Spacer(Modifier.width(4.dp))
         ToolbarArrow(EcoIcons.More, "批量操作", onMore)
@@ -668,11 +731,17 @@ private fun ToolbarArrow(icon: androidx.compose.ui.graphics.vector.ImageVector, 
 }
 
 /**
- * 工具条「按分类筛选」入口：与左右箭头同为 26dp 圆形热区，放在「全部/支出/收入」左侧的空白里。
- * 分类筛选生效时图标转主色并在右上角点一个小圆点——否则用户看到少了的列表会以为账单丢了。
+ * 工具条图标动作（排序 / 分类筛选）：与左右箭头同为 26dp 圆形热区，排在「全部/支出/收入」左侧。
+ * 生效（非默认排序 / 有分类筛选）时图标转主色并在右上角点一个小圆点——
+ * 否则用户看到被收窄或重排过的列表会以为账单丢了。搜索页也用它。
  */
 @Composable
-private fun ToolbarFilterButton(active: Boolean, onClick: () -> Unit) {
+internal fun ToolbarIconAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
     val c = MaterialTheme.eco
     Box(
         Modifier
@@ -682,8 +751,8 @@ private fun ToolbarFilterButton(active: Boolean, onClick: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            EcoIcons.Filter,
-            contentDescription = if (active) "分类筛选（已启用）" else "分类筛选",
+            icon,
+            contentDescription = description,
             tint = if (active) c.blueDeep else c.muted,
             modifier = Modifier.size(14.dp),
         )
@@ -1033,7 +1102,35 @@ internal fun DayHeader(day: LocalDate, dayRows: List<TransactionRow>, onClickDay
     }
 }
 
-/** 单笔流水行（账单页与搜索页共用）：勾选框 + 分类图标 + 商户/时间/备注 + 金额 */
+/** 流水行 + 行间分隔线（账单页与搜索页共用）；[showDate] = 平铺列表里行内补日期 */
+@Composable
+internal fun BillListItem(
+    row: TransactionRow,
+    selecting: Boolean,
+    selected: Boolean,
+    showDate: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
+    BillRow(
+        row = row,
+        selecting = selecting,
+        selected = selected,
+        showDate = showDate,
+        onClick = onClick,
+        onLongClick = onLongClick,
+    )
+    HorizontalDivider(
+        color = MaterialTheme.eco.rule,
+        thickness = 1.dp,
+        modifier = Modifier.padding(start = 55.dp),
+    )
+}
+
+/**
+ * 单笔流水行（账单页与搜索页共用）：勾选框 + 分类图标 + 商户/时间/备注 + 金额。
+ * [showDate] = true 时小行补上日期（金额排序平铺时没有日期头，必须靠行内日期才看得出是哪天）。
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun BillRow(
@@ -1042,13 +1139,16 @@ internal fun BillRow(
     selected: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    showDate: Boolean = false,
 ) {
     val c = MaterialTheme.eco
     val isExpense = row.type == TxType.EXPENSE
-    val time = remember(row.timestamp) {
-        Instant.ofEpochMilli(row.timestamp).atZone(ZoneId.systemDefault()).toLocalTime().format(timeFormatter)
+    val dateTime = remember(row.timestamp) {
+        Instant.ofEpochMilli(row.timestamp).atZone(ZoneId.systemDefault())
     }
-    val texts = billRowText(row.counterparty, row.categoryName, time, row.note)
+    val time = remember(dateTime) { dateTime.toLocalTime().format(timeFormatter) }
+    val datePrefix = if (showDate) "${dateTime.monthValue}月${dateTime.dayOfMonth}日" else null
+    val texts = billRowText(row.counterparty, row.categoryName, time, row.note, datePrefix)
     Row(
         Modifier
             .fillMaxWidth()

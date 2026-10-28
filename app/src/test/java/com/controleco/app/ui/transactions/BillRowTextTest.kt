@@ -44,4 +44,19 @@ class BillRowTextTest {
     fun `商户名前后空格会被去掉`() {
         assertEquals("全家便利店", billRowText(" 全家便利店 ", "日用", "21:10", "").title)
     }
+
+    @Test
+    fun `平铺排序时小行前面补日期`() {
+        val withMerchant = billRowText("星巴克", "餐饮", "09:30", "", datePrefix = "10月28日")
+        assertEquals("10月28日 09:30  餐饮", withMerchant.subLine1)
+        val withoutMerchant = billRowText("", "餐饮", "09:30", "", datePrefix = "10月28日")
+        assertEquals("餐饮", withoutMerchant.title)
+        assertEquals("10月28日 09:30", withoutMerchant.subLine1)
+    }
+
+    @Test
+    fun `日期前缀为空视同按天分组_不产生多余空格`() {
+        assertEquals("09:30  餐饮", billRowText("星巴克", "餐饮", "09:30", "", datePrefix = null).subLine1)
+        assertEquals("09:30  餐饮", billRowText("星巴克", "餐饮", "09:30", "", datePrefix = "").subLine1)
+    }
 }

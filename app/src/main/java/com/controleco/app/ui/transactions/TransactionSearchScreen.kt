@@ -26,7 +26,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -63,9 +62,7 @@ import com.controleco.app.ui.eco.EcoSegmented
 import com.controleco.app.ui.eco.EcoTopBar
 import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.eco
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
@@ -100,8 +97,10 @@ fun TransactionSearchScreen(
     var typeFilter by rememberSaveable { mutableStateOf(TxFilter.ALL) }
     // 分类多选与分页深度都要跨「进编辑页再返回」保留
     var categoryIds by rememberSaveable(stateSaver = CategoryIdSetSaver) { mutableStateOf(emptySet<Long>()) }
+    var sort by rememberSaveable { mutableStateOf(BillSort.TIME_DESC) }
     var loadedLimit by rememberSaveable { mutableIntStateOf(FIRST_PAGE_ROWS) }
     var showFilterSheet by remember { mutableStateOf(false) }
+    var showSortSheet by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     val query = remember(keyword, amountMode, exactText, minText, maxText, typeFilter, categoryIds) {
@@ -113,17 +112,23 @@ fun TransactionSearchScreen(
         )
     }
     val results = remember(rowsReady, query) { searchBills(rowsReady, query) }
-    val grouped: Map<LocalDate, List<TransactionRow>> = remember(results) {
-        results.groupBy { Instant.ofEpochMilli(it.timestamp).atZone(ZoneId.systemDefault()).toLocalDate() }
+    val sorted = remember(results, sort) { sortBills(results, sort) }
+    // 时间排序：按天分组；金额排序：平铺 + 行内补日期（与账单页同一口径）
+    val byDay = sort.groupedByDay
+    val grouped: Map<LocalDate, List<TransactionRow>> = remember(sorted, byDay) {
+        if (byDay) groupRowsByDay(sorted) else emptyMap()
     }
     val allDays = grouped.keys.toList()
     val (shownDays, _) = remember(allDays, grouped, loadedLimit) {
         pageDays(allDays, grouped, loadedLimit)
     }
-    val hasMoreDays = shownDays.size < allDays.size
+    val shownRows = remember(sorted, loadedLimit, byDay) {
+        if (byDay) emptyList() else sorted.take(loadedLimit)
+    }
+    val hasMore = if (byDay) shownDays.size < allDays.size else shownRows.size < sorted.size
 
-    val loadMore by rememberUpdatedState(hasMoreDays)
-    LaunchedEffect(listState, results) {
+    val loadMore by rememberUpdatedState(hasMore)
+    LaunchedEffect(listState, sorted) {
         snapshotFlow {
             val info = listState.layoutInfo
             (info.visibleItemsInfo.lastOrNull()?.index ?: -1) to info.totalItemsCount
@@ -136,9 +141,9 @@ fun TransactionSearchScreen(
             }
     }
 
-    // 条件真的变了才回顶并重置分页：本 effect 在「从编辑页返回」时也会重跑，
+    // 条件或排序真的变了才回顶并重置分页：本 effect 在「从编辑页返回」时也会重跑，
     // 无条件 scrollToItem(0) 会把刚恢复好的滚动位置抹掉（同账单页，见 BillListMemory.kt）。
-    val queryKey = remember(query) { billSearchKey(query) }
+    val queryKey = remember(query, sort) { billSearchKey(query, sort) }
     var lastQueryKey by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(queryKey) {
         val previous = lastQueryKey
@@ -224,6 +229,13 @@ fun TransactionSearchScreen(
                     onSelect = { typeFilter = TxFilter.entries[it] },
                 )
                 Spacer(Modifier.weight(1f))
+                ToolbarIconAction(
+                    icon = EcoIcons.Sort,
+                    description = if (sort != BillSort.TIME_DESC) "排序方式（非默认）" else "排序方式",
+                    active = sort != BillSort.TIME_DESC,
+                    onClick = { showSortSheet = true },
+                )
+                Spacer(Modifier.width(6.dp))
                 CategoryFilterButton(
                     active = categoryIds.isNotEmpty(),
                     count = categoryIds.size,
@@ -266,23 +278,33 @@ fun TransactionSearchScreen(
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     contentPadding = PaddingValues(bottom = 24.dp),
                 ) {
-                    shownDays.forEach { day ->
-                        val dayRows = grouped[day].orEmpty()
-                        stickyHeader(key = "d${day.toEpochDay()}") {
-                            DayHeader(day = day, dayRows = dayRows)
+                    if (byDay) {
+                        shownDays.forEach { day ->
+                            val dayRows = grouped[day].orEmpty()
+                            stickyHeader(key = "d${day.toEpochDay()}") {
+                                DayHeader(day = day, dayRows = dayRows)
+                            }
+                            items(dayRows, key = { it.id }) { row ->
+                                BillListItem(
+                                    row = row,
+                                    selecting = false,
+                                    selected = false,
+                                    showDate = false,
+                                    onClick = { onEditTransaction(row.id) },
+                                    onLongClick = {},
+                                )
+                            }
                         }
-                        items(dayRows, key = { it.id }) { row ->
-                            BillRow(
+                    } else {
+                        // 金额排序：平铺，行内补日期
+                        items(shownRows, key = { it.id }) { row ->
+                            BillListItem(
                                 row = row,
                                 selecting = false,
                                 selected = false,
+                                showDate = true,
                                 onClick = { onEditTransaction(row.id) },
                                 onLongClick = {},
-                            )
-                            HorizontalDivider(
-                                color = MaterialTheme.eco.rule,
-                                thickness = 1.dp,
-                                modifier = Modifier.padding(start = 55.dp),
                             )
                         }
                     }
@@ -300,6 +322,17 @@ fun TransactionSearchScreen(
                 showFilterSheet = false
             },
             onDismiss = { showFilterSheet = false },
+        )
+    }
+
+    if (showSortSheet) {
+        BillSortSheet(
+            current = sort,
+            onSelect = {
+                sort = it
+                showSortSheet = false
+            },
+            onDismiss = { showSortSheet = false },
         )
     }
 }
