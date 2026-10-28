@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -164,6 +165,8 @@ fun TransactionSearchScreen(
     Column(
         Modifier
             .fillMaxSize()
+            .imePadding()
+            // 键盘可见时 imePadding 已经把底部让出来了，再叠 navigationBarsPadding 会多出一截（同快速记账/编辑页）
             .then(if (imeVisible) Modifier else Modifier.navigationBarsPadding()),
     ) {
         EcoTopBar(micro = "SEARCH / $periodText", title = "搜索", onBack = onBack)
@@ -241,6 +244,12 @@ fun TransactionSearchScreen(
         }
 
         when {
+            // 整个周期都没有记录时，先说清“不是搜索没搜到”，否则用户会一直换关键字
+            rowsReady.isEmpty() -> BillEmpty(
+                title = "当前周期还没有记录",
+                body = "回账单页点右下角「记账」补一笔，或到「个人」页导入账单。",
+                modifier = Modifier.weight(1f),
+            )
             !query.isActive -> BillEmpty(
                 title = "输入商户或金额开始搜索",
                 body = "范围是当前周期（$periodText），也可以只用类型、分类筛选。",
