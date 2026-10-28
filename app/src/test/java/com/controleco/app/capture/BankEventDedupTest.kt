@@ -171,4 +171,38 @@ class BankEventDedupTest {
         claims.claim(9, income, BankEventDedup.Channel.PUSH, t0, now = t0)
         assertEquals(9L, claims.find(income, BankEventDedup.Channel.SMS, t0 + 5_000, now = t0 + 5_000))
     }
+
+    // ---------- 真实样本（2026-10-27 工行 ¥36.40 盒马：短信 + 系统短信 App 通知，记了两笔） ----------
+
+    @Test
+    fun `真实样本_同一条短信的短信通道与通知通道会被一比一吸收`() {
+        // 两条消息都取不到尾号（正文是「尾号卡10月27日…」，没有四位数字）→ 按通配处理
+        val smsKey = BankEventDedup.keyOf("工商银行", 3640, TxType.EXPENSE, false, null)!!
+        val noticeKey = BankEventDedup.keyOf("工商银行", 3640, TxType.EXPENSE, false, null)!!
+        assertTrue(BankEventDedup.matches(smsKey, noticeKey))
+
+        // 短信先入账（#26）→ 同银行同额的通知到达时并入，不再记第二笔
+        val claims = BankEventClaims()
+        claims.claim(26, smsKey, BankEventDedup.Channel.SMS, t0, now = t0)
+        assertEquals(26L, claims.find(noticeKey, BankEventDedup.Channel.PUSH, t0, now = t0))
+        claims.claim(26, noticeKey, BankEventDedup.Channel.PUSH, t0, now = t0)
+        // 之后同一通道再来（例如第二条短信）不再吸收 → 不会把两笔真实同额并成一条
+        assertNull(claims.find(smsKey, BankEventDedup.Channel.SMS, t0 + 1_000, now = t0))
+    }
+
+    @Test
+    fun `真实样本_不同银行或不同金额不会误并`() {
+        val icbc = BankEventDedup.keyOf("工商银行", 3640, TxType.EXPENSE, false, null)!!
+        val cmb = BankEventDedup.keyOf("招商银行", 3640, TxType.EXPENSE, false, null)!!
+        assertFalse(BankEventDedup.matches(icbc, cmb))
+        val claims = BankEventClaims()
+        claims.claim(26, icbc, BankEventDedup.Channel.SMS, t0, now = t0)
+        assertNull(claims.find(cmb, BankEventDedup.Channel.PUSH, t0, now = t0))
+        assertNull(
+            claims.find(
+                BankEventDedup.keyOf("工商银行", 3641, TxType.EXPENSE, false, null)!!,
+                BankEventDedup.Channel.PUSH, t0, now = t0,
+            ),
+        )
+    }
 }

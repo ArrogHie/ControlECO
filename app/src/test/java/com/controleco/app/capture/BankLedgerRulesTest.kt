@@ -3,6 +3,7 @@ package com.controleco.app.capture
 import com.controleco.app.data.db.TxType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -255,5 +256,48 @@ class BankLedgerRulesTest {
                 fallbackBankName = BankLedgerRules.bankNameOfPackage("com.example.app"),
             ),
         )
+    }
+
+    // ---------- 真实样本（2026-10-27 真机捕获日志：同一笔 ¥36.40 被记了两次） ----------
+
+    /** 真实短信正文（工行，盒马消费）：注意「尾号卡」后面没有四位数字 */
+    private val realIcbcSms =
+        "尾号卡10月27日09:35支出(消费支付宝-上海盒马网络科技有限公司)36.40元，余额7.62元。【工商银行】"
+
+    /** 同一条短信在系统短信 App 通知里的文本（title + text + bigText 拼接后的形态） */
+    private val realMmsNotification =
+        "工商银行 $realIcbcSms 工商银行: $realIcbcSms $realIcbcSms"
+
+    @Test
+    fun `真实样本_工行盒马支出3640`() {
+        val r = parseSms(realIcbcSms)!!
+        assertEquals(TxType.EXPENSE, r.type)
+        assertEquals(3640L, r.amountCents)          // 余额 7.62 不抢金额
+        assertEquals("工商银行", r.bankName)
+        assertEquals("工商银行短信·支出", r.ruleName)
+        assertEquals("消费支付宝-上海盒马网络科技有限公司", r.merchant)
+        // 「尾号卡」后面没有四位数字 → 取不到尾号（已知边界：尾号为 null）
+        assertNull(r.cardTail)
+        assertEquals("工商银行", r.accountLabel)
+    }
+
+    @Test
+    fun `真实样本_短信App通知的文本同样可解析_但包名不在银行白名单`() {
+        // 解析层面一致（这就是当初被记成第二笔的原因）
+        val r = BankLedgerRules.parse(realMmsNotification, "com.android.mms", "通知", smsTime)!!
+        assertEquals(3640L, r.amountCents)
+        assertEquals("工商银行", r.bankName)
+        // 但 com.android.mms 不是银行 App 包名 → 2026-10-27 起该通知不再进入银行通道
+        assertNull(BankLedgerRules.bankNameOfPackage("com.android.mms"))
+    }
+
+    @Test
+    fun `真实样本_两条通道的去重键因来源键不同而不同`() {
+        // 旧行为：两条都能落库（唯一索引不冲突）→ 就是用户看到的 transaction 26 / 27
+        val sms = parseSms(realIcbcSms)!!
+        val mms = BankLedgerRules.parse(realMmsNotification, "com.android.mms", "通知", smsTime)!!
+        assertTrue(sms.dedupKey.startsWith("SMS:工商银行|EXPENSE|3640|"))
+        assertTrue(mms.dedupKey.startsWith("com.android.mms|EXPENSE|3640|"))
+        assertNotEquals(sms.dedupKey, mms.dedupKey)
     }
 }

@@ -89,6 +89,13 @@ class CaptureHeuristicsTest {
     }
 
     @Test
+    fun `系统短信App的通知不重复入账`() {
+        // 真实样本（2026-10-27）：同一条工行 ¥36.40 短信既走了短信通道，又被系统短信 App 的通知
+        // 捕获，于是记了两笔（transaction 26 / 27）。com.android.mms 不是银行 App 包名 → 不入账。
+        assertFalse(candidate("com.android.mms"))
+    }
+
+    @Test
     fun `用户关掉该应用或总开关关闭_不采集`() {
         assertFalse(candidate("cmb.pb", watchedOrUnknown = false))
         assertFalse(candidate("cmb.pb", bankPushEnabled = false))
