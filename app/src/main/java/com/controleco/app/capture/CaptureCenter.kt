@@ -309,21 +309,24 @@ object CaptureCenter {
         note: String,
         pendingId: Long = -1L,
     ) {
-        if (pendingId > 0) {
-            val pending = pendingDao.getById(pendingId)
-            if (pending != null &&
-                tryShowConfirmCard(pending, alreadyEntered = false, isRefund, sourceLabel, counterparty, dedupKey)
-            ) {
-                return
-            }
-        }
-        postPendingNotification(type, isRefund, amountCents, sourceLabel, counterparty, dedupKey)
+        // 插入被数据库去重拒绝时，没有新的待确认条目，不应再次提醒。
+        if (pendingId <= 0L || OverlayPromptLog.wasShown(dedupKey)) return
+        val pending = pendingDao.getById(pendingId) ?: return
+        if (tryShowConfirmCard(
+                pending, alreadyEntered = false, isRefund,
+                sourceLabel, counterparty, dedupKey,
+            )
+        ) return
+
+        // 3 秒等待期间，用户可能已确认/忽略，或另一任务先弹出了卡片。
+        if (OverlayPromptLog.wasShown(dedupKey) || pendingDao.getById(pendingId) == null) return
+        postPendingNotification(type, isRefund, amountCents, sourceLabel, counterparty, dedupKey, pendingId)
     }
 
     /**
      * 已入账后的提醒（卡片/通知互斥）：
      * - 悬浮窗入账：弹「已记入（可改/可删）」卡片；卡片弹不出来账也在——这正是"先入账后弹卡"的意义；
-     * - 入账提醒：卡片没弹（或没开悬浮窗）时发「已记入一笔 X」通知（点击进该笔编辑页，附「撤销」）。
+     * - 入账提醒：卡片未弹时通知兜底；卡片已弹则等用户保存/保留/确认成功后发送通知。
      */
     private suspend fun announceEntry(
         entered: Entered,
@@ -334,12 +337,17 @@ object CaptureCenter {
         counterparty: String,
         dedupKey: String,
     ) {
+        // 该笔已弹出过确认卡时，等用户处理卡片后再发“已记好一笔”通知。
+        if (OverlayPromptLog.wasShown(dedupKey)) return
         val pending = if (entered.pendingId > 0) pendingDao.getById(entered.pendingId) else null
         if (pending != null &&
             tryShowConfirmCard(pending, alreadyEntered = true, isRefund, sourceLabel, counterparty, dedupKey)
-        ) {
-            return
-        }
+        ) return
+
+        // 避免卡片弹出/撤销之后，迟到的采集协程重新发布一条“已入账”通知。
+        if (OverlayPromptLog.wasShown(dedupKey) || entered.txId <= 0L) return
+        if (txDao.findIdByExternalId("NTF:$dedupKey") != entered.txId) return
+
         postEntryNotification(entered.txId, type, isRefund, amountCents, counterparty, sourceLabel, dedupKey)
     }
 
@@ -398,6 +406,46 @@ object CaptureCenter {
             "$ROUTE_EDIT_PREFIX$txId",
             entryNotifId(dedupKey),
             action = undoEntryAction(txId, dedupKey),
+        )
+    }
+
+    /**
+     * 用户在已经弹出的悬浮卡里保存/保留一笔真实存在的交易后通知。
+     * 复用“入账通知”开关、系统通知权限、通知渠道与撤销 action。
+     */
+    private suspend fun notifyEntryAfterOverlay(
+        pending: PendingTransactionEntity,
+        amountCents: Long,
+        counterparty: String,
+    ) {
+        if (!isCaptureNotifyEnabled()) return
+        val txId = txDao.findIdByExternalId("NTF:${pending.dedupKey}") ?: return
+        postEntryNotification(
+            txId = txId,
+            type = pending.type,
+            isRefund = pending.refundMark == RefundMark.REFUND_INCOME,
+            amountCents = amountCents,
+            counterparty = counterparty,
+            sourceLabel = NotificationRules.sourceLabelOrRule(pending.sourcePackage, pending.ruleName),
+            dedupKey = pending.dedupKey,
+        )
+    }
+
+    /**
+     * 用户稍后在应用的待确认列表里确认一笔此前弹过悬浮卡的账单。
+     * 新建交易成功才通知，避免重复点击或数据库冲突导致重复通知。
+     */
+    suspend fun notifyConfirmedFromPendingList(pending: PendingTransactionEntity, txId: Long) {
+        if (!initialized || txId <= 0L || !OverlayPromptLog.wasShown(pending.dedupKey)) return
+        cancelCaptureNotification(pendingNotifId(pending.dedupKey))
+        postEntryNotification(
+            txId = txId,
+            type = pending.type,
+            isRefund = pending.refundMark == RefundMark.REFUND_INCOME,
+            amountCents = pending.amountCents,
+            counterparty = pending.counterparty,
+            sourceLabel = NotificationRules.sourceLabelOrRule(pending.sourcePackage, pending.ruleName),
+            dedupKey = pending.dedupKey,
         )
     }
 
@@ -558,7 +606,6 @@ object CaptureCenter {
             if (dedupKey.isNotBlank()) {
                 pendingDao.deleteByDedupKey(dedupKey)
                 OverlayFieldGuards.clear(dedupKey)
-                OverlayPromptLog.clear(dedupKey)
                 if (dedupKey.isNotBlank()) AppLog.d("pending", "entry removed key=$dedupKey")
                 cancelCaptureNotification(entryNotifId(dedupKey))
                 if (ConfirmCardWindow.showingPendingId > 0 &&
@@ -584,9 +631,8 @@ object CaptureCenter {
             } else {
                 pendingDao.deleteByDedupKey(dedupKey)
             }
-            // 条目已丢弃：释放去重键，同分钟桶里的下一笔真实交易可以复用
+            // 条目已丢弃：释放字段锁，仍保留已弹卡记录以拦截迟到的重复采集
             OverlayFieldGuards.clear(dedupKey)
-            OverlayPromptLog.clear(dedupKey)
             if (dedupKey.isNotBlank()) AppLog.d("pending", "pending removed key=$dedupKey")
             cancelCaptureNotification(pendingNotifId(dedupKey))
             if (ConfirmCardWindow.showingPendingId == pendingId) {
@@ -774,7 +820,7 @@ object CaptureCenter {
     }
 
     /**
-     * 尝试弹确认卡。返回 true = 卡片已展示（本次不再发通知）。
+     * 尝试弹确认卡。返回 true = 已成功展示或同一笔此前已经展示（本次不再发捕获兜底通知）。
      * [alreadyEntered] = true（悬浮窗入账的常态）：卡片是"已入账，可改/可删"；
      * false：待确认条目（金额待补 / 无可推测分类 / 三个开关全关的完全手动模式）。
      * 延迟 [OVERLAY_DELAY_MS] 再弹：支付保护层在支付页停留期会拦截悬浮窗（阶段三旧结论），
@@ -791,23 +837,26 @@ object CaptureCenter {
         forcePrompt: Boolean = false,
         askMode: Boolean = false,
     ): Boolean {
-        // 预检只判"硬条件"（开关/权限/本应用前台/屏幕），不看前台匹配：支付完成瞬间的前台窗口
-        // 可能还是支付保护/安全键盘等系统弹层，等 3 秒后再看用户到底在哪（实测：预检查前台匹配会把卡拒掉）
+        // 预检只判硬条件；同一笔如果已弹过，则不再执行延迟后的新建窗口。
+        if (OverlayPromptLog.wasShown(dedupKey)) return true
         if (!overlayConditionsOk(pending.sourcePackage, requireForegroundMatch = false, forcePrompt = forcePrompt)) return false
         delay(if (askMode) RED_PACKET_PROMPT_DELAY_MS else OVERLAY_DELAY_MS)
+
+        // 第一轮延迟期间另一捕获通道可能已经展示/关闭了这笔卡。
+        if (OverlayPromptLog.wasShown(dedupKey)) return true
         if (!overlayConditionsOk(pending.sourcePackage, requireForegroundMatch = true, forcePrompt = forcePrompt)) return false
         // 延迟期间条目可能已被确认/丢弃/被同笔富化改写（dedupKey 变化即视为已处理）
         val fresh = pendingDao.getById(pending.id)
         if (fresh == null || fresh.dedupKey != dedupKey) {
             lastOverlayDecision = "等待期间条目已处理"
-            return false
+            return OverlayPromptLog.wasShown(dedupKey)
         }
         val categories = categoryDao.getAll()
         val accounts = accountDao.getAll()
         val learned = merchantRuleDao.getAll()
         val shown = showCardOnMain(
             fresh, categories, accounts, learned, alreadyEntered, askMode,
-            isRefund, sourceLabel, counterparty, dedupKey,
+            isRefund, sourceLabel, counterparty, dedupKey, forcePrompt,
         )
         lastOverlayDecision = if (shown) "已弹出" else "系统拦截了悬浮窗（支付保护等）"
         AppLog.i("Overlay", if (shown) "confirm card shown for #${pending.id}" else "confirm card unavailable, fallback to notification")
@@ -817,7 +866,7 @@ object CaptureCenter {
     /**
      * 富化后补一次"卡片优先"提醒：同笔被后续通道捕获（页面合并/跨通道归并）时，
      * 若卡片没在展示就重新判定一次——首次尝试可能因当时的系统弹层/支付保护被拒，
-     * 而此刻用户往往已回到结果页。卡片成功则撤销早先的横幅通知（同一笔不重复打扰）。
+     * 而此刻用户往往已回到结果页。只有真正新弹出时才在主线程撤销旧兜底通知。
      *
      * **同一笔只打扰一次**（用户口径 2026-10-27）：这条条目曾经成功弹过卡片（[OverlayPromptLog]），
      * 后续富化就只静默补信息、不再新弹。否则用户在电商结果页会看到"第二张卡"，
@@ -841,11 +890,8 @@ object CaptureCenter {
             counterparty = pending.counterparty,
             dedupKey = pending.dedupKey,
         )
-        if (shown) {
-            cancelCaptureNotification(
-                if (alreadyEntered) entryNotifId(pending.dedupKey) else pendingNotifId(pending.dedupKey),
-            )
-        }
+        // 不在异步补弹协程里撤销通知：用户可能已点“保存”，新入账通知不能被迟到任务删掉。
+        // 首次实际 addView 成功时的旧通知清理由 showCardOnMain 在主线程完成。
     }
 
     /** WindowManager 必须在主线程操作；DAO 数据已在 IO 侧取好 */
@@ -860,8 +906,23 @@ object CaptureCenter {
         sourceLabel: String,
         counterparty: String,
         dedupKey: String,
+        forcePrompt: Boolean,
     ): Boolean = suspendCancellableCoroutine { cont ->
         mainHandler.post {
+            // 不能让已经取消的协程，在用户离开支付页后继续创建窗口。
+            if (!cont.isActive) return@post
+            // 这道检查与真正的 addView 在同一个主线程回调里，不存在检查后又被另一任务抢先展示的竞态。
+            if (OverlayPromptLog.wasShown(dedupKey)) {
+                cont.resume(true)
+                return@post
+            }
+            if (!overlayConditionsOk(
+                    pending.sourcePackage, requireForegroundMatch = true, forcePrompt = forcePrompt,
+                )
+            ) {
+                cont.resume(false)
+                return@post
+            }
             val shown = ConfirmCardWindow.showConfirm(
                 pending = pending,
                 categories = categories,
@@ -906,6 +967,12 @@ object CaptureCenter {
                             }
                         } else {
                             AppLog.i("Overlay", "card dismissed -> entry kept #${pending.id} (edited=${snapshot.edited})")
+                            // 已入账卡的关闭/超时按原规则保留账单：若开启入账通知，现在才提醒。
+                            // 数据库中的条目可能在展示期间被页面富化，因此优先取最新值。
+                            scope.launch {
+                                val latest = pendingDao.getById(pending.id) ?: pending
+                                notifyEntryAfterOverlay(latest, latest.amountCents, latest.counterparty)
+                            }
                         }
                     } else if (askMode) {
                         // 红包询问卡：关闭/超时都只收起卡片，绝不入账；条目继续留在待确认列表。
@@ -926,6 +993,14 @@ object CaptureCenter {
                     }
                 },
             )
+            // 仅实际弹出新卡时，撤销以前的待确认/已入账兜底通知。
+            // 此操作与 addView 同在主线程，先于用户点“保存”后的最终入账通知。
+            if (shown && ConfirmCardWindow.showingPendingId == pending.id) {
+                cancelCaptureNotification(
+                    if (alreadyEntered) entryNotifId(pending.dedupKey)
+                    else pendingNotifId(pending.dedupKey),
+                )
+            }
             if (cont.isActive) cont.resume(shown)
         }
     }
@@ -955,14 +1030,21 @@ object CaptureCenter {
         }
         // 用户改过的字段：后续页面/银行侧富化跳过（未改过的字段照旧自动富化）
         OverlayFieldGuards.mark(pending.dedupKey, editedFields)
+        // 不再把旧通知直接撤销后无声结束：保存成功才发最终的入账通知。
         cancelCaptureNotification(entryNotifId(pending.dedupKey))
+        notifyEntryAfterOverlay(pending, amountCents, counterparty)
         toast("已更新")
         if (withStrip) {
             mainHandler.post {
                 ConfirmCardWindow.showSaved(pending.type, amountCents) {
                     scope.launch {
-                        PendingActions.undoEntered(db, txDao, pendingDao, pending.dedupKey)
-                        toast("已撤销")
+                        val removed = PendingActions.undoEntered(db, txDao, pendingDao, pending.dedupKey)
+                        if (removed) {
+                            cancelCaptureNotification(entryNotifId(pending.dedupKey))
+                            toast("已撤销")
+                        } else {
+                            toast("这笔已被处理")
+                        }
                     }
                 }
             }
@@ -974,7 +1056,6 @@ object CaptureCenter {
         val removed = PendingActions.undoEntered(db, txDao, pendingDao, pending.dedupKey)
         pendingDao.deleteById(pending.id)
         OverlayFieldGuards.clear(pending.dedupKey)
-        OverlayPromptLog.clear(pending.dedupKey)
         cancelCaptureNotification(entryNotifId(pending.dedupKey))
         toast(if (removed) "已忽略，这笔未记账" else "这笔已被撤销")
         AppLog.i("Overlay", "ignored (entry deleted=$removed) #${pending.id} key=${pending.dedupKey}")
@@ -998,20 +1079,37 @@ object CaptureCenter {
             toast("入账失败：${e.message ?: "未知错误"}")
             return
         }
-        // 条目已入账（待确认条目被删除），登记簿里的字段锁一并清理
+        // 入账成功后清理字段锁，但保留“已展示”标记以拦截稍晚到达的页面/银行消息。
         OverlayFieldGuards.clear(pending.dedupKey)
-        OverlayPromptLog.clear(pending.dedupKey)
         cancelCaptureNotification(pendingNotifId(pending.dedupKey))
+        if (txId == null) {
+            toast("这笔已记过")
+            return // 数据库冲突或双通道重复，不发送第二条入账通知
+        }
         val kindType = pending.type
+        postEntryNotification(
+            txId = txId,
+            type = pending.type,
+            isRefund = pending.refundMark == RefundMark.REFUND_INCOME,
+            amountCents = amountCents,
+            counterparty = counterparty,
+            sourceLabel = NotificationRules.sourceLabelOrRule(pending.sourcePackage, pending.ruleName),
+            dedupKey = pending.dedupKey,
+        )
         toast("已记入")
-        if (txId == null) return // 已入过账（重复通知/双通道竞态）
         mainHandler.post {
             ConfirmCardWindow.showSaved(kindType, amountCents) {
                 scope.launch {
                     runCatching { txDao.deleteById(txId) }
-                        .onSuccess { AppLog.i("Overlay", "undo confirmed entry tx=#$txId") }
-                        .onFailure { AppLog.w("Overlay", "undo failed", it) }
-                    toast("已撤销")
+                        .onSuccess {
+                            cancelCaptureNotification(entryNotifId(pending.dedupKey))
+                            AppLog.i("Overlay", "undo confirmed entry tx=#$txId")
+                            toast("已撤销")
+                        }
+                        .onFailure {
+                            AppLog.w("Overlay", "undo failed", it)
+                            toast("撤销失败")
+                        }
                 }
             }
         }
@@ -2600,7 +2698,10 @@ object CaptureCenter {
         // 微信红包领取页：不走自动入账/融合，落 ASK 待确认并弹悬浮卡让用户决定。
         // 放在融合与入账之前，确保自动入账开关开着也不会把红包猜成账。
         if (candidate.requiresUserConfirmation) {
-            queueUserConfirmation(candidate, packageName, rawId, snapshotText, capturedAt)
+            queueUserConfirmation(
+                candidate, packageName, rawId, snapshotText,
+                capturedAt, flow.flowInstanceId, snapshot.fingerprint,
+            )
             return
         }
 
@@ -2871,10 +2972,20 @@ object CaptureCenter {
         rawId: Long,
         snapshotText: String,
         capturedAt: Long,
+        pageFlowId: String,
+        pageFingerprint: String,
     ) {
-        // 每次询问用独立身份：同一分钟、同额的两个红包不会撞去重键，也不会与页面流程互相认领。
-        val promptIdentity = "r:" + java.util.UUID.randomUUID().toString()
-        val dedupKey = dedupKeyWithIdentity(candidate.dedupKey, promptIdentity)
+        // 同一流程中同一红包封面的多次采样复用身份；新的红包封面仍保有不同指纹。
+        // 不再每次都生成 UUID，否则数据库唯一索引根本拦不住重复询问卡。
+        val promptIdentity = "r:$pageFlowId:${stableDigest(pageFingerprint)}"
+        // ASK 是人工决策且不入融合池：不使用随捕获分钟变化的候选 baseKey。
+        // 只要仍是同一红包封面，跨分钟重采样也能稳定命中唯一索引。
+        val dedupKey = "ASK|$packageName|$promptIdentity"
+        if (OverlayPromptLog.wasShown(dedupKey) || pendingDao.countByDedupKey(dedupKey) > 0) {
+            captureDao.updateMatch(rawId, candidate.ruleName, true)
+            AppLog.d("Page", "skip duplicate red packet confirmation key=$dedupKey")
+            return
+        }
         val pendingId = pendingDao.insert(
             PendingTransactionEntity(
                 type = candidate.type,

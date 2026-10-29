@@ -42,7 +42,7 @@ internal object OverlayPromptLog {
     @Synchronized
     fun wasShown(dedupKey: String): Boolean = dedupKey.isNotBlank() && dedupKey in shown
 
-    /** 条目被忽略/撤销/确认消失后清理，避免去重键复用时该弹却不弹 */
+    /** 显式清理单键（兼容旧调用/测试）；普通确认或忽略不应调用，否则迟到的采集会重复弹卡。 */
     @Synchronized
     fun clear(dedupKey: String) {
         if (dedupKey.isNotBlank()) shown.remove(dedupKey)

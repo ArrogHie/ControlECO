@@ -49,7 +49,11 @@ internal object ConfirmCardWindow {
     private var savedDismiss: Runnable? = null
     private var dismissCallback: ((DismissSnapshot) -> Unit)? = null
 
+    /** 单张卡片只允许一次保存/忽略/关闭决定，防止重复点击和超时回调并发写账。 */
+    private var cardDecisionTaken = false
+
     /** 卡片当前展示的待确认条目 id（-1 = 未展示） */
+    @Volatile
     var showingPendingId: Long = -1L
         private set
 
@@ -89,8 +93,24 @@ internal object ConfirmCardWindow {
         onDismiss: (DismissSnapshot) -> Unit,
     ): Boolean {
         if (!this::appContext.isInitialized) return false
-        removeConfirmWindow() // 重入时先清旧窗口（新的一笔直接替换展示）
 
+        // 最终展示检查与 addView 都在主线程：两个延迟任务不能同时通过这道闸门。
+        // 样例卡 id 为 -1，不参与实际账单的去重。
+        if (pending.id > 0L &&
+            (showingPendingId == pending.id ||
+                com.controleco.app.capture.OverlayPromptLog.wasShown(pending.dedupKey))
+        ) {
+            AppLog.d(TAG, "skip duplicate confirm card #${pending.id}")
+            return true // 这笔已经提醒过，调用方不再发送捕获阶段的兜底通知
+        }
+
+        // 另一笔卡片还在让用户编辑：禁止直接移除它；新交易由通知兜底。
+        if (confirmView != null) {
+            AppLog.i(TAG, "card occupied by #$showingPendingId; fallback #${pending.id}")
+            return false
+        }
+
+        cardDecisionTaken = false
         state.bind(pending, categories, accounts, learnedRules)
 
         val wm = appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -101,9 +121,17 @@ internal object ConfirmCardWindow {
                 alreadyEntered = alreadyEntered,
                 askMode = askMode,
                 onConfirm = { amountCents, categoryId, accountId, counterparty, note, editedFields ->
-                    onConfirm(amountCents, categoryId, accountId, counterparty, note, editedFields)
+                    if (!cardDecisionTaken) {
+                        cardDecisionTaken = true
+                        onConfirm(amountCents, categoryId, accountId, counterparty, note, editedFields)
+                    }
                 },
-                onIgnore = onIgnore,
+                onIgnore = {
+                    if (!cardDecisionTaken) {
+                        cardDecisionTaken = true
+                        onIgnore()
+                    }
+                },
                 onDismiss = { handleDismiss() },
                 // P0：任何触摸/拖动/字段编辑都重置 60s 自动收起计时，避免编辑中途被收起
                 onUserActivity = { noteUserActivity() },
@@ -129,8 +157,10 @@ internal object ConfirmCardWindow {
             softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         }
 
+        var viewAdded = false
         return try {
             wm.addView(view, params)
+            viewAdded = true
             host.attach()
             confirmView = view
             confirmHost = host
@@ -144,6 +174,16 @@ internal object ConfirmCardWindow {
         } catch (e: Exception) {
             // 无悬浮窗权限 / 被支付保护层拦截：调用方回落通知（Toast 可见而卡片不可见 = 被拦截的铁证）
             AppLog.w(TAG, "confirm card addView failed, fallback to notification", e)
+            if (viewAdded) {
+                runCatching { wm.removeViewImmediate(view) }
+                    .onFailure { AppLog.w(TAG, "cleanup failed confirm view", it) }
+            }
+            if (confirmView === view) {
+                confirmView = null
+                confirmHost = null
+                showingPendingId = -1L
+                dismissCallback = null
+            }
             runCatching { host.destroy() }
             false
         }
@@ -239,7 +279,9 @@ internal object ConfirmCardWindow {
      * 窗口先移除再回调（回调可能要弹「已记入」细条）。
      */
     private fun handleDismiss() {
+        if (cardDecisionTaken) return
         val cb = dismissCallback ?: return
+        cardDecisionTaken = true
         val snapshot = DismissSnapshot(
             amountCents = state.amountCents ?: 0L,
             categoryId = state.categoryId,

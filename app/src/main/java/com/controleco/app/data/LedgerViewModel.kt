@@ -1278,9 +1278,8 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun discardPending(id: Long) {
         viewModelScope.launch(Dispatchers.IO) {
-            // 条目消失 → 一并清掉"已弹过卡"与"字段锁"登记，避免去重键复用时该弹却不弹
+            // 删除待确认条目只释放字段锁；保留已弹卡记录，阻止迟到的采集再次打扰
             pendingDao.getById(id)?.let {
-                com.controleco.app.capture.OverlayPromptLog.clear(it.dedupKey)
                 com.controleco.app.capture.OverlayFieldGuards.clear(it.dedupKey)
             }
             PendingActions.discard(pendingDao, id)
@@ -1324,10 +1323,13 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         viewModelScope.launch(Dispatchers.IO) {
-            PendingActions.confirm(db, txDao, pendingDao, merchantRuleDao, item, categoryId, accountId, counterparty)
-            // 条目已入账（行被删除）→ 清理登记
-            com.controleco.app.capture.OverlayPromptLog.clear(item.dedupKey)
+            val txId = PendingActions.confirm(db, txDao, pendingDao, merchantRuleDao, item, categoryId, accountId, counterparty)
+            // 条目确认后只释放字段锁；已弹卡标记用于拦截后到的重复事件。
             com.controleco.app.capture.OverlayFieldGuards.clear(item.dedupKey)
+            if (txId != null) {
+                // 先弹了悬浮卡、稍后在待确认列表里按“计入”的情况也发送最终入账通知。
+                CaptureCenter.notifyConfirmedFromPendingList(item.copy(counterparty = counterparty), txId)
+            }
         }
     }
 
@@ -1375,9 +1377,8 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                 items.forEach { pendingDao.deleteById(it.id) }
                 ids.count { it != -1L }
             }
-            // 条目已入账（行被删除）→ 清理"已弹过卡"与"字段锁"登记
+            // 批量入账只释放字段锁，已弹卡记录继续拦截后到的重复采集
             items.forEach {
-                com.controleco.app.capture.OverlayPromptLog.clear(it.dedupKey)
                 com.controleco.app.capture.OverlayFieldGuards.clear(it.dedupKey)
             }
             AppLog.i("pending", "confirmAll: ${items.size} items, inserted=$inserted")
