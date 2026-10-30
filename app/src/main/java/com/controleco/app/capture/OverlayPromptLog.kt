@@ -3,7 +3,7 @@ package com.controleco.app.capture
 import com.controleco.app.util.AppLog
 
 /**
- * "这条条目已经给用户弹过悬浮确认卡"的登记簿（纯内存，按条目去重键索引）。
+ * "这笔已经给用户弹过悬浮确认卡"的登记簿（纯内存，按**逻辑交易**索引）。
  *
  * 为什么需要它（用户口径 2026-10-27）：**同一笔只在首次捕获时打扰一次**。
  * 用户在卡片上确认/关闭后，同一笔往往还会被另一条通道再抓一次（微信付款 → 返回电商结果页），
@@ -15,7 +15,12 @@ import com.controleco.app.util.AppLog
  * - 成功展示 → 登记 → 后续富化只刷新正在显示的卡片（`refreshCardIfShowing`），**不再新弹**；
  * - 没成功展示 → 未登记 → 富化时仍允许补试一次（`retryCardIfNoCard`）。
  *
- * 用去重键而不是自增 id 作索引：条目被删后自增 id 可能被复用，会让本该补弹的条目被误判成"已弹过"。
+ * **键口径（2026-10-30 修正）**：所有读写都按 [LogicalTransactions] 的等价关系判断，
+ * 而不是字面比较去重键。同一笔真实支付从不同通道到达时会得到不同的去重键
+ * （`@n:` 通知 / `@p:` 页面流程 / `@b:` 银行事件），只按原始去重键索引就会把
+ * "同一笔的第二个通道"看成"从没弹过"——这正是重复弹卡的根因。
+ * 归一到逻辑交易后，"一次真实支付最多打扰一次"才成立。
+ *
  * 刻意不落库：与 [OverlayFieldGuards] 同一种取舍，进程重启后失效
  * （代价：重启后同一笔可能被弹第二次，用户已知并接受）。容量上限 [MAX_ENTRIES]，只留最近一批。
  */
@@ -29,27 +34,43 @@ internal object OverlayPromptLog {
     @Synchronized
     fun markShown(dedupKey: String) {
         if (dedupKey.isBlank()) return
-        shown.add(dedupKey)
+        val key = LogicalTransactions.canonical(dedupKey)
+        shown.add(key)
         while (shown.size > MAX_ENTRIES) {
             val it = shown.iterator()
             if (!it.hasNext()) break
             it.next()
             it.remove()
         }
-        AppLog.d("Overlay", "card already shown once key=$dedupKey")
+        AppLog.d("Overlay", "card already shown once key=$key")
     }
 
+    /**
+     * 是否已经为**同一笔**成功展示过卡片。
+     *
+     * 判据是"登记过的键里存在与本键同一逻辑交易的键"（[LogicalTransactions.sameLogical]）：
+     * 别名可能晚于登记建立（页面先弹卡、银行侧后到才建别名），字面比较会漏判。
+     */
     @Synchronized
-    fun wasShown(dedupKey: String): Boolean = dedupKey.isNotBlank() && dedupKey in shown
+    fun wasShown(dedupKey: String): Boolean {
+        if (dedupKey.isBlank()) return false
+        if (LogicalTransactions.canonical(dedupKey) in shown) return true
+        return shown.any { LogicalTransactions.sameLogical(it, dedupKey) }
+    }
 
-    /** 显式清理单键（兼容旧调用/测试）；普通确认或忽略不应调用，否则迟到的采集会重复弹卡。 */
+    /** 显式清理单键（兼容旧调用/测试）：同一逻辑交易的所有登记一并移除 */
     @Synchronized
     fun clear(dedupKey: String) {
-        if (dedupKey.isNotBlank()) shown.remove(dedupKey)
+        if (dedupKey.isBlank()) return
+        shown.remove(LogicalTransactions.canonical(dedupKey))
+        shown.removeAll { LogicalTransactions.sameLogical(it, dedupKey) }
     }
 
     /** 仅测试用 */
     internal fun clearAll() {
         synchronized(this) { shown.clear() }
     }
+
+    /** 仅测试用：登记条目数 */
+    internal fun size(): Int = synchronized(this) { shown.size }
 }

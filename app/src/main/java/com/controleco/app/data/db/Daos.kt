@@ -193,21 +193,29 @@ interface TransactionDao {
     @Query("UPDATE transactions SET flowId = :flowId WHERE externalId = :externalId AND flowId = ''")
     suspend fun updateFlowIdByExternalId(externalId: String, flowId: String)
 
-    /** 悬浮卡编辑同步：金额/分类/账户/商户/备注回写已入账的交易（「忽略」与「撤销」走删除） */
-    @Query(
-        """UPDATE transactions
-           SET amountCents = :amountCents, categoryId = :categoryId,
-               accountId = :accountId, counterparty = :counterparty, note = :note
-           WHERE id = :id"""
-    )
-    suspend fun updateEnteredFields(
-        id: Long,
-        amountCents: Long,
-        categoryId: Long,
-        accountId: Long,
-        counterparty: String,
-        note: String,
-    )
+    /**
+     * 悬浮卡编辑同步：**逐字段**回写已入账的交易（「忽略」与「撤销」走删除）。
+     *
+     * 为什么拆成四个单列更新：用户只改了备注时，卡片快照里的金额/商户可能比数据库旧
+     * （卡片打开期间页面/银行通道又富化了一轮）。整行 UPDATE 会把用户没碰过的字段
+     * 用旧快照写回去，等于用一次编辑抹掉一次富化。只写用户真正改过的列，
+     * 其余字段由富化通道继续维护（见 docs/自动记账捕获机制.md §3.4）。
+     */
+    @Query("UPDATE transactions SET amountCents = :amountCents WHERE id = :id")
+    suspend fun updateAmount(id: Long, amountCents: Long)
+
+    @Query("UPDATE transactions SET counterparty = :counterparty WHERE id = :id")
+    suspend fun updateCounterparty(id: Long, counterparty: String)
+
+    @Query("UPDATE transactions SET note = :note WHERE id = :id")
+    suspend fun updateNote(id: Long, note: String)
+
+    /**
+     * 分类与账户一起写：待确认条目表里没有这两列（只有交易表有），
+     * 卡片上的分类/账户始终是当前最新值，写回同值是无害的幂等操作。
+     */
+    @Query("UPDATE transactions SET categoryId = :categoryId, accountId = :accountId WHERE id = :id")
+    suspend fun updateCategoryAndAccount(id: Long, categoryId: Long, accountId: Long)
 
     /** 登记退款的候选：近 60 天还没标「已退款」的支出（供"无金额退款通知→选被退款的账单"使用） */
     @Query(

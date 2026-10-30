@@ -59,6 +59,106 @@ internal data class RelatedPending(
 )
 
 /**
+ * 身份是否"可核对且相同"：仅当既有条目带有**同一种**身份（通知实例 / 银行事件 / 页面流程）
+ * 且两者相等时返回 true。
+ *
+ * 用途：决定"重复捕获"能用多宽的窗口。可核对的身份相等 = 同一条通知/同一次支付流程的重复观察，
+ * 窗口可以放宽到 [AUTO_ENTRY_DEDUP_WINDOW_MS]；身份缺一侧（跨通道：既有是通知、本条是页面流程）
+ * 就无法核对，只能用两条通道实际间隔的窄窗口 [SAME_ORDER_WINDOW_MS]——
+ * 否则"窗口内同额"就会变成"窗口内同额即同笔"，把两笔真实交易并掉（丢记录）。
+ */
+internal fun sameIdentityKind(existing: PendingTransactionEntity, identity: String?): Boolean {
+    if (identity.isNullOrEmpty()) return false
+    val existingValue = when {
+        identity.startsWith(NOTIFICATION_ID_PREFIX) -> entryNotificationInstanceId(existing)
+        identity.startsWith(BANK_ID_PREFIX) -> entryBankInstanceId(existing)
+        // 页面流程与旧版本短标识同属"流程身份"
+        else -> entryFlowId(existing)
+    }
+    return existingValue.isNotEmpty() && existingValue == identity
+}
+
+/**
+ * 重复预检的命中结果：**同一笔**在合并池里已经有一条（待确认或已入账）。
+ *
+ * 与 [pickRelatedPending] 的差别：这里不要求金额相等（调用方已经按本次金额筛过），
+ * 但要求**身份兼容**——同来源的另一笔同额真实交易带着不同的 `n:`/`p:`/`b:` 身份后缀，
+ * `flowCompatible` 会拒绝配对，因此不会被误判成重复（丢账）。
+ *
+ * 窗口是**分级**的（见 [sameIdentityKind]）：身份可核对且相同才用 [windowMs]（默认 60s），
+ * 身份缺一侧的跨通道情形收紧到 [SAME_ORDER_WINDOW_MS]。
+ */
+internal fun pickRecentSameEntry(
+    candidates: List<PendingTransactionEntity>,
+    sourcePackage: String,
+    type: TxType,
+    amountCents: Long,
+    now: Long,
+    windowMs: Long = AUTO_ENTRY_DEDUP_WINDOW_MS,
+    /** 本条候选的交易时间（页面账单详情页会带上原始交易时刻），见 [hasRecentSameEntry] */
+    txTime: Long? = null,
+    /** 本条候选的身份（`p:`/`n:`/`b:`）：为空时退回"只比来源+金额+时间"的旧口径 */
+    identity: String? = null,
+): PendingTransactionEntity? = candidates
+    .filter {
+        val window = if (sameIdentityKind(it, identity)) windowMs else minOf(windowMs, SAME_ORDER_WINDOW_MS)
+        sameCaptureFingerprint(it, sourcePackage, type, amountCents, now, window, txTime) &&
+            flowCompatible(it, identity, sourcePackage)
+    }
+    // 多条命中取最近的一条：同一笔的重复捕获总是紧挨着原条目
+    .minByOrNull { abs(now - it.createdAt) }
+
+/**
+ * 重复捕获并入既有条目时允许改动的字段（**金额与时间永不改动**）。
+ *
+ * 与页面合并（[mergePageInfo]）的差别：重复捕获的原话是"这条我早就处理过了"，
+ * 它带来的信息不比既有条目更权威，因此只补**空白**、只追加备注，
+ * 绝不覆盖既有值——尤其不能覆盖用户在悬浮卡里改过的字段（[guarded]）。
+ */
+internal data class DuplicateMerge(
+    val counterparty: String,
+    val note: String,
+    val paymentInstrument: String,
+    /** 是否真的产生了变化（没变化就不必写库，避免无意义的 Flow 刷新） */
+    val changed: Boolean,
+)
+
+internal fun mergeDuplicateCapture(
+    existing: PendingTransactionEntity,
+    incomingCounterparty: String,
+    incomingNote: String,
+    incomingInstrument: String,
+    /** 用户在悬浮卡里改过的字段（[OverlayFieldGuards] 登记）；空 = 全部按自动富化处理 */
+    guarded: Set<GuardedField> = emptySet(),
+): DuplicateMerge {
+    val legacyLock = existing.userEdited
+    val lockCounterparty = legacyLock || GuardedField.COUNTERPARTY in guarded
+    val lockNote = legacyLock || GuardedField.NOTE in guarded
+
+    val usableCounterparty = incomingCounterparty.takeIf {
+        it.isNotBlank() && !PageParseSupport.isAmountLikeNode(it)
+    }
+    val counterparty = when {
+        lockCounterparty || existing.counterparty.isNotBlank() -> existing.counterparty
+        else -> usableCounterparty ?: existing.counterparty
+    }
+    val note = if (lockNote || incomingNote.isBlank()) {
+        existing.note
+    } else {
+        combineNotes(existing.note, incomingNote)
+    }
+    val instrument = existing.paymentInstrument.ifBlank { incomingInstrument }
+    return DuplicateMerge(
+        counterparty = counterparty,
+        note = note,
+        paymentInstrument = instrument,
+        changed = counterparty != existing.counterparty ||
+            note != existing.note ||
+            instrument != existing.paymentInstrument,
+    )
+}
+
+/**
  * 在合并池（待确认 + 自动入账条目）里找同一笔：同包名同方向、捕获时刻在窗口内、**金额相同**，
  * 且流程/通知实例身份不冲突。金额不同一律不合并——"窗口内候选唯一"不能证明是同一笔。
  *

@@ -90,8 +90,17 @@ internal object PendingActions {
      * 已入账条目的编辑同步（悬浮卡"先入账、后修改"）：卡内当前值写回交易与 AUTO 条目，
      * 并学习商户归类（与 [confirm] 同一口径）。
      *
-     * **不再**给条目打整条 `userEdited`：用户只改了哪几个字段，由调用方交给
-     * [OverlayFieldGuards] 逐字段登记，后续富化只跳过这些字段（2026-10-27 用户口径）。
+     * **只写用户真正改过的字段**（[editedFields]）。整行回写的问题是：卡片打开期间页面/银行通道
+     * 可能又富化了一轮，而卡片快照是旧的——用户只改了备注，却用旧快照把金额/商户覆盖回去，
+     * 等于"一次编辑抹掉一次富化"。因此：
+     * - [GuardedField.AMOUNT] → 只写金额；
+     * - [GuardedField.COUNTERPARTY] → 只写商户；
+     * - [GuardedField.NOTE] → 只写备注；
+     * - 分类/账户总能写（待确认条目表里没有这两列，且卡片上的分类/账户始终是当前值）；
+     * - 没改过的字段一律不碰，交给富化通道继续维护。
+     *
+     * **不**给条目打整条 `userEdited`：用户改过哪几个字段由 [OverlayFieldGuards] 逐字段登记，
+     * 后续富化只跳过这些字段（2026-10-27 用户口径）。
      * 返回 false = 找不到该笔交易（可能已被撤销），调用方只需静默收场。
      */
     suspend fun updateEntered(
@@ -105,6 +114,7 @@ internal object PendingActions {
         counterparty: String,
         amountCents: Long,
         note: String = item.note,
+        editedFields: Set<GuardedField> = GuardedField.entries.toSet(),
     ): Boolean {
         val externalId = "NTF:${item.dedupKey}"
         val txId = txDao.findIdByExternalId(externalId) ?: return false
@@ -112,17 +122,33 @@ internal object PendingActions {
         // 用数据库里的最新备注/时间：卡片打开后页面可能又补了信息，用户只改了金额/商户，
         // 不能拿打开卡片时的旧快照把后到的富化结果覆盖回去
         val fresh = pendingDao.getById(item.id) ?: item
+        val editAmount = GuardedField.AMOUNT in editedFields
+        val editCounterparty = GuardedField.COUNTERPARTY in editedFields
+        val editNote = GuardedField.NOTE in editedFields
+        // 合并后的最终值：交易与 AUTO 条目必须一致（读者可能从任意一侧看这笔账）
+        val finalAmount = if (editAmount) amountCents else fresh.amountCents
+        val finalCounterparty = if (editCounterparty) counterpartyValue else fresh.counterparty
+        val finalNote = if (editNote) note else fresh.note
         db.withTransaction {
-            txDao.updateEnteredFields(txId, amountCents, categoryId, accountId, counterpartyValue, note)
+            // 逐字段写交易：没改过的列一律不碰
+            if (editAmount) txDao.updateAmount(txId, finalAmount)
+            if (editCounterparty) txDao.updateCounterparty(txId, finalCounterparty)
+            if (editNote) txDao.updateNote(txId, finalNote)
+            txDao.updateCategoryAndAccount(txId, categoryId, accountId)
             // AUTO 条目同步：页面/银行通道后续富化以它为准，不能留旧值
-            pendingDao.updateFromPage(
-                item.id, amountCents, fresh.timestamp, counterpartyValue, note, fresh.ruleName,
-            )
+            if (editAmount || editCounterparty || editNote) {
+                pendingDao.updateFromPage(
+                    item.id, finalAmount, fresh.timestamp, finalCounterparty, finalNote, fresh.ruleName,
+                )
+            }
         }
         merchantRuleDao?.let {
-            MerchantRules.learn(it, item.type, categoryId, accountId, counterpartyValue, item.note)
+            MerchantRules.learn(it, item.type, categoryId, accountId, finalCounterparty, finalNote)
         }
-        AppLog.i("pending", "updated entered tx=#$txId amount=$amountCents externalId=$externalId (user edited)")
+        AppLog.i(
+            "pending",
+            "updated entered tx=#$txId amount=$finalAmount externalId=$externalId edited=$editedFields",
+        )
         return true
     }
 

@@ -58,6 +58,29 @@ internal fun resolveNotificationTime(
     return capturedAt
 }
 
+/**
+ * "本次捕获的指纹与既有条目一致"：同来源 + 同方向 + 同金额，且
+ * 捕获时刻（[PendingTransactionEntity.createdAt]）与**交易时刻**（`timestamp`）任一落在窗口内。
+ *
+ * 只描述"看起来是同一条捕获"，**不含身份判定**——两笔真实同额交易也满足它。
+ * 调用方必须再叠一层身份判定（[pickRecentSameEntry] / [matchesFinishedCapture]），
+ * 否则 60 秒内的两笔 1.00 会被并成一笔（丢账）。
+ */
+internal fun sameCaptureFingerprint(
+    candidate: PendingTransactionEntity,
+    sourcePackage: String,
+    type: TxType,
+    amountCents: Long,
+    now: Long,
+    windowMs: Long,
+    /** 本条候选的交易时间（页面**账单详情页**会带上原始交易时刻），见 [hasRecentSameEntry] */
+    txTime: Long? = null,
+): Boolean = candidate.sourcePackage == sourcePackage &&
+    candidate.type == type &&
+    candidate.amountCents == amountCents &&
+    (abs(now - candidate.createdAt) <= windowMs ||
+        (txTime != null && txTime > 0 && abs(txTime - candidate.timestamp) <= windowMs))
+
 internal fun hasRecentSameEntry(
     candidates: List<PendingTransactionEntity>,
     sourcePackage: String,
@@ -72,9 +95,7 @@ internal fun hasRecentSameEntry(
      */
     txTime: Long? = null,
 ): Boolean = candidates.any {
-    it.sourcePackage == sourcePackage && it.type == type && it.amountCents == amountCents &&
-        (abs(now - it.createdAt) <= windowMs ||
-            (txTime != null && txTime > 0 && abs(txTime - it.timestamp) <= windowMs))
+    sameCaptureFingerprint(it, sourcePackage, type, amountCents, now, windowMs, txTime)
 }
 
 /**

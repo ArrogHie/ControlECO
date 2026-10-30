@@ -329,7 +329,7 @@ object CaptureCenter {
      * - 入账提醒：卡片未弹时通知兜底；卡片已弹则等用户保存/保留/确认成功后发送通知。
      */
     private suspend fun announceEntry(
-        entered: Entered,
+        entered: EntryResult.Entered,
         type: TxType,
         isRefund: Boolean,
         amountCents: Long,
@@ -601,12 +601,15 @@ object CaptureCenter {
     fun undoEntryFromNotification(txId: Long, dedupKey: String) {
         if (!initialized) return
         scope.launch {
+            // 终态登记必须在删除前取快照：撤销之后迟到的重复捕获不许再入队/弹卡
+            val snapshot = pendingDao.findByDedupKey(dedupKey)
             runCatching { if (txId > 0) txDao.deleteById(txId) }
                 .onFailure { AppLog.w("Ntf", "undo entry delete failed", it) }
             if (dedupKey.isNotBlank()) {
                 pendingDao.deleteByDedupKey(dedupKey)
                 OverlayFieldGuards.clear(dedupKey)
-                if (dedupKey.isNotBlank()) AppLog.d("pending", "entry removed key=$dedupKey")
+                snapshot?.let { LogicalTransactions.markResolved(it, CaptureResolution.REJECTED) }
+                AppLog.d("pending", "entry removed key=$dedupKey")
                 cancelCaptureNotification(entryNotifId(dedupKey))
                 if (ConfirmCardWindow.showingPendingId > 0 &&
                     ConfirmCardWindow.showingPendingId == pendingIdOfDedup(dedupKey)
@@ -626,6 +629,7 @@ object CaptureCenter {
     fun ignoreFromNotification(pendingId: Long, dedupKey: String) {
         if (!initialized) return
         scope.launch {
+            val snapshot = if (pendingId > 0) pendingDao.getById(pendingId) else pendingDao.findByDedupKey(dedupKey)
             if (pendingId > 0) {
                 PendingActions.discard(pendingDao, pendingId)
             } else {
@@ -633,6 +637,8 @@ object CaptureCenter {
             }
             // 条目已丢弃：释放字段锁，仍保留已弹卡记录以拦截迟到的重复采集
             OverlayFieldGuards.clear(dedupKey)
+            // 终态登记：这笔是用户不要的，迟到的捕获只留溯源
+            snapshot?.let { LogicalTransactions.markResolved(it, CaptureResolution.REJECTED) }
             if (dedupKey.isNotBlank()) AppLog.d("pending", "pending removed key=$dedupKey")
             cancelCaptureNotification(pendingNotifId(dedupKey))
             if (ConfirmCardWindow.showingPendingId == pendingId) {
@@ -1022,6 +1028,7 @@ object CaptureCenter {
         val ok = runCatching {
             PendingActions.updateEntered(
                 db, txDao, pendingDao, merchantRuleDao, pending, categoryId, accountId, counterparty, amountCents, note,
+                editedFields = editedFields,
             )
         }.onFailure { AppLog.e("Overlay", "sync entered edits failed", it) }.getOrDefault(false)
         if (!ok) {
@@ -1056,6 +1063,8 @@ object CaptureCenter {
         val removed = PendingActions.undoEntered(db, txDao, pendingDao, pending.dedupKey)
         pendingDao.deleteById(pending.id)
         OverlayFieldGuards.clear(pending.dedupKey)
+        // 终态登记：这笔是用户不要的，迟到的重复捕获只留溯源，不再入队/弹卡
+        LogicalTransactions.markResolved(pending, CaptureResolution.REJECTED)
         cancelCaptureNotification(entryNotifId(pending.dedupKey))
         toast(if (removed) "已忽略，这笔未记账" else "这笔已被撤销")
         AppLog.i("Overlay", "ignored (entry deleted=$removed) #${pending.id} key=${pending.dedupKey}")
@@ -1081,6 +1090,8 @@ object CaptureCenter {
         }
         // 入账成功后清理字段锁，但保留“已展示”标记以拦截稍晚到达的页面/银行消息。
         OverlayFieldGuards.clear(pending.dedupKey)
+        // 终态登记：这笔已有结论（已入账），迟到的重复捕获并入/溯源，不再弹卡
+        LogicalTransactions.markResolved(pending, CaptureResolution.HANDLED)
         cancelCaptureNotification(pendingNotifId(pending.dedupKey))
         if (txId == null) {
             toast("这笔已记过")
@@ -1117,8 +1128,11 @@ object CaptureCenter {
 
     /** 卡片「忽略」：丢弃待确认条目（误报纠错，一条点击） */
     private suspend fun ignoreFromOverlay(pendingId: Long, dedupKey: String) {
+        // 先取快照再删：终态登记需要金额/时间/反方向来认出迟到的重复捕获
+        val snapshot = pendingDao.getById(pendingId)
         PendingActions.discard(pendingDao, pendingId)
         OverlayFieldGuards.clear(dedupKey)
+        snapshot?.let { LogicalTransactions.markResolved(it, CaptureResolution.REJECTED) }
         if (dedupKey.isNotBlank()) AppLog.d("Overlay", "pending ignored key=$dedupKey")
         cancelCaptureNotification(pendingNotifId(dedupKey))
         AppLog.i("Overlay", "ignored from card #$pendingId")
@@ -1589,7 +1603,9 @@ object CaptureCenter {
                 )
                 if (related != null) {
                     AppLog.d("Ntf", "skip duplicate ${dedupKey} (page side won, related #${related.pending.id})")
-                    mergeNotificationIntoExisting(related.pending, parsed, notificationIdentity, sourceAt)
+                    mergeNotificationIntoExisting(
+                        related.pending, parsed, notificationIdentity, sourceAt, incomingDedupKey = dedupKey,
+                    )
                     traceCapture(
                         channel = CaptureChannel.NOTIFICATION,
                         packageName = packageName,
@@ -1686,37 +1702,103 @@ object CaptureCenter {
                         ruleName = parsed.ruleName,
                         isRefund = parsed.isRefund,
                         notificationInstanceId = notificationIdentity.orEmpty(),
+                        identity = notificationIdentity.orEmpty(),
                     )
-                    if (entered != null) {
-                        captureDao.updateMatch(rawId, parsed.ruleName, true)
-                        AppLog.i(
-                            "Ntf",
-                            "entered: ${parsed.ruleName} ${parsed.type} ${Money.formatYuan(parsed.amountCents)}" +
-                                (if (parsed.isRefund) " [退款]" else "") + " pkg=$packageName",
-                        )
-                        traceCapture(
-                            channel = CaptureChannel.NOTIFICATION,
-                            packageName = packageName,
-                            title = title, text = text, bigText = bigText,
-                            capturedAt = sourceAt,
-                            matchedRule = parsed.ruleName,
-                            type = parsed.type,
-                            amountCents = parsed.amountCents,
-                            note = parsed.note,
-                            dedupKey = dedupKey,
-                            outcome = TraceOutcome.AUTO_ENTRY,
-                        )
-                        announceEntry(
-                            entered = entered,
-                            type = parsed.type,
-                            isRefund = parsed.isRefund,
-                            amountCents = parsed.amountCents,
-                            sourceLabel = NotificationRules.sourceLabel(packageName),
-                            counterparty = "",
-                            dedupKey = dedupKey,
-                        )
-                        return@launch
+                    when (entered) {
+                        is CaptureCenter.EntryResult.Entered -> {
+                            captureDao.updateMatch(rawId, parsed.ruleName, true)
+                            AppLog.i(
+                                "Ntf",
+                                "entered: ${parsed.ruleName} ${parsed.type} ${Money.formatYuan(parsed.amountCents)}" +
+                                    (if (parsed.isRefund) " [退款]" else "") + " pkg=$packageName",
+                            )
+                            traceCapture(
+                                channel = CaptureChannel.NOTIFICATION,
+                                packageName = packageName,
+                                title = title, text = text, bigText = bigText,
+                                capturedAt = sourceAt,
+                                matchedRule = parsed.ruleName,
+                                type = parsed.type,
+                                amountCents = parsed.amountCents,
+                                note = parsed.note,
+                                dedupKey = dedupKey,
+                                outcome = TraceOutcome.AUTO_ENTRY,
+                            )
+                            announceEntry(
+                                entered = entered,
+                                type = parsed.type,
+                                isRefund = parsed.isRefund,
+                                amountCents = parsed.amountCents,
+                                sourceLabel = NotificationRules.sourceLabel(packageName),
+                                counterparty = "",
+                                dedupKey = dedupKey,
+                            )
+                            return@launch
+                        }
+                        // 同一笔的重复捕获：已静默并入既有条目，绝不新建、绝不弹卡
+                        is CaptureCenter.EntryResult.Merged -> {
+                            captureDao.updateMatch(rawId, parsed.ruleName + "·并入既有条目", true)
+                            traceCapture(
+                                channel = CaptureChannel.NOTIFICATION,
+                                packageName = packageName,
+                                title = title, text = text, bigText = bigText,
+                                capturedAt = sourceAt,
+                                matchedRule = parsed.ruleName,
+                                type = parsed.type,
+                                amountCents = parsed.amountCents,
+                                note = parsed.note,
+                                dedupKey = entered.pending.dedupKey,
+                                outcome = TraceOutcome.SKIPPED_DUPLICATE,
+                            )
+                            return@launch
+                        }
+                        // 这笔已有结论（已入账且条目已消失 / 用户已忽略或撤销）：只留溯源
+                        is CaptureCenter.EntryResult.Handled -> {
+                            captureDao.updateMatch(rawId, parsed.ruleName + "·同笔已处理", true)
+                            traceCapture(
+                                channel = CaptureChannel.NOTIFICATION,
+                                packageName = packageName,
+                                title = title, text = text, bigText = bigText,
+                                capturedAt = sourceAt,
+                                matchedRule = parsed.ruleName,
+                                type = parsed.type,
+                                amountCents = parsed.amountCents,
+                                note = parsed.note,
+                                dedupKey = entered.finished.dedupKey,
+                                outcome = TraceOutcome.SKIPPED_DUPLICATE,
+                            )
+                            return@launch
+                        }
+                        null -> Unit // 语料不足/写入失败：回落待确认队列（不丢单）
                     }
+                }
+                // 手动模式（三个入账开关全关）也要拦重复：同一笔已入队 → 静默并入；
+                // 已入账/已忽略 → 只留溯源。否则第二个通道会再插一条并弹第二张卡。
+                if (absorbedByExisting(
+                        sourcePackage = packageName,
+                        type = parsed.type,
+                        amountCents = parsed.amountCents,
+                        isRefund = parsed.isRefund,
+                        eventTime = sourceAt,
+                        identity = notificationIdentity.orEmpty(),
+                        dedupKey = dedupKey,
+                        counterparty = "",
+                        note = parsed.note,
+                    )
+                ) {
+                    traceCapture(
+                        channel = CaptureChannel.NOTIFICATION,
+                        packageName = packageName,
+                        title = title, text = text, bigText = bigText,
+                        capturedAt = sourceAt,
+                        matchedRule = parsed.ruleName,
+                        type = parsed.type,
+                        amountCents = parsed.amountCents,
+                        note = parsed.note,
+                        dedupKey = dedupKey,
+                        outcome = TraceOutcome.SKIPPED_DUPLICATE,
+                    )
+                    return@launch
                 }
                 val pendingId = pendingDao.insert(
                     PendingTransactionEntity(
@@ -1969,43 +2051,121 @@ object CaptureCenter {
                 source = TxSource.BANK,
                 bankName = ledger.bankName,
                 notificationInstanceId = bankIdentity,
+                identity = bankIdentity,
             )
-            if (entered != null) {
-                if (bankKey != null) bankClaims.claim(entered.pendingId, bankKey, bankChannel, sourceAt)
-                captureDao.updateMatch(rawId, ledger.ruleName, true)
-                AppLog.i(
-                    "Sms",
-                    "entered: ${ledger.ruleName} ${ledger.type} ${Money.formatYuan(ledger.amountCents)}" +
-                        (if (ledger.isRefund) " [退款]" else "") + " ${ledger.displayLabel}",
-                )
-                traceCapture(
-                    channel = channel,
-                    packageName = ledger.sourceKey,
-                    title = if (channel == CaptureChannel.SMS) "银行短信" else "银行推送",
-                    text = ledger.note,
-                    bigText = "",
-                    capturedAt = sourceAt,
-                    matchedRule = ledger.ruleName,
-                    type = ledger.type,
-                    amountCents = ledger.amountCents,
-                    counterparty = ledger.merchant,
-                    note = ledger.note,
-                    dedupKey = dedupKey,
-                    outcome = TraceOutcome.AUTO_ENTRY,
-                )
-                announceEntry(
-                    entered = entered,
-                    type = ledger.type,
-                    isRefund = ledger.isRefund,
-                    amountCents = ledger.amountCents,
-                    sourceLabel = ledger.displayLabel,
-                    counterparty = ledger.merchant,
-                    dedupKey = dedupKey,
-                )
-                return
+            when (entered) {
+                is CaptureCenter.EntryResult.Entered -> {
+                    if (bankKey != null) bankClaims.claim(entered.pendingId, bankKey, bankChannel, sourceAt)
+                    captureDao.updateMatch(rawId, ledger.ruleName, true)
+                    AppLog.i(
+                        "Sms",
+                        "entered: ${ledger.ruleName} ${ledger.type} ${Money.formatYuan(ledger.amountCents)}" +
+                            (if (ledger.isRefund) " [退款]" else "") + " ${ledger.displayLabel}",
+                    )
+                    traceCapture(
+                        channel = channel,
+                        packageName = ledger.sourceKey,
+                        title = if (channel == CaptureChannel.SMS) "银行短信" else "银行推送",
+                        text = ledger.note,
+                        bigText = "",
+                        capturedAt = sourceAt,
+                        matchedRule = ledger.ruleName,
+                        type = ledger.type,
+                        amountCents = ledger.amountCents,
+                        counterparty = ledger.merchant,
+                        note = ledger.note,
+                        dedupKey = dedupKey,
+                        outcome = TraceOutcome.AUTO_ENTRY,
+                    )
+                    announceEntry(
+                        entered = entered,
+                        type = ledger.type,
+                        isRefund = ledger.isRefund,
+                        amountCents = ledger.amountCents,
+                        sourceLabel = ledger.displayLabel,
+                        counterparty = ledger.merchant,
+                        dedupKey = dedupKey,
+                    )
+                    return
+                }
+                // 同一笔的重复捕获：静默并入既有条目，不再新建、不再弹卡。
+                // 刻意不 claim（bankClaims 是 1:1 通道配对，重复投递不该再占一个格位）
+                is EntryResult.Merged -> {
+                    captureDao.updateMatch(rawId, ledger.ruleName + "·并入既有条目", true)
+                    traceCapture(
+                        channel = channel,
+                        packageName = ledger.sourceKey,
+                        title = if (channel == CaptureChannel.SMS) "银行短信" else "银行推送",
+                        text = ledger.note,
+                        bigText = "",
+                        capturedAt = sourceAt,
+                        matchedRule = ledger.ruleName,
+                        type = ledger.type,
+                        amountCents = ledger.amountCents,
+                        counterparty = ledger.merchant,
+                        note = ledger.note,
+                        dedupKey = entered.pending.dedupKey,
+                        outcome = TraceOutcome.SKIPPED_DUPLICATE,
+                    )
+                    return
+                }
+                // 这笔已有结论（用户已忽略/撤销）：只留溯源
+                is CaptureCenter.EntryResult.Handled -> {
+                    captureDao.updateMatch(rawId, ledger.ruleName + "·同笔已处理", true)
+                    traceCapture(
+                        channel = channel,
+                        packageName = ledger.sourceKey,
+                        title = if (channel == CaptureChannel.SMS) "银行短信" else "银行推送",
+                        text = ledger.note,
+                        bigText = "",
+                        capturedAt = sourceAt,
+                        matchedRule = ledger.ruleName,
+                        type = ledger.type,
+                        amountCents = ledger.amountCents,
+                        counterparty = ledger.merchant,
+                        note = ledger.note,
+                        dedupKey = entered.finished.dedupKey,
+                        outcome = TraceOutcome.SKIPPED_DUPLICATE,
+                    )
+                    return
+                }
+                null -> Unit // 语料不足/写入失败：回落待确认队列（不丢单）
             }
         }
 
+        // 手动模式（三个入账开关全关）也要拦重复：同一笔已入队 → 静默并入；
+        // 已入账/已忽略 → 只留溯源。否则银行侧的第二条消息会再插一条并弹第二张卡。
+        if (absorbedByExisting(
+                sourcePackage = ledger.sourceKey,
+                type = ledger.type,
+                amountCents = ledger.amountCents,
+                isRefund = ledger.isRefund,
+                eventTime = sourceAt,
+                identity = bankIdentity,
+                dedupKey = dedupKey,
+                counterparty = ledger.merchant,
+                note = ledger.note,
+                instrument = ledger.accountLabel,
+            )
+        ) {
+            captureDao.updateMatch(rawId, ledger.ruleName + "·同笔已存在", true)
+            traceCapture(
+                channel = channel,
+                packageName = ledger.sourceKey,
+                title = if (channel == CaptureChannel.SMS) "银行短信" else "银行推送",
+                text = ledger.note,
+                bigText = "",
+                capturedAt = sourceAt,
+                matchedRule = ledger.ruleName,
+                type = ledger.type,
+                amountCents = ledger.amountCents,
+                counterparty = ledger.merchant,
+                note = ledger.note,
+                dedupKey = dedupKey,
+                outcome = TraceOutcome.SKIPPED_DUPLICATE,
+            )
+            return
+        }
         val bankPendingId = pendingDao.insert(
             PendingTransactionEntity(
                 type = ledger.type,
@@ -2087,7 +2247,7 @@ object CaptureCenter {
         )
         val mergeable = pendingDao.getMergeable().filter { flowCompatible(it, bankIdentity) }
         val pageCandidates = mergeable.filter { it.sourcePackage in NotificationRules.checkoutPackages }
-            .filter { CrossAppLinker.isSamePurchase(pageEvidenceOf(it), bankEvidence) }
+            .filter { CrossAppLinker.isSamePurchase(pendingEvidenceOf(it), bankEvidence) }
         if (pageCandidates.size == 1) return pageCandidates.single()
         if (pageCandidates.size > 1) {
             AppLog.w("Sms", "cross-app ambiguous (${pageCandidates.size} page entries), keep separate ${ledger.ruleName}")
@@ -2167,8 +2327,17 @@ object CaptureCenter {
         ledger: BankLedgerRules.BankLedger,
     ): CrossChannelDedup.LinkReason? {
         if (!CrossChannelDedup.isPayChannelSide(candidate.sourcePackage)) return null
-        val payText = listOf(candidate.paymentInstrument, candidate.counterparty, candidate.note, candidate.ruleName)
-            .filter { it.isNotBlank() }.joinToString(" ")
+        // 用户改过的商户/备注不作线索：拿"午饭"去证明"这笔用了招商银行"会造出假证据；
+        // 反过来，改过之后就一律不配对，会让同一笔记成两条——两种错都要避免，
+        // 所以只取系统写入且未被改动的字段。
+        val guards = OverlayFieldGuards.fieldsOf(candidate.dedupKey)
+        val lockText = candidate.userEdited
+        val payText = buildList {
+            add(candidate.paymentInstrument)
+            if (!lockText && GuardedField.COUNTERPARTY !in guards) add(candidate.counterparty)
+            if (!lockText && GuardedField.NOTE !in guards) add(candidate.note)
+            add(candidate.ruleName)
+        }.filter { it.isNotBlank() }.joinToString(" ")
         val bankText = listOf(ledger.note, ledger.merchant, ledger.ruleName)
             .filter { it.isNotBlank() }.joinToString(" ")
         return CrossChannelDedup.payBankLink(
@@ -2186,13 +2355,20 @@ object CaptureCenter {
      * **刻意不含 ruleName**：银行条目被页面回填后 ruleName 会改写成页面侧的（如「微信·支付成功页」），
      * 拿它当"银行侧点名了渠道"的证据就成了自己证明自己；银行名另走 [bankEntryName]。
      */
-    private fun bankEntryText(entry: PendingTransactionEntity): String =
-        listOf(entry.note, entry.counterparty, entry.paymentInstrument)
-            .filter { it.isNotBlank() }.joinToString(" ")
+    private fun bankEntryText(entry: PendingTransactionEntity): String {
+        // 用户改过的商户/备注不作银行线索（同 payEntryLinkReason 的口径）
+        val guards = OverlayFieldGuards.fieldsOf(entry.dedupKey)
+        val lockText = entry.userEdited
+        return buildList {
+            if (!lockText && GuardedField.NOTE !in guards) add(entry.note)
+            if (!lockText && GuardedField.COUNTERPARTY !in guards) add(entry.counterparty)
+            add(entry.paymentInstrument)
+        }.filter { it.isNotBlank() }.joinToString(" ")
+    }
 
     /** 既有银行侧条目的银行名：优先来源键/包名，其次规则名与正文里的签名 */
     private fun bankEntryName(entry: PendingTransactionEntity): String =
-        CrossAppLinker.bankNameOf(pageEvidenceOf(entry))
+        CrossAppLinker.bankNameOf(pendingEvidenceOf(entry))
             ?: BankLedgerRules.detectBankName(bankEntryText(entry))
             ?: ""
 
@@ -2290,6 +2466,8 @@ object CaptureCenter {
         ledger: BankLedgerRules.BankLedger,
         bankIdentity: String,
     ) {
+        // 逻辑交易别名：银行侧去重键 = 既有条目的同一笔（悬浮窗只弹一次 / 字段锁共用键）
+        LogicalTransactions.link(dedupKeyWithIdentity(ledger.dedupKey, bankIdentity), existing.dedupKey)
         val guards = OverlayFieldGuards.fieldsOf(existing.dedupKey)
         val lockNote = existing.userEdited || GuardedField.NOTE in guards
         val lockCounterparty = existing.userEdited || GuardedField.COUNTERPARTY in guards
@@ -2362,7 +2540,12 @@ object CaptureCenter {
         parsed: ParsedNotification,
         notificationIdentity: String?,
         notificationTime: Long,
+        /** 本条通知的去重键：登记为既有条目的别名（同一笔跨通道只算一笔） */
+        incomingDedupKey: String = "",
     ) {
+        if (incomingDedupKey.isNotBlank()) {
+            LogicalTransactions.link(incomingDedupKey, existing.dedupKey)
+        }
         val fixedTime = mergeNotificationInfo(existing, notificationTime)
         db.withTransaction {
             if (fixedTime != null) {
@@ -2420,14 +2603,14 @@ object CaptureCenter {
         val candidates = mergeable.filter { candidate ->
             candidate.sourcePackage in NotificationRules.checkoutPackages &&
                 flowCompatible(candidate, notificationIdentity, packageName) &&
-                CrossAppLinker.isSamePurchase(pageEvidenceOf(candidate), incoming)
+                CrossAppLinker.isSamePurchase(pendingEvidenceOf(candidate), incoming)
         }
         if (candidates.size > 1) {
             AppLog.w("Ntf", "cross-app ambiguous (${candidates.size} page entries), keep separate $ruleName")
             return null
         }
         return candidates.singleOrNull()?.also { hit ->
-            val reason = CrossAppLinker.linkReason(pageEvidenceOf(hit), incoming)
+            val reason = CrossAppLinker.linkReason(pendingEvidenceOf(hit), incoming)
             AppLog.i(
                 "Dedup",
                 "cross-app same transaction (notification): ${NotificationRules.sourceLabel(packageName)} " +
@@ -2508,8 +2691,18 @@ object CaptureCenter {
         return hit
     }
 
-    private fun pageEvidenceOf(pending: PendingTransactionEntity): CrossAppLinker.Evidence =
-        CrossAppLinker.Evidence(
+    /**
+     * 既有条目的跨应用证据。
+     *
+     * **用户改过的商户/备注不再当证据**（[CrossAppLinker.Evidence.counterpartyEdited] /
+     * [CrossAppLinker.Evidence.noteEdited]）：把"美团"改成"午饭"之后，微信侧那条通知
+     * 就再也关联不上这笔账，同一笔付款会被记成两条。富化与判重都要用系统原文，
+     * 用户看到的仍是用户改后的值。
+     */
+    private fun pendingEvidenceOf(pending: PendingTransactionEntity): CrossAppLinker.Evidence {
+        val guards = OverlayFieldGuards.fieldsOf(pending.dedupKey)
+        val legacyLock = pending.userEdited
+        return CrossAppLinker.Evidence(
             sourcePackage = pending.sourcePackage,
             amountCents = pending.amountCents,
             type = pending.type,
@@ -2520,10 +2713,10 @@ object CaptureCenter {
             note = pending.note,
             ruleName = pending.ruleName,
             orderId = pending.orderId,
+            counterpartyEdited = legacyLock || GuardedField.COUNTERPARTY in guards,
+            noteEdited = legacyLock || GuardedField.NOTE in guards,
         )
-
-    private fun pendingEvidenceOf(pending: PendingTransactionEntity): CrossAppLinker.Evidence =
-        pageEvidenceOf(pending)
+    }
 
     private fun pageEvidenceOf(
         candidate: PageCandidate,
@@ -2860,46 +3053,124 @@ object CaptureCenter {
                 paymentInstrument = candidate.instrument?.label,
                 flowId = flowIdentity,
                 orderId = candidate.orderId.orEmpty(),
+                identity = flowIdentity,
             )
-            if (entered != null) {
-                if (pageBankKey != null) {
-                    bankClaims.claim(entered.pendingId, pageBankKey, BankEventDedup.Channel.PAGE, pageEventTime)
+            when (entered) {
+                is CaptureCenter.EntryResult.Entered -> {
+                    if (pageBankKey != null) {
+                        bankClaims.claim(entered.pendingId, pageBankKey, BankEventDedup.Channel.PAGE, pageEventTime)
+                    }
+                    captureDao.updateMatch(rawId, candidate.ruleName, true)
+                    AppLog.i(
+                        "Page",
+                        "entered: ${candidate.ruleName} ${Money.formatYuan(candidate.amountCents)} " +
+                            "收款方=${candidate.counterparty} 支付方式=${candidate.paymentMethod ?: "-"}",
+                    )
+                    traceCapture(
+                        channel = CaptureChannel.A11Y,
+                        packageName = packageName,
+                        title = "页面快照",
+                        text = snapshotText,
+                        bigText = "",
+                        capturedAt = capturedAt,
+                        matchedRule = candidate.ruleName,
+                        type = candidate.type,
+                        amountCents = candidate.amountCents,
+                        counterparty = candidate.counterparty,
+                        note = candidate.note,
+                        dedupKey = dedupKey,
+                        outcome = TraceOutcome.AUTO_ENTRY,
+                    )
+                    announceEntry(
+                        entered = entered,
+                        type = candidate.type,
+                        isRefund = candidate.isRefund,
+                        amountCents = candidate.amountCents,
+                        sourceLabel = candidate.sourceLabel,
+                        counterparty = candidate.counterparty,
+                        dedupKey = dedupKey,
+                    )
+                    return
                 }
-                captureDao.updateMatch(rawId, candidate.ruleName, true)
-                AppLog.i(
-                    "Page",
-                    "entered: ${candidate.ruleName} ${Money.formatYuan(candidate.amountCents)} " +
-                        "收款方=${candidate.counterparty} 支付方式=${candidate.paymentMethod ?: "-"}",
-                )
-                traceCapture(
-                    channel = CaptureChannel.A11Y,
-                    packageName = packageName,
-                    title = "页面快照",
-                    text = snapshotText,
-                    bigText = "",
-                    capturedAt = capturedAt,
-                    matchedRule = candidate.ruleName,
-                    type = candidate.type,
-                    amountCents = candidate.amountCents,
-                    counterparty = candidate.counterparty,
-                    note = candidate.note,
-                    dedupKey = dedupKey,
-                    outcome = TraceOutcome.AUTO_ENTRY,
-                )
-                announceEntry(
-                    entered = entered,
-                    type = candidate.type,
-                    isRefund = candidate.isRefund,
-                    amountCents = candidate.amountCents,
-                    sourceLabel = candidate.sourceLabel,
-                    counterparty = candidate.counterparty,
-                    dedupKey = dedupKey,
-                )
-                return
+                // 同一笔的重复捕获：已静默并入既有条目（用户改过的字段保持用户值），
+                // 不再新建待确认条目、不再弹卡——这是"重复捕获弹第二个悬浮窗"的修复点
+                is CaptureCenter.EntryResult.Merged -> {
+                    captureDao.updateMatch(rawId, candidate.ruleName + "·并入既有条目", true)
+                    traceCapture(
+                        channel = CaptureChannel.A11Y,
+                        packageName = packageName,
+                        title = "页面快照",
+                        text = snapshotText,
+                        bigText = "",
+                        capturedAt = capturedAt,
+                        matchedRule = candidate.ruleName,
+                        type = candidate.type,
+                        amountCents = candidate.amountCents,
+                        counterparty = candidate.counterparty,
+                        note = candidate.note,
+                        dedupKey = entered.pending.dedupKey,
+                        outcome = TraceOutcome.SKIPPED_DUPLICATE,
+                    )
+                    return
+                }
+                // 这笔已有结论（用户已忽略/撤销）：只留溯源，不入队、不弹卡
+                is CaptureCenter.EntryResult.Handled -> {
+                    captureDao.updateMatch(rawId, candidate.ruleName + "·同笔已处理", true)
+                    traceCapture(
+                        channel = CaptureChannel.A11Y,
+                        packageName = packageName,
+                        title = "页面快照",
+                        text = snapshotText,
+                        bigText = "",
+                        capturedAt = capturedAt,
+                        matchedRule = candidate.ruleName,
+                        type = candidate.type,
+                        amountCents = candidate.amountCents,
+                        counterparty = candidate.counterparty,
+                        note = candidate.note,
+                        dedupKey = entered.finished.dedupKey,
+                        outcome = TraceOutcome.SKIPPED_DUPLICATE,
+                    )
+                    return
+                }
+                null -> Unit // 语料不足/写入失败：回落待确认队列（不丢单）
             }
         }
 
-        // enterEntry 返回 null（最近同额预检命中/无可推测账户）时仍插入 pending：
+        // 手动模式（三个入账开关全关）也要拦重复：同一笔已入队 → 静默并入；
+        // 已入账/已忽略 → 只留溯源。30 秒后用户返回商家结果页时不会再插一条、弹第二张卡。
+        if (absorbedByExisting(
+                sourcePackage = packageName,
+                type = candidate.type,
+                amountCents = candidate.amountCents,
+                isRefund = candidate.isRefund,
+                eventTime = candidate.txTime ?: capturedAt,
+                identity = flowIdentity,
+                dedupKey = dedupKey,
+                counterparty = candidate.counterparty,
+                note = candidate.note,
+                instrument = candidate.instrument?.label.orEmpty(),
+            )
+        ) {
+            captureDao.updateMatch(rawId, candidate.ruleName + "·同笔已存在", true)
+            traceCapture(
+                channel = CaptureChannel.A11Y,
+                packageName = packageName,
+                title = "页面快照",
+                text = snapshotText,
+                bigText = "",
+                capturedAt = capturedAt,
+                matchedRule = candidate.ruleName,
+                type = candidate.type,
+                amountCents = candidate.amountCents,
+                counterparty = candidate.counterparty,
+                note = candidate.note,
+                dedupKey = dedupKey,
+                outcome = TraceOutcome.SKIPPED_DUPLICATE,
+            )
+            return
+        }
+        // enterEntry 返回 null（无可推测账户/写入失败/证据不足的疑似重复）时仍插入 pending：
         // 60 秒内的两笔真实同额交易（如两笔 1.00）必须保留为待确认，不能丢——
         // 真正的"同一稳定页面重复"已由上面的 recentPageCache 在融合/入账前拦掉。
         val pendingId = pendingDao.insert(
@@ -3081,6 +3352,12 @@ object CaptureCenter {
         crossApp: Boolean = false,
     ) {
         val existing = related.pending
+        // 逻辑交易别名：本条页面的去重键与既有条目是同一笔 →
+        // 悬浮窗"只弹一次"与字段锁都按同一个键索引（跨通道不再各自为政）
+        LogicalTransactions.link(
+            dedupKeyWithIdentity(candidate.dedupKey, pageFlowIdentity),
+            existing.dedupKey,
+        )
         // 用户在悬浮卡里改过的字段：合并时保持用户值（其余字段照旧按页面优先富化）
         val guarded = OverlayFieldGuards.fieldsOf(existing.dedupKey)
         val merged = mergePageInfo(
@@ -3165,7 +3442,8 @@ object CaptureCenter {
      * 页面是否值得进捕获日志（未匹配样本池）：解析器判定的交易场景，或页面命中交易锚点。
      * 聊天/朋友圈等噪音页不进库，避免捕获日志被无障碍事件刷爆。
      */
-    private fun isInterestingPage(snapshot: PageSnapshot, result: PageParseResult): Boolean {        if (result is PageParseResult.SceneOnly && result.scene != PageScene.UNKNOWN) return true
+    private fun isInterestingPage(snapshot: PageSnapshot, result: PageParseResult): Boolean {
+        if (result is PageParseResult.SceneOnly && result.scene != PageScene.UNKNOWN) return true
         val joined = snapshot.joined
         return pageInterestingMarkers.any { joined.contains(it) }
     }
@@ -3175,8 +3453,22 @@ object CaptureCenter {
         "收款成功", "退款成功", "转账成功", "付款方式", "支付方式", "交易单号", "订单编号",
     )
 
-    /** 直接入账结果：新交易 id + 对应的 AUTO 条目 id（卡片与通知都按它们工作） */
-    private data class Entered(val txId: Long, val pendingId: Long)
+    /**
+     * 直接入账的结论（2026-10-30）：
+     * - [Entered]：新落了一笔账，调用方继续走"卡片/通知"提醒；
+     * - [Merged]：**本次是同一笔的重复捕获**，已静默并入 [Merged.pending]——
+     *   调用方不得再入队、不得再弹卡（这正是"重复捕获会弹第二个悬浮窗"的修复点）；
+     * - [Handled]：这笔此前已有结论（已入账或用户已忽略/撤销）。库里的条目可能已经消失，
+     *   所以按内存里的终态登记认人：调用方**只留溯源**，不入队、不弹卡。
+     *
+     * `enterEntry` 返回 null 仍表示"没法入账"（无可推测分类/账户、写入失败、证据不足的疑似重复），
+     * 调用方按原逻辑回落待确认队列（不丢单）。
+     */
+    private sealed interface EntryResult {
+        data class Entered(val txId: Long, val pendingId: Long) : EntryResult
+        data class Merged(val pending: PendingTransactionEntity) : EntryResult
+        data class Handled(val finished: FinishedCapture) : EntryResult
+    }
 
     /** 三种入账方式（入账提醒/悬浮窗入账/自动入账）任一开启即"先直接入账"；全关 = 完全手动模式 */
     private fun directEntryEnabled(): Boolean =
@@ -3190,7 +3482,15 @@ object CaptureCenter {
      * 直接入账（三种入账方式共用）：按推测分类/账户先落账——这就是"先入账"的落点，
      * 后续的卡片（改/删）与通知（提醒/撤销）都围绕这笔已有账目工作，卡片弹不出来账也不会丢。
      * 条目以 AUTO 状态留在合并池里——页面通道随后捕获同笔时回填更全的信息。
-     * 返回 null = 没有可用的分类/账户、重复预检命中或写入失败，调用方回落待确认流程（不丢单）。
+     *
+     * **重复捕获在这里被识别并静默并入既有那一笔**（2026-10-30 修复的核心）：
+     * 旧实现在这里只返回 null 表示"最近同额已存在"，三个调用方都把 null 当成"没入账"，
+     * 于是插入一条新的待确认条目并再次弹卡——用户看到的就是"重复捕获弹第二个悬浮窗"。
+     * 现在改为返回 [EntryResult.Merged]（并入既有条目，只富化未锁字段）/[EntryResult.Handled]
+     * （这笔已有结论，只留溯源），调用方据此**直接 return**。
+     *
+     * 返回 null = 语料不足（无可推测分类/账户）、证据不足的疑似重复或写入失败，
+     * 调用方按原逻辑回落待确认流程（不丢单）。
      */
     private suspend fun enterEntry(
         type: TxType,
@@ -3208,7 +3508,9 @@ object CaptureCenter {
         flowId: String = "",
         notificationInstanceId: String = "",
         orderId: String = "",
-    ): Entered? {
+        /** 本条捕获的身份（`p:`/`n:`/`b:`）：判重时用来区分"同一笔的重复"与"另一笔同额真实交易" */
+        identity: String = "",
+    ): EntryResult? {
         val learned = merchantRuleDao.getAll()
         val categories = categoryDao.getAll()
         val accounts = accountDao.getAll()
@@ -3228,15 +3530,40 @@ object CaptureCenter {
             AppLog.w("Ntf", "direct entry skipped (no category/account to use)")
             return null
         }
-        // 重复预检（±60s 同数据库校验）：同来源+同方向+同金额在窗口内已有条目（待确认或已入账）
-        // → 不静默入账，回落"入队 + 提醒"（重复通知/分钟边界重发不会造成双记账，可疑的第二笔仍让用户看到）
-        if (hasRecentSameEntry(
-                pendingDao.getMergeable(), sourcePackage, type, amountCents, System.currentTimeMillis(),
-                txTime = timestamp,
+        // 重复预检（±60s 同数据库校验）：同来源 + 同方向 + 同金额 + **身份兼容**。
+        // 身份兼容是关键：另一笔同额真实交易带不同的 `n:`/`p:`/`b:` 后缀，flowCompatible 会拒绝配对，
+        // 仍然照常入账（两笔真实同额不能被并掉）。命中时静默并入既有条目，绝不新建、绝不弹卡。
+        val now = System.currentTimeMillis()
+        val sameEntry = pickRecentSameEntry(
+            pendingDao.getMergeable(), sourcePackage, type, amountCents, now,
+            txTime = timestamp, identity = identity,
+        )
+        if (sameEntry != null) {
+            AppLog.i(
+                "Dedup",
+                "direct entry merged into existing #${sameEntry.id} $sourcePackage $type " +
+                    "${Money.formatYuan(amountCents)} identity=$identity",
             )
-        ) {
-            AppLog.i("Ntf", "direct entry skipped (recent same entry) $sourcePackage $type ${Money.formatYuan(amountCents)}")
-            return null
+            mergeDuplicateIntoExisting(sameEntry, counterparty, note, paymentInstrument.orEmpty(), identity, dedupKey)
+            return EntryResult.Merged(sameEntry)
+        }
+        // 既有条目已被用户处理掉（确认/忽略/撤销）时库里已经查不到：按内存终态登记认人，
+        // 迟到的那一条只留溯源。这是"忽略之后又一次弹卡"的兜底闸门。
+        LogicalTransactions.findResolved(
+            sourcePackage = sourcePackage,
+            type = type,
+            amountCents = amountCents,
+            isRefund = isRefund,
+            identity = identity,
+            eventTime = timestamp,
+            now = now,
+        )?.let { finished ->
+            AppLog.i(
+                "Dedup",
+                "late duplicate after ${finished.resolution.name}: $sourcePackage $type " +
+                    "${Money.formatYuan(amountCents)} identity=$identity key=${finished.dedupKey}",
+            )
+            return EntryResult.Handled(finished)
         }
         return try {
             // 正式交易与 AUTO 关联条目必须在同一事务里写入：任一步失败整体回滚，
@@ -3287,7 +3614,7 @@ object CaptureCenter {
                 "entered #$txId ${Money.formatYuan(amountCents)} dedup=$dedupKey" +
                     (paymentInstrument?.let { " 支付工具=$it" } ?: ""),
             )
-            Entered(txId, pendingId)
+            EntryResult.Entered(txId, pendingId)
         } catch (e: Exception) {
             // externalId/待确认键唯一索引冲突 = 这笔已经入过账（重复通知/双通道）：
             // 找回原交易与关联条目，卡片/通知仍可用
@@ -3299,16 +3626,148 @@ object CaptureCenter {
                     "direct entry skipped (already recorded) dedup=$dedupKey " +
                         "tx=$existing pending=${existingPending?.id}",
                 )
-                if (existing != null || existingPending != null) {
-                    Entered(existing ?: -1L, existingPending?.id ?: -1L)
-                } else {
-                    null
+                when {
+                    // 同键的 AUTO 条目还在：按"重复捕获"并入，不新建、不弹卡
+                    existingPending != null -> {
+                        mergeDuplicateIntoExisting(
+                            existingPending, counterparty, note, paymentInstrument.orEmpty(), identity, dedupKey,
+                        )
+                        EntryResult.Merged(existingPending)
+                    }
+                    // 交易在、条目已被用户处理掉：已有结论，只留溯源
+                    existing != null -> EntryResult.Handled(
+                        FinishedCapture(
+                            sourcePackage = sourcePackage,
+                            type = type,
+                            amountCents = amountCents,
+                            isRefund = isRefund,
+                            eventTime = timestamp,
+                            identity = flowIdentityOf(dedupKey),
+                            dedupKey = dedupKey,
+                            resolution = CaptureResolution.HANDLED,
+                            at = System.currentTimeMillis(),
+                        ),
+                    )
+                    else -> null
                 }
             } else {
                 AppLog.w("Ntf", "direct entry failed, fallback to pending", e)
                 null
             }
         }
+    }
+
+    /**
+     * 入队前的"这一笔是不是已经有了"拦一道（三种入账方式全关的手动模式同样需要）。
+     *
+     * 返回 true = 本次捕获已经被既有条目或终态登记吸收，调用方**直接 return**：
+     * 不入队、不弹卡、不发通知（只应留一条溯源）。
+     *
+     * 为什么不能只靠去重键：手动模式下每笔捕获都走 pending 插入，而去重键带的是
+     * 通道身份后缀（`@n:` / `@p:` / `@b:`）——同一笔从第二个通道到达时键不同，
+     * 唯一索引拦不住，于是合并池里多一条、`announceCapture` 再弹一张卡。
+     */
+    private suspend fun absorbedByExisting(
+        sourcePackage: String,
+        type: TxType,
+        amountCents: Long,
+        isRefund: Boolean,
+        eventTime: Long,
+        identity: String,
+        dedupKey: String,
+        counterparty: String,
+        note: String,
+        instrument: String = "",
+    ): Boolean {
+        val now = System.currentTimeMillis()
+        // 1) 这笔已有结论（已入账 / 用户已忽略或撤销）：只留溯源
+        LogicalTransactions.findResolved(
+            sourcePackage = sourcePackage,
+            type = type,
+            amountCents = amountCents,
+            isRefund = isRefund,
+            identity = identity,
+            eventTime = eventTime,
+            now = now,
+        )?.let { finished ->
+            AppLog.i(
+                "Dedup",
+                "capture absorbed by ${finished.resolution.name} #$sourcePackage " +
+                    "${Money.formatYuan(amountCents)} identity=$identity",
+            )
+            return true
+        }
+        // 2) 同一笔在合并池里已经有一条：静默并入，不新建、不弹卡
+        val sameEntry = pickRecentSameEntry(
+            pendingDao.getMergeable(), sourcePackage, type, amountCents, now,
+            txTime = eventTime, identity = identity,
+        ) ?: return false
+        AppLog.i(
+            "Dedup",
+            "capture merged into existing #${sameEntry.id} $sourcePackage " +
+                "${Money.formatYuan(amountCents)} identity=$identity",
+        )
+        mergeDuplicateIntoExisting(sameEntry, counterparty, note, instrument, identity, dedupKey)
+        return true
+    }
+
+
+    /**
+     * 重复捕获并入既有条目：**只补空白、只追加备注**，金额/时间/分类/账户一律不动。
+     *
+     * 与页面合并的区别：[mergePageInfo] 是"页面信息更权威"，[mergeDuplicateCapture] 是
+     * "这条我早处理过了"——它带来的信息不比既有条目更新。同时按 [OverlayFieldGuards]
+     * 跳过用户改过的字段，并在并入后登记逻辑交易别名，让后续通道认得出这是同一笔。
+     */
+    private suspend fun mergeDuplicateIntoExisting(
+        existing: PendingTransactionEntity,
+        counterparty: String,
+        note: String,
+        instrument: String,
+        identity: String,
+        /** 本次捕获的去重键：登记成 [existing] 的别名，后续通道按逻辑交易键归一 */
+        incomingDedupKey: String = "",
+    ) {
+        // 同一笔的不同通道去重键登记为别名：悬浮窗"只弹一次"与字段锁都按逻辑交易键索引
+        if (incomingDedupKey.isNotBlank()) {
+            LogicalTransactions.link(incomingDedupKey, existing.dedupKey)
+        }
+        val guards = OverlayFieldGuards.fieldsOf(existing.dedupKey)
+        val merged = mergeDuplicateCapture(existing, counterparty, note, instrument, guards)
+        if (!merged.changed) {
+            AppLog.d("Dedup", "duplicate capture added nothing #${existing.id} identity=$identity")
+            return
+        }
+        db.withTransaction {
+            pendingDao.updateFromPage(
+                existing.id,
+                existing.amountCents,
+                existing.timestamp,
+                merged.counterparty,
+                merged.note,
+                existing.ruleName,
+            )
+            if (existing.paymentInstrument.isBlank() && merged.paymentInstrument.isNotBlank()) {
+                pendingDao.updatePaymentInstrument(existing.id, merged.paymentInstrument)
+            }
+            // 已入账条目同步回交易（金额/时间保持既有值，只同步被补上的文本）
+            if (existing.status == PendingStatus.AUTO) {
+                txDao.updateCapturedByExternalId(
+                    "NTF:${existing.dedupKey}",
+                    existing.amountCents,
+                    existing.timestamp,
+                    merged.counterparty,
+                    merged.note,
+                )
+            }
+        }
+        AppLog.i(
+            "Dedup",
+            "duplicate capture merged into #${existing.id} identity=$identity" +
+                (if (guards.isNotEmpty()) " [用户改过 $guards，仅补其余字段]" else ""),
+        )
+        // 卡片正在展示时同步刷新（用户改过的字段由卡片状态自行保护），否则静默——不再新弹
+        refreshCardIfShowing(existing.id)
     }
 
     // ---------- 通知测试（debug）----------

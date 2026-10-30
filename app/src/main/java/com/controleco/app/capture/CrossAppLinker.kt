@@ -76,9 +76,24 @@ internal object CrossAppLinker {
         val note: String = "",
         val ruleName: String = "",
         val orderId: String = "",
+        /**
+         * 商户名是否被用户在悬浮卡里改过（[GuardedField.COUNTERPARTY]）。
+         * 改过的商户名不再是"系统原文"，不能当证据用：既不能用来证明是同一笔，
+         * **也不能用来否定**（否则用户把"美团"改成"午饭"，同一笔的微信通知就再也关联不上，
+         * 一笔付款记成两条账）。见 [merchantText]。
+         */
+        val counterpartyEdited: Boolean = false,
+        /** 备注是否被用户改过：同上，改过的备注不再参与渠道线索判定 */
+        val noteEdited: Boolean = false,
     ) {
         val isCheckoutPage: Boolean
             get() = sourcePackage in NotificationRules.checkoutPackages
+
+        /** 可作证据的商户名：用户改过就视为"没有这项证据" */
+        val merchantText: String get() = if (counterpartyEdited) "" else counterparty
+
+        /** 可作证据的备注：用户改过就视为"没有这项证据" */
+        val noteText: String get() = if (noteEdited) "" else note
     }
 
     /**
@@ -132,10 +147,10 @@ internal object CrossAppLinker {
         return null
     }
 
-    /** 双方都有商户名且互不包含 → 明显不是同一笔 */
+    /** 双方都有商户名且互不包含 → 明显不是同一笔（任一侧商户名被用户改过则不作数） */
     fun merchantConflicts(page: Evidence, other: Evidence): Boolean {
-        val a = normalizeMerchant(page.counterparty)
-        val b = normalizeMerchant(other.counterparty)
+        val a = normalizeMerchant(page.merchantText)
+        val b = normalizeMerchant(other.merchantText)
         return a.isNotEmpty() && b.isNotEmpty() && !a.contains(b) && !b.contains(a)
     }
 
@@ -156,7 +171,8 @@ internal object CrossAppLinker {
 
     /** 页面文本明确写出的支付渠道（只认微信/支付宝；其余返回 null） */
     private fun explicitPaymentChannel(page: Evidence): String? {
-        val text = (page.instrument + " " + page.note + " " + page.ruleName + " " + page.counterparty).trim()
+        // 用户改过的备注/商户不算"页面明确写出"的渠道（那是用户的措辞，不是系统原文）
+        val text = (page.instrument + " " + page.noteText + " " + page.ruleName + " " + page.merchantText).trim()
         if (text.isBlank()) return null
         val alipay = text.contains("支付宝") || text.contains("花呗") || text.contains("余额宝")
         val wechat = text.contains("微信支付") || text.contains("微信") || text.contains("零钱") || text.contains("分付")
@@ -170,7 +186,7 @@ internal object CrossAppLinker {
 
     /** 页面披露的支付方式是否指向该支付渠道（微信/支付宝） */
     fun paymentChannelMatches(sourcePackage: String, page: Evidence): Boolean {
-        val text = (page.instrument + " " + page.note + " " + page.ruleName).trim()
+        val text = (page.instrument + " " + page.noteText + " " + page.ruleName).trim()
         if (text.isBlank()) return false
         return when (sourcePackage) {
             NotificationRules.WECHAT ->
@@ -187,7 +203,7 @@ internal object CrossAppLinker {
      */
     fun bankChannelMatches(bankSide: Evidence, page: Evidence): Boolean {
         val bankName = bankNameOf(bankSide)
-        val pageMoney = PaymentInstrumentSnapshot.of(page.instrument, page.note)
+        val pageMoney = PaymentInstrumentSnapshot.of(page.instrument, page.noteText)
         if (bankName != null && pageMoney.bankName != null && bankName != pageMoney.bankName) return false
         val bankTail = bankSide.instrument.tailOfMaybe()
         if (bankTail != null && pageMoney.tail != null && bankTail != pageMoney.tail) return false
@@ -206,12 +222,14 @@ internal object CrossAppLinker {
         BankLedgerRules.bankNameOfPackage(source)?.let { return it }
         BankLedgerRules.detectBankName(evidence.ruleName)?.let { return it }
         BankLedgerRules.detectBankName(evidence.instrument)?.let { return it }
+        // 用户改过的备注不能当银行线索（会凭空造出"这笔用了招商银行"的证据）
+        BankLedgerRules.detectBankName(evidence.noteText)?.let { return it }
         return null
     }
 
     /** 充值/提现/转账/还款不是消费，不参与跨应用关联 */
     private fun isMoneyMovement(evidence: Evidence): Boolean {
-        val text = evidence.ruleName + " " + evidence.note
+        val text = evidence.ruleName + " " + evidence.noteText
         return listOf("充值", "提现", "转账", "还款", "转出", "转入", "零钱通", "余额宝转").any {
             text.contains(it)
         }

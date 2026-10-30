@@ -1281,6 +1281,10 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             // 删除待确认条目只释放字段锁；保留已弹卡记录，阻止迟到的采集再次打扰
             pendingDao.getById(id)?.let {
                 com.controleco.app.capture.OverlayFieldGuards.clear(it.dedupKey)
+                // 终态登记：用户不要这笔 → 同一笔的迟到捕获只留溯源，不再入队/弹卡
+                com.controleco.app.capture.LogicalTransactions.markResolved(
+                    it, com.controleco.app.capture.CaptureResolution.REJECTED,
+                )
             }
             PendingActions.discard(pendingDao, id)
         }
@@ -1326,6 +1330,10 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             val txId = PendingActions.confirm(db, txDao, pendingDao, merchantRuleDao, item, categoryId, accountId, counterparty)
             // 条目确认后只释放字段锁；已弹卡标记用于拦截后到的重复事件。
             com.controleco.app.capture.OverlayFieldGuards.clear(item.dedupKey)
+            // 终态登记：这笔已入账，迟到的重复捕获不许再入队/弹卡
+            com.controleco.app.capture.LogicalTransactions.markResolved(
+                item, com.controleco.app.capture.CaptureResolution.HANDLED,
+            )
             if (txId != null) {
                 // 先弹了悬浮卡、稍后在待确认列表里按“计入”的情况也发送最终入账通知。
                 CaptureCenter.notifyConfirmedFromPendingList(item.copy(counterparty = counterparty), txId)
@@ -1380,6 +1388,9 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
             // 批量入账只释放字段锁，已弹卡记录继续拦截后到的重复采集
             items.forEach {
                 com.controleco.app.capture.OverlayFieldGuards.clear(it.dedupKey)
+                com.controleco.app.capture.LogicalTransactions.markResolved(
+                    it, com.controleco.app.capture.CaptureResolution.HANDLED,
+                )
             }
             AppLog.i("pending", "confirmAll: ${items.size} items, inserted=$inserted")
         }
