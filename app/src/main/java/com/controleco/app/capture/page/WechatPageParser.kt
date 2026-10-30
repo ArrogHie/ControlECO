@@ -146,8 +146,10 @@ object WechatPageParser : AppPageParser {
             return detailCandidate(snapshot, flow, detailTitle)
         }
 
-        // 10) 支付成功页
-        if (successTitles.any { joined.contains(it) } && !joined.contains("当前状态")) {
+        // 10) 支付成功页：成功关键词必须位于前两个文本节点
+        if (lines.take(2).any { line ->
+                successTitles.any { line.contains(it) }
+            } && !joined.contains("当前状态")) {
             return successCandidate(snapshot, flow)
         }
 
