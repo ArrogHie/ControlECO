@@ -39,6 +39,9 @@ internal object PendingActions {
     ): Long? {
         val externalId = "NTF:${item.dedupKey}"
         val counterpartyValue = counterparty.trim().ifBlank { item.counterparty }
+        // 提前占住内存终态：确认的 Room 事务删除待确认条目前后都不能出现可重新入队的空窗。
+        // 真正失败时撤销占位；窗口锚点仍来自 item.createdAt，绝不来自本次点击时间。
+        LogicalTransactions.markResolved(item, CaptureResolution.HANDLED)
         val txId = try {
             db.withTransaction {
                 val id = txDao.insert(
@@ -68,6 +71,7 @@ internal object PendingActions {
                 AppLog.i("pending", "already recorded, skip duplicate externalId=$externalId")
                 null
             } else {
+                LogicalTransactions.forget(item.dedupKey)
                 throw e
             }
         }
@@ -82,7 +86,14 @@ internal object PendingActions {
 
     /** 丢弃（误报纠错）：只删待确认条目，不产生账目 */
     suspend fun discard(pendingDao: PendingDao, id: Long) {
-        pendingDao.deleteById(id)
+        val item = pendingDao.getById(id)
+        item?.let { LogicalTransactions.markResolved(it, CaptureResolution.REJECTED) }
+        try {
+            pendingDao.deleteById(id)
+        } catch (e: Exception) {
+            item?.let { LogicalTransactions.forget(it.dedupKey) }
+            throw e
+        }
         AppLog.i("pending", "discarded #$id")
     }
 
@@ -161,9 +172,16 @@ internal object PendingActions {
     ): Boolean {
         val externalId = "NTF:$dedupKey"
         val txId = txDao.findIdByExternalId(externalId)
-        db.withTransaction {
-            if (txId != null) txDao.deleteById(txId)
-            pendingDao.deleteByDedupKey(dedupKey)
+        val item = pendingDao.findByDedupKey(dedupKey)
+        item?.let { LogicalTransactions.markResolved(it, CaptureResolution.REJECTED) }
+        try {
+            db.withTransaction {
+                if (txId != null) txDao.deleteById(txId)
+                pendingDao.deleteByDedupKey(dedupKey)
+            }
+        } catch (e: Exception) {
+            item?.let { LogicalTransactions.forget(it.dedupKey) }
+            throw e
         }
         AppLog.i("pending", "undo entered tx=#$txId externalId=$externalId")
         return txId != null

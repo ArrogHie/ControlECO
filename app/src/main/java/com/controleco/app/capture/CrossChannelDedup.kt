@@ -33,7 +33,7 @@ import kotlin.math.abs
 internal object CrossChannelDedup {
 
     /** 归并窗口：银行短信/推送相对支付通知的到达延迟 */
-    const val WINDOW_MS = 130_000L
+    const val WINDOW_MS = LogicalTransactions.CAPTURE_WINDOW_MS
 
     /**
      * 跨应用链路（`CrossAppLinker`）用的通道分类：支付类（微信/支付宝）与银行类（短信 / 银行 App 推送 / 云闪付）。

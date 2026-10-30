@@ -23,15 +23,15 @@ import kotlin.math.abs
  *   旧条目按 [PendingTransactionEntity.userEdited] 整条锁定。
  */
 
-/** 两通道"同时捕获到一笔"的判定窗口：捕获时刻相差 ≤ 10s */
-internal const val SAME_ORDER_WINDOW_MS = 10_000L
+/** 同应用通知/页面两通道：只比较新捕获与首次 Pending.createdAt，相差最多 180s */
+internal const val SAME_ORDER_WINDOW_MS = LogicalTransactions.CAPTURE_WINDOW_MS
 
 /**
  * 美团外卖的页面重捕窗口：支付成功后弹窗干扰/页面重渲染会让它的付款结果页被重新观察，
- * 快照内容略有出入（营销节点增减）、捕获时刻相差一两分钟——只靠 10s 窗口会把同一笔记成两条。
+ * 快照内容略有出入（营销节点增减）、捕获时刻相差一两分钟——不能再按后到事件时间重置三分钟窗口。
  * **只对美团外卖生效**。
  */
-internal const val MEITUAN_RECAPTURE_WINDOW_MS = 180_000L
+internal const val MEITUAN_RECAPTURE_WINDOW_MS = LogicalTransactions.CAPTURE_WINDOW_MS
 
 /** 通知侧时间对页面侧兜底时间的修正窗口：页面把捕获时刻当交易时间时，用通知的发布时间校正 */
 internal const val NOTIFICATION_TIME_FIX_WINDOW_MS = 300_000L
@@ -62,10 +62,8 @@ internal data class RelatedPending(
  * 身份是否"可核对且相同"：仅当既有条目带有**同一种**身份（通知实例 / 银行事件 / 页面流程）
  * 且两者相等时返回 true。
  *
- * 用途：决定"重复捕获"能用多宽的窗口。可核对的身份相等 = 同一条通知/同一次支付流程的重复观察，
- * 窗口可以放宽到 [AUTO_ENTRY_DEDUP_WINDOW_MS]；身份缺一侧（跨通道：既有是通知、本条是页面流程）
- * 就无法核对，只能用两条通道实际间隔的窄窗口 [SAME_ORDER_WINDOW_MS]——
- * 否则"窗口内同额"就会变成"窗口内同额即同笔"，把两笔真实交易并掉（丢记录）。
+ * 用途：同一来源、同一捕获通道的不同实例身份不能误并；
+ * 通知和页面是互补通道时，统一按首次捕获时刻向后 180 秒识别。
  */
 internal fun sameIdentityKind(existing: PendingTransactionEntity, identity: String?): Boolean {
     if (identity.isNullOrEmpty()) return false
@@ -85,8 +83,7 @@ internal fun sameIdentityKind(existing: PendingTransactionEntity, identity: Stri
  * 但要求**身份兼容**——同来源的另一笔同额真实交易带着不同的 `n:`/`p:`/`b:` 身份后缀，
  * `flowCompatible` 会拒绝配对，因此不会被误判成重复（丢账）。
  *
- * 窗口是**分级**的（见 [sameIdentityKind]）：身份可核对且相同才用 [windowMs]（默认 60s），
- * 身份缺一侧的跨通道情形收紧到 [SAME_ORDER_WINDOW_MS]。
+ * 时间窗口固定以首次 [PendingTransactionEntity.createdAt] 为锚点，最多 180s。
  */
 internal fun pickRecentSameEntry(
     candidates: List<PendingTransactionEntity>,
@@ -101,9 +98,9 @@ internal fun pickRecentSameEntry(
     identity: String? = null,
 ): PendingTransactionEntity? = candidates
     .filter {
-        val window = if (sameIdentityKind(it, identity)) windowMs else minOf(windowMs, SAME_ORDER_WINDOW_MS)
-        sameCaptureFingerprint(it, sourcePackage, type, amountCents, now, window, txTime) &&
-            flowCompatible(it, identity, sourcePackage)
+        val window = minOf(windowMs, LogicalTransactions.CAPTURE_WINDOW_MS)
+        it.sourcePackage == sourcePackage && it.type == type && it.amountCents == amountCents &&
+            now - it.createdAt in 0..window && flowCompatible(it, identity, sourcePackage)
     }
     // 多条命中取最近的一条：同一笔的重复捕获总是紧挨着原条目
     .minByOrNull { abs(now - it.createdAt) }
@@ -173,10 +170,13 @@ internal fun pickRelatedPending(
     captureAt: Long,
     windowMs: Long = SAME_ORDER_WINDOW_MS,
     flowIdentity: String? = null,
+    isRefund: Boolean? = null,
 ): RelatedPending? {
     val inWindow = candidates.filter {
         it.status != PendingStatus.ASK &&
-            it.sourcePackage == packageName && it.type == type && abs(captureAt - it.createdAt) <= windowMs &&
+            (isRefund == null || (it.refundMark == RefundMark.REFUND_INCOME) == isRefund) &&
+            it.sourcePackage == packageName && it.type == type &&
+            captureAt - it.createdAt in 0..minOf(windowMs, LogicalTransactions.CAPTURE_WINDOW_MS) &&
             flowCompatible(it, flowIdentity, packageName)
     }
     return inWindow.filter { it.amountCents == amountCents }
@@ -257,8 +257,8 @@ internal fun entryBankInstanceId(pending: PendingTransactionEntity): String {
  * 页面通道的"同一笔"判定，四层（全部要求金额相同）：
  * 0. 同一订单号（最强证据，忽略时间窗口）；
  * 1. 同一支付流程内的后续页面（结果页之后又打开账单详情）：[flowIdentity] 相同的既有条目；
- * 2. 跨通道窗口（10s）；
- * 3. 美团外卖的重捕窗口（[MEITUAN_RECAPTURE_WINDOW_MS]）——只对美团外卖生效。
+ * 2. 同源同额的 180s 固定窗口（[SAME_ORDER_WINDOW_MS]）；
+ * 3. 美团外卖页面重捕兼容（[MEITUAN_RECAPTURE_WINDOW_MS]）。
  *
  * 金额不同时**没有任何一层**允许合并：页面来源优先不能替代"是否同一笔"的判定。
  * 金额是否被锚定（[com.controleco.app.capture.page.PageCandidate.amountAnchored]）只说明
@@ -277,8 +277,12 @@ internal fun pickRelatedPendingForPage(
     flowIdentity: String? = null,
     orderId: String? = null,
     txTime: Long? = null,
+    isRefund: Boolean? = null,
 ): RelatedPending? {
-    val pool = candidates.filter { it.status != PendingStatus.ASK }
+    val pool = candidates.filter {
+        it.status != PendingStatus.ASK &&
+            (isRefund == null || (it.refundMark == RefundMark.REFUND_INCOME) == isRefund)
+    }
     // 页面明确交易时间：同一笔的重复观察/进程重启后重新打开同一收款页，
     // 数据库里已有同额同时间的条目时直接回并，不能再走 pending（避免重复待确认/弹卡）。
     if (txTime != null && txTime > 0) {
@@ -302,12 +306,13 @@ internal fun pickRelatedPendingForPage(
     }
     pickRelatedPending(
         pool, packageName, type, amountCents, captureAt,
-        flowIdentity = flowIdentity,
+        flowIdentity = flowIdentity, isRefund = isRefund,
     )?.let { return it }
     if (packageName != NotificationRules.MEITUAN_TAKEOUT) return null
     return pickRelatedPending(
         pool, packageName, type, amountCents, captureAt,
         windowMs = MEITUAN_RECAPTURE_WINDOW_MS, flowIdentity = flowIdentity,
+        isRefund = isRefund,
     )
 }
 

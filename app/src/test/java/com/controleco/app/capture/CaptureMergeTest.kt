@@ -90,11 +90,11 @@ class CaptureMergeTest {
     }
 
     @Test
-    fun `超过十秒不算同一笔`() {
-        assertNull(pickRelatedPending(listOf(pending()), NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 10_001))
-        // 边界：正好 10s 仍算同笔
+    fun `超过首次捕获后一百八十秒不算同一笔`() {
+        assertNull(pickRelatedPending(listOf(pending()), NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 180_001))
+        // 边界：正好 180s 仍算同笔
         assertTrue(
-            pickRelatedPending(listOf(pending()), NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 10_000) != null,
+            pickRelatedPending(listOf(pending()), NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 180_000) != null,
         )
     }
 
@@ -271,15 +271,13 @@ class CaptureMergeTest {
     }
 
     @Test
-    fun `其他来源不享受页面重捕窗口_判重口径保持原样`() {
-        // 本轮改动只针对美团外卖：微信/支付宝的页面捕获仍只走 10s 跨通道窗口（90s 后的同额页面不算同一笔）
+    fun `其他来源也按首次捕获窗口不随捕获续期`() {
         val pool = listOf(pending(packageName = NotificationRules.WECHAT, amount = 1290))
-        assertNull(
-            pickRelatedPendingForPage(pool, NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 90_000),
-        )
-        // 10s 内照旧命中
         assertTrue(
-            pickRelatedPendingForPage(pool, NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 3_000) != null,
+            pickRelatedPendingForPage(pool, NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 90_000) != null,
+        )
+        assertNull(
+            pickRelatedPendingForPage(pool, NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 180_001),
         )
     }
 
@@ -910,8 +908,8 @@ class CaptureMergeTest {
     @Test
     fun `窗口外或特征不同不算同笔`() {
         val existing = listOf(pending(amount = 1290, createdAt = base))
-        // 超过窗口
-        assertFalse(hasRecentSameEntry(existing, NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 60_001))
+        // 超过首次捕获起算的 180 秒窗口
+        assertFalse(hasRecentSameEntry(existing, NotificationRules.WECHAT, TxType.EXPENSE, 1290, base + 180_001))
         // 金额不同 / 方向不同 / 来源不同
         assertFalse(hasRecentSameEntry(existing, NotificationRules.WECHAT, TxType.EXPENSE, 1291, base + 1_000))
         assertFalse(hasRecentSameEntry(existing, NotificationRules.WECHAT, TxType.INCOME, 1290, base + 1_000))

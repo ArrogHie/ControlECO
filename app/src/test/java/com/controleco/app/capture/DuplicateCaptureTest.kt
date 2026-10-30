@@ -87,9 +87,9 @@ class DuplicateCaptureTest {
     }
 
     @Test
-    fun `跨通道身份不同时窗口收紧到两条通道的实际间隔`() {
-        // 既有条目是通知身份，本次是页面流程身份：跨通道重复正是要配对的情形，
-        // 但两侧身份**无法核对**（`n:` vs `p:`），所以只给通道间的窄窗口。
+    fun `跨通道身份不同时窗口固定为首次捕获后三分钟`() {
+        // 既有通知 n: 身份与后到的页面 p: 身份不同，属于互补通道；
+        // 统一使用首次 createdAt 起算的 180 秒，而非原先 10 秒。
         val existing = listOf(pending(notificationInstanceId = "n:aaa"))
         assertNotNull(
             "10s 内：用户返回结果页紧接支付通知",
@@ -98,10 +98,17 @@ class DuplicateCaptureTest {
                 identity = "p:page-1",
             ),
         )
-        assertNull(
-            "超过窄窗口：交给页面侧的跨应用证据去认（那里的证据更强，不能靠同额硬并）",
+        assertNotNull(
+            "20s：不同通道同额可以归入首次捕获",
             pickRecentSameEntry(
                 existing, wechat, TxType.EXPENSE, 1290, base + 20_000,
+                identity = "p:page-1",
+            ),
+        )
+        assertNull(
+            "180s 后不因第二次捕获续期",
+            pickRecentSameEntry(
+                existing, wechat, TxType.EXPENSE, 1290, base + 180_001,
                 identity = "p:page-1",
             ),
         )
@@ -124,9 +131,9 @@ class DuplicateCaptureTest {
         val existing = listOf(pending(notificationInstanceId = "n:aaa"))
 
         assertNull(
-            "窗口外（>60s）",
+            "窗口外（>180s）",
             pickRecentSameEntry(
-                existing, wechat, TxType.EXPENSE, 1290, base + 60_001,
+                existing, wechat, TxType.EXPENSE, 1290, base + 180_001,
                 identity = "n:aaa",
             ),
         )

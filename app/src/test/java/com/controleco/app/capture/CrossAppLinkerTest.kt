@@ -100,7 +100,7 @@ class CrossAppLinkerTest {
     @Test
     fun `页面没有支付方式_短时同额可关联但超出窗口不关联`() {
         // 2026-10-19 规则调整：页面读不到支付方式时，同一笔仍会同时被商户页与支付应用捕获；
-        // 60 秒内完全相同金额即视为同一笔（真实样本：美团 ¥19.20 + 微信 ¥19.20）。
+        // 180 秒内完全相同金额即视为同一笔（真实样本：美团 ¥19.20 + 微信 ¥19.20）。
         assertTrue(CrossAppLinker.isSamePurchase(page(""), other(NotificationRules.ALIPAY)))
         // 窗口外不凭金额关联（时间越远，"同额"越可能是另一笔）
         assertFalse(
@@ -190,7 +190,7 @@ class CrossAppLinkerTest {
     }
 
     @Test
-    fun `短时同额窗口边界_恰好六十秒仍判重_超过不判`() {
+    fun `短时同额窗口边界_恰好一百八十秒仍判重_超过不判`() {
         val meituan = page(instrument = "", amount = 1920)
         val at60 = other(NotificationRules.WECHAT, amount = 1920, time = t0 + CrossAppLinker.SAME_AMOUNT_WINDOW_MS)
         val at61 = other(NotificationRules.WECHAT, amount = 1920, time = t0 + CrossAppLinker.SAME_AMOUNT_WINDOW_MS + 1)

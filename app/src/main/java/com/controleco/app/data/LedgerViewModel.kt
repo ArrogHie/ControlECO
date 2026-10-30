@@ -1380,10 +1380,21 @@ class LedgerViewModel(app: Application) : AndroidViewModel(app) {
                     flowId = item.flowId,
                 )
             }
-            val inserted = db.withTransaction {
-                val ids = txDao.insertAllIgnore(entities)
-                items.forEach { pendingDao.deleteById(it.id) }
-                ids.count { it != -1L }
+            // 批量确认同样先登记已处理身份，再删除待确认池（失败时撤销占位）。
+            items.forEach {
+                com.controleco.app.capture.LogicalTransactions.markResolved(
+                    it, com.controleco.app.capture.CaptureResolution.HANDLED,
+                )
+            }
+            val inserted = try {
+                db.withTransaction {
+                    val ids = txDao.insertAllIgnore(entities)
+                    items.forEach { pendingDao.deleteById(it.id) }
+                    ids.count { it != -1L }
+                }
+            } catch (e: Exception) {
+                items.forEach { com.controleco.app.capture.LogicalTransactions.forget(it.dedupKey) }
+                throw e
             }
             // 批量入账只释放字段锁，已弹卡记录继续拦截后到的重复采集
             items.forEach {

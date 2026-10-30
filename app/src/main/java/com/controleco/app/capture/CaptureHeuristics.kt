@@ -9,11 +9,11 @@ import kotlin.math.abs
  */
 
 /**
- * 自动入账前的重复预检窗口（±60s 数据库校验）：
+ * 自动入账前的重复预检窗口（首次捕获起算 180s）：
  * 合并池里已有"同来源 + 同方向 + 同金额、时间在窗口内"的条目时不再静默入账——
  * 重复通知/分钟边界重发不会造成双记账；调用方回落到"入队 + 提醒"，用户仍然看得到这笔。
  */
-internal const val AUTO_ENTRY_DEDUP_WINDOW_MS = 60_000L
+internal const val AUTO_ENTRY_DEDUP_WINDOW_MS = LogicalTransactions.CAPTURE_WINDOW_MS
 
 /** 通知 `when` 的合理范围：早于 24 小时或晚于当前 5 分钟都视为异常值 */
 internal const val EVENT_TIME_MAX_AGE_MS = 24 * 3_600_000L
