@@ -63,6 +63,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.controleco.app.data.LedgerViewModel
 import com.controleco.app.data.budget.BudgetShare
 import com.controleco.app.data.db.CategoryEntity
+import com.controleco.app.data.db.CategoryRules
 import com.controleco.app.data.db.TxType
 import com.controleco.app.ui.common.EcoIcons
 import com.controleco.app.ui.eco.EcoCategoryTile
@@ -91,7 +92,8 @@ import java.time.ZoneId
 @Composable
 fun QuickAddScreen(vm: LedgerViewModel, onBack: () -> Unit) {
     val accounts by vm.accounts.collectAsStateWithLifecycle()
-    val categories by vm.categories.collectAsStateWithLifecycle()
+    val allCategories by vm.categories.collectAsStateWithLifecycle()
+    val categories = allCategories.filterNot { CategoryRules.isRefundIncome(it.type, it.name) }
 
     var amountText by remember { mutableStateOf("") }
     var type by remember { mutableStateOf(TxType.EXPENSE) }
@@ -107,6 +109,7 @@ fun QuickAddScreen(vm: LedgerViewModel, onBack: () -> Unit) {
     var showMore by remember { mutableStateOf(false) }
     var categoryExpanded by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var saving by remember { mutableStateOf(false) }
 
     // 默认选中：第一个账户 + 当前类型的第一个分类
     LaunchedEffect(accounts, categories, type) {
@@ -148,7 +151,7 @@ fun QuickAddScreen(vm: LedgerViewModel, onBack: () -> Unit) {
 
     val cents = Money.parseCents(amountText)
     val hasAmount = cents != null && cents > 0L
-    val valid = hasAmount && categoryId != null && accountId != null
+    val valid = hasAmount && categoryId != null && accountId != null && !saving
     val catsOfType = categories.filter { it.type == type }
     val selectedCategory = catsOfType.firstOrNull { it.id == categoryId }
     val step = when {
@@ -162,6 +165,7 @@ fun QuickAddScreen(vm: LedgerViewModel, onBack: () -> Unit) {
     val contentScroll = rememberScrollState()
 
     fun save() {
+        if (saving) return
         val amount = Money.parseCents(amountText)
         // AA 人数只在「支出 + 勾选 AA」时才需要合法；其余情况一律按 0 落库
         val wantAa = type == TxType.EXPENSE && aaEnabled
@@ -179,13 +183,19 @@ fun QuickAddScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                 } else {
                     date.atTime(LocalTime.now()).atZone(zone).toInstant().toEpochMilli()
                 }
+                saving = true
                 vm.saveTransaction(
                     -1L, type, amount, categoryId!!, accountId!!, ts, note.trim(), counterparty.trim(),
                     budgetExcluded = budgetExcluded,
                     aaShares = shares ?: 0,
+                    onResult = { message ->
+                        saving = false
+                        if (message == null) {
+                            EcoToast.show("已记一笔")
+                            onBack()
+                        } else error = message
+                    },
                 )
-                EcoToast.show("已记一笔")
-                onBack()
             }
         }
     }

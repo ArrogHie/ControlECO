@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.WindowManager
+import android.view.ViewTreeObserver
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -158,6 +159,19 @@ internal object ConfirmCardWindow {
         }
 
         var viewAdded = false
+        var firstFrameDrawn = false
+        val firstDraw = object : ViewTreeObserver.OnDrawListener {
+            override fun onDraw() {
+                if (firstFrameDrawn || confirmView !== view) return
+                firstFrameDrawn = true
+                com.controleco.app.capture.OverlayPromptLog.markShown(pending.dedupKey)
+                handler.post {
+                    if (view.viewTreeObserver.isAlive) view.viewTreeObserver.removeOnDrawListener(this)
+                }
+                AppLog.i(TAG, "confirm card first frame pending=#${pending.id}")
+            }
+        }
+        view.viewTreeObserver.addOnDrawListener(firstDraw)
         return try {
             wm.addView(view, params)
             viewAdded = true
@@ -167,9 +181,7 @@ internal object ConfirmCardWindow {
             showingPendingId = pending.id
             dismissCallback = onDismiss
             scheduleAutoDismiss()
-            // 记下"这条已经成功打扰过一次"：后续富化不再为同一笔新弹卡片（见 OverlayPromptLog）
-            com.controleco.app.capture.OverlayPromptLog.markShown(pending.dedupKey)
-            AppLog.i(TAG, "confirm card shown pending=#${pending.id} ${pending.ruleName}")
+            AppLog.i(TAG, "confirm card attached pending=#${pending.id} ${pending.ruleName}")
             true
         } catch (e: Exception) {
             // 无悬浮窗权限 / 被支付保护层拦截：调用方回落通知（Toast 可见而卡片不可见 = 被拦截的铁证）

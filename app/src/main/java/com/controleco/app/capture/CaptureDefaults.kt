@@ -12,7 +12,7 @@ import com.controleco.app.util.CategoryGuesser
 
 /**
  * 捕获入账的分类/账户推测（待确认弹窗、悬浮卡与自动入账共用一套规则，纯函数便于单测）：
- * 分类优先用**学到的商户规则**（MerchantRules：确认/编辑过几次后自动归类），
+ * 分类优先用**学到的商户规则**（一次确认/编辑即可生效），
  * 没有规则再按关键词猜（CategoryGuesser："滴滴出行"→交通、"医院"→医疗…），
  * 猜中的分类必须与方向匹配才采用，否则回退该类型的「其他」（没有则第一个）；
  * 账户按来源推测（微信/支付宝/银行名），未命中取第一个。
@@ -31,17 +31,31 @@ internal object CaptureDefaults {
     ): Long? {
         // 0) 退款收入永远归「退款」：商户名与原支出相同，学到的规则（购物/餐饮）对退款没有意义
         if (isRefund) return RefundCategory.incomeCategoryId(categories)
-        // 1) 学到的商户规则（"越用越准"）
-        MerchantRules.categoryIdFrom(learnedRules, categories, type, counterparty, note)?.let { return it }
-        // 2) 关键词猜测
-        val hint = merchantHint.trim()
-        if (hint.isNotEmpty()) {
-            val guessed = CategoryGuesser.guess(hint)
-            categories.firstOrNull { it.type == type && it.name == guessed }?.id?.let { return it }
-        }
+        categorySuggestionId(categories, type, counterparty.ifBlank { merchantHint }, note, learnedRules)
+            ?.let { return it }
         // 3) 该方向的其他/第一个
         return categories.firstOrNull { it.type == type && it.name == "其他" }?.id
-            ?: categories.firstOrNull { it.type == type }?.id
+            ?: categories.firstOrNull {
+                it.type == type && !(it.type == TxType.INCOME && it.name == RefundCategory.NAME)
+            }?.id
+    }
+
+    /** 明确商户规则或关键词建议；无证据返回 null，供后到商户信息富化时避免降级分类。 */
+    fun categorySuggestionId(
+        categories: List<CategoryEntity>,
+        type: TxType,
+        counterparty: String,
+        note: String,
+        learnedRules: List<MerchantRuleEntity> = emptyList(),
+    ): Long? {
+        MerchantRules.categoryIdFrom(learnedRules, categories, type, counterparty, note)?.let { return it }
+        // 商户优先；商户未知或只是平台名时，备注仍可能包含实际商品/服务线索。
+        for (hint in listOf(counterparty, note)) {
+            val guessed = CategoryGuesser.guess(hint)
+            if (guessed == "其他") continue
+            categories.firstOrNull { it.type == type && it.name == guessed }?.id?.let { return it }
+        }
+        return null
     }
 
     /**

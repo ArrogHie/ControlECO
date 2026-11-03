@@ -206,6 +206,15 @@ internal object LogicalTransactions {
         AppLog.d("Dedup", "logical tx resolved ${resolution.name} key=$key firstAt=$eventTime")
     }
 
+    /** 无金额退款不能按同额推测同笔，但用户处理后的同一捕获键仍应保持终态。 */
+    @Synchronized
+    fun findResolvedByKey(dedupKey: String, capturedAt: Long): FinishedCapture? {
+        prune(capturedAt)
+        return finished[canonical(dedupKey)]?.takeIf {
+            capturedAt - it.eventTime in 0..CAPTURE_WINDOW_MS
+        }
+    }
+
     /** 终态与在池时同规则；命中后追加别名，第三、第四次的顺序不再影响识别。 */
     @Synchronized
     fun findResolved(

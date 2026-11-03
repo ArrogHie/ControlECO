@@ -209,18 +209,17 @@ internal class ConfirmCardState {
         this.categories = categories
         this.accounts = accounts
         this.learnedRules = learnedRules
-        if (categoryId == null) {
-            categoryId = CaptureDefaults.categoryId(
-                categories, pending.type, pending.counterparty.ifBlank { pending.note },
-                learnedRules = learnedRules, counterparty = pending.counterparty, note = pending.note,
-                isRefund = pending.refundMark == com.controleco.app.data.db.RefundMark.REFUND_INCOME,
-            )
+        if (!categoryUserEdited) {
+            categoryId = CaptureDefaults.categorySuggestionId(
+                categories, pending.type, counterparty, note, learnedRules,
+            ) ?: categoryId
         }
-        if (accountId == null) {
+        if (!accountUserEdited) {
             accountId = CaptureDefaults.accountId(
                 accounts,
                 pending.sourcePackage,
                 CaptureDefaults.bankNameOf(pending.sourcePackage, pending.ruleName),
+                learnedAccountId = MerchantRules.accountIdFrom(learnedRules, accounts, pending.type, counterparty, note),
                 instrumentLabel = pending.paymentInstrument,
             )
         }

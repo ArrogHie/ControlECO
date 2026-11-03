@@ -17,8 +17,8 @@ enum class TxSource { MANUAL, WECHAT, ALIPAY, NOTIFICATION, BANK }
 
 /**
  * 退款标记：
- * - NONE：普通记录（用户把待处理的退款「记为收入」后也回到 NONE）
- * - REFUNDED_EXPENSE：被全额退款的支出（钱已退回，另有对应的退款收入记录）
+ * - NONE：普通记录
+ * - REFUNDED_EXPENSE：被标记退款的支出（钱已退回，另有对应的退款收入记录）
  * - REFUND_INCOME：退款到账收入（微信"XXX-退款"收入行 / 支付宝"退款成功"行）
  * 退款记录始终入库、始终显示、始终计入汇总。
  */
@@ -86,7 +86,7 @@ data class TransactionEntity(
      * 账单导入时账单自己就把该标的都标好了，所以导入的退款 = false，不打扰用户。
      *
      * - 账单导入的退款收入 = false；
-     * - 通知/页面捕获的退款收入 = true，直到用户在待确认里选中被退款的支出或选择「记为收入」；
+     * - 旧版捕获的退款收入可能为 true，选中原支出后清除；新版捕获先保存 pending，处理时收入为 false；
      * - 迁移 v12 之前入库的历史退款 = false（不打扰用户）。
      */
     @ColumnInfo(defaultValue = "0")
@@ -169,7 +169,7 @@ enum class TraceOutcome {
     /** 重复捕获：同笔已由另一通道处理，本次不再入账 */
     SKIPPED_DUPLICATE,
 
-    /** 无金额退款通知：只发提醒，等用户手动关联退款（不产生账目） */
+    /** 旧版无金额退款只发提醒的历史结果；新版持久化为 PENDING */
     REFUND_NOTICE,
 }
 
@@ -211,7 +211,7 @@ data class CaptureTraceEntity(
 )
 
 /**
- * 商户归类学习规则（"越用越准"）：用户确认过几次"瑞幸咖啡"→餐饮之后，下次捕获自动预选。
+ * 商户归类学习规则（"越用越准"）：用户确认过"瑞幸咖啡"→餐饮之后，下次捕获自动预选。
  *
  * 学习时机：确认待确认条目（PendingActions）/ 编辑捕获来的交易；**不从手动记账学习**
  * （手写的一次性备注容易污染规则）。键是归一化后的商户/备注词（[MerchantRules.keyOf]），
@@ -231,7 +231,7 @@ data class MerchantRuleEntity(
     val categoryId: Long,
     /** 学习到的账户（可选：确认时用户选的账户） */
     val accountId: Long? = null,
-    /** 命中次数（确认几次后认定稳定，展示用） */
+    /** 学习次数（展示用；没有生效次数门槛） */
     val hits: Int = 1,
     val updatedAt: Long = System.currentTimeMillis(),
 )

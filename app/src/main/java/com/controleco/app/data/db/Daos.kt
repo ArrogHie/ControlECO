@@ -217,7 +217,10 @@ interface TransactionDao {
     @Query("UPDATE transactions SET categoryId = :categoryId, accountId = :accountId WHERE id = :id")
     suspend fun updateCategoryAndAccount(id: Long, categoryId: Long, accountId: Long)
 
-    /** 登记退款的候选：近 60 天还没标「已退款」的支出（供"无金额退款通知→选被退款的账单"使用） */
+    @Query("UPDATE transactions SET categoryId = :categoryId WHERE id = :id")
+    suspend fun updateCategory(id: Long, categoryId: Long)
+
+    /** 退款候选：全部未退款支出；已捕获金额时仅返回同额记录 */
     @Query(
         """SELECT t.id AS id, t.type AS type, t.amountCents AS amountCents, t.timestamp AS timestamp,
            t.note AS note, t.counterparty AS counterparty, t.source AS source,
@@ -229,10 +232,10 @@ interface TransactionDao {
            FROM transactions t
            JOIN categories c ON t.categoryId = c.id
            JOIN accounts a ON t.accountId = a.id
-           WHERE t.type = 'EXPENSE' AND t.refundMark = 'NONE' AND t.timestamp >= :since
-           ORDER BY t.timestamp DESC LIMIT 50"""
+           WHERE t.type = 'EXPENSE' AND t.refundMark = 'NONE' AND (:amountCents IS NULL OR t.amountCents = :amountCents)
+           ORDER BY t.timestamp DESC, t.id DESC"""
     )
-    suspend fun recentUnrefundedExpenses(since: Long): List<TransactionRow>
+    suspend fun refundCandidates(amountCents: Long?): List<TransactionRow>
 
     // ---------- 待处理的退款收入（已入账，只等用户处理） ----------
 
@@ -260,27 +263,6 @@ interface TransactionDao {
     @Query("SELECT COUNT(*) FROM transactions WHERE refundPending = 1")
     fun observePendingRefundCount(): Flow<Int>
 
-    /**
-     * 同金额的支出候选（待处理退款 sheet 用）：只列**金额相同、还没被标已退款**的支出，新的在前。
-     * 不做"这笔退款配哪笔支出"的判定：选中只是给这笔支出打「已退款」标记，两笔记录之间不留关联。
-     */
-    @Query(
-        """SELECT t.id AS id, t.type AS type, t.amountCents AS amountCents, t.timestamp AS timestamp,
-           t.note AS note, t.counterparty AS counterparty, t.source AS source,
-           c.id AS categoryId, c.name AS categoryName, c.icon AS categoryIcon,
-           a.id AS accountId, a.name AS accountName,
-           t.refundMark AS refundMark, t.refundPending AS refundPending,
-           t.budgetExcluded AS budgetExcluded, t.aaShares AS aaShares,
-           t.createdAt AS createdAt
-           FROM transactions t
-           JOIN categories c ON t.categoryId = c.id
-           JOIN accounts a ON t.accountId = a.id
-           WHERE t.type = 'EXPENSE' AND t.amountCents = :amountCents
-             AND t.refundMark != 'REFUNDED_EXPENSE'
-           ORDER BY t.timestamp DESC LIMIT 50"""
-    )
-    suspend fun expenseCandidatesByAmount(amountCents: Long): List<TransactionRow>
-
     /** 把退款标成「已处理」（只对还没处理的退款生效，重复点击/并发不会覆盖） */
     @Query("UPDATE transactions SET refundPending = 0 WHERE id = :refundId AND refundPending = 1")
     suspend fun clearRefundPending(refundId: Long)
@@ -292,12 +274,16 @@ interface TransactionDao {
     @Query("UPDATE transactions SET refundMark = 'REFUNDED_EXPENSE' WHERE id = :expenseId AND refundMark = 'NONE'")
     suspend fun markExpenseRefunded(expenseId: Long)
 
-    /** 「记为收入」：去掉退款标记，当成普通收入记账（这笔退款不再有"待处理"状态） */
+    @Query("UPDATE transactions SET refundMark = 'NONE' WHERE id = :expenseId AND type = 'EXPENSE' AND refundMark = 'REFUNDED_EXPENSE'")
+    suspend fun clearExpenseRefund(expenseId: Long)
+
     @Query(
-        """UPDATE transactions SET refundMark = 'NONE', refundPending = 0
-           WHERE id = :refundId"""
+        """SELECT t.* FROM transactions t JOIN categories c ON c.id = t.categoryId
+           WHERE t.type = 'INCOME' AND c.type = 'INCOME' AND c.name = '退款'
+             AND t.amountCents = :amountCents AND t.timestamp > :afterTimestamp
+           ORDER BY t.timestamp ASC, t.id ASC LIMIT 1"""
     )
-    suspend fun markRefundAsIncome(refundId: Long)
+    suspend fun firstRefundIncomeAfter(amountCents: Long, afterTimestamp: Long): TransactionEntity?
 
     @Query("SELECT COUNT(*) FROM transactions WHERE categoryId = :categoryId")
     suspend fun countByCategory(categoryId: Long): Int
@@ -505,7 +491,7 @@ interface PendingDao {
     /** 完整捕获到达时清掉同笔的 0 元占位条（返回删除条数） */
     @Query(
         """DELETE FROM pending_transactions
-           WHERE status = 'PENDING' AND amountCents = 0
+           WHERE status = 'PENDING' AND amountCents = 0 AND refundMark = 'NONE'
              AND sourcePackage = :sourcePackage AND type = :type
              AND timestamp BETWEEN :from AND :to"""
     )
@@ -529,7 +515,7 @@ interface MerchantRuleDao {
     suspend fun getAll(): List<MerchantRuleEntity>
 
     /** 管理页列表（最近学习的在前） */
-    @Query("SELECT * FROM merchant_rules ORDER BY updatedAt DESC LIMIT 300")
+    @Query("SELECT * FROM merchant_rules ORDER BY updatedAt DESC")
     fun observeRecent(): Flow<List<MerchantRuleEntity>>
 
     @Query("SELECT COUNT(*) FROM merchant_rules")

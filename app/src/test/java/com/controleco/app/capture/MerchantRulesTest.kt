@@ -97,4 +97,29 @@ class MerchantRulesTest {
         assertNull(MerchantRules.categoryIdFrom(emptyList(), listOf(cat(1, "餐饮")), TxType.EXPENSE, "瑞幸咖啡", ""))
         assertTrue(MerchantRules.match(emptyList(), TxType.EXPENSE, "瑞幸咖啡", "") == null)
     }
+
+    @Test
+    fun `跨渠道标签全角和平台前缀归一到同一商户`() {
+        assertEquals("luckincoffee", MerchantRules.keyOf("商户名称：Ｌｕｃｋｉｎ　Ｃｏｆｆｅｅ", ""))
+        assertEquals("瑞幸咖啡", MerchantRules.keyOf("微信支付-瑞幸咖啡", ""))
+        val rules = listOf(rule("瑞幸咖啡"))
+        assertEquals(1L, MerchantRules.match(rules, TxType.EXPENSE, "收款方：瑞幸咖啡", "")?.categoryId)
+    }
+
+    @Test
+    fun `通用商户只从备注明确商户字段取键`() {
+        assertEquals("小鹿书店", MerchantRules.keyOf("微信支付", "支付成功\n商户：小鹿书店\n金额：15.00元"))
+        assertEquals("小鹿书店", MerchantRules.keyOf("", "商户：小鹿书店 支付金额：15.00元"))
+        assertNull(MerchantRules.keyOf("微信支付", "楼下超市"))
+        assertNull(MerchantRules.keyOf("", "您的账户收到一条很长很长的付款结果通知，金额99.00元"))
+    }
+
+    @Test
+    fun `相似商户不模糊归并且历史退款规则不应用于普通收入`() {
+        assertNull(MerchantRules.match(listOf(rule("小鹿书店")), TxType.EXPENSE, "小鹿书店东门店", ""))
+        assertNull(MerchantRules.categoryIdFrom(
+            listOf(rule("小鹿书店", TxType.INCOME, 9)),
+            listOf(cat(9, "退款", TxType.INCOME)), TxType.INCOME, "小鹿书店", "",
+        ))
+    }
 }

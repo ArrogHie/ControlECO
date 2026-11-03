@@ -111,7 +111,7 @@ object NotificationRules {
 
     /**
      * 无金额的退款到账提醒（微信折叠通知"退款到账通知"常不带金额，实测样本：
-     * title=微信支付 text=退款到账通知）——无法入队，转"退款待处理"流程让用户选被退款的账单。
+     * title=微信支付 text=退款到账通知）——以金额未知的待处理条目持久化，让用户选被退款的账单。
      * 带金额的退款在 parse() 里已正常入队，不会走到这里。
      */
     fun isAmountlessRefundNotice(
@@ -502,7 +502,7 @@ object NotificationRules {
             AppLog.d(
                 "Ntf",
                 "rule amount not found type=$type refund=$isRefund pkg=$packageName body=$body" +
-                    if (isRefund) "（退款汇总通知常无金额，属预期，不入队）" else "",
+                    if (isRefund) "（退款通知缺金额，转待处理退款）" else "",
             )
             return null
         }

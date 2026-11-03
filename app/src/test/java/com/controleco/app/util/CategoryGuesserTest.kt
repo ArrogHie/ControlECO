@@ -45,4 +45,10 @@ class CategoryGuesserTest {
         assertEquals("其他", CategoryGuesser.guess("某个完全不认识的商户"))
         assertEquals("其他", CategoryGuesser.guess(""))
     }
+
+    @Test
+    fun `latin merchants ignore case`() {
+        assertEquals("餐饮", CategoryGuesser.guess("LUCKIN COFFEE"))
+        assertEquals("娱乐", CategoryGuesser.guess("星光 ktv"))
+    }
 }

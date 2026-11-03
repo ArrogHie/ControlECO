@@ -1,144 +1,156 @@
 package com.controleco.app.ui.refund
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.controleco.app.data.LedgerViewModel
+import com.controleco.app.data.db.PendingStatus
+import com.controleco.app.data.db.RefundMark
 import com.controleco.app.data.db.TransactionRow
 import com.controleco.app.ui.common.EcoIcons
-import com.controleco.app.ui.eco.EcoCategoryTile
-import com.controleco.app.ui.eco.EcoEmpty
-import com.controleco.app.ui.eco.EcoGhostButton
-import com.controleco.app.ui.eco.EcoMoneyField
-import com.controleco.app.ui.eco.EcoPageLead
-import com.controleco.app.ui.eco.EcoPageNote
-import com.controleco.app.ui.eco.EcoPane
-import com.controleco.app.ui.eco.EcoPrimaryButton
-import com.controleco.app.ui.eco.EcoRowDivider
-import com.controleco.app.ui.eco.EcoSheet
-import com.controleco.app.ui.eco.EcoToast
-import com.controleco.app.ui.eco.EcoTopBar
-import com.controleco.app.ui.eco.ecoPressable
+import com.controleco.app.ui.eco.*
 import com.controleco.app.ui.theme.EcoType
 import com.controleco.app.ui.theme.eco
 import com.controleco.app.util.Money
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
-/**
- * 登记退款页：微信"退款到账通知"不带金额，无法自动入账——
- * 用户在此选择被退款的支出，生成退款收入（金额可改，支持部分退款）并把那笔支出标「已退款」。
- *
- * 两笔记录之间**不建立关联**：支出只是被标了「已退款」，退款收入只是一笔收入。
- */
+/** 捕获退款与历史待处理退款共用候选页；不创建两笔交易的持久关联。 */
 @Composable
-fun RefundLinkScreen(vm: LedgerViewModel, onBack: () -> Unit) {
+fun RefundLinkScreen(
+    vm: LedgerViewModel,
+    pendingId: Long? = null,
+    legacyRefundId: Long? = null,
+    onBack: () -> Unit,
+) {
     var rows by remember { mutableStateOf<List<TransactionRow>>(emptyList()) }
+    var amount by remember { mutableStateOf<Long?>(null) }
     var loading by remember { mutableStateOf(true) }
-    var linking by remember { mutableStateOf<TransactionRow?>(null) }
+    var available by remember { mutableStateOf(false) }
+    var submitting by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var merchant by remember { mutableStateOf("") }
+    var minAmount by remember { mutableStateOf("") }
+    var maxAmount by remember { mutableStateOf("") }
+    var startDate by remember { mutableStateOf<LocalDate?>(null) }
+    var endDate by remember { mutableStateOf<LocalDate?>(null) }
     val c = MaterialTheme.eco
 
-    LaunchedEffect(Unit) {
-        rows = vm.refundCandidates()
-        loading = false
+    LaunchedEffect(pendingId, legacyRefundId) {
+        loading = true
+        try {
+            if (pendingId != null) {
+                val pending = vm.pendingById(pendingId)
+                available = pending?.refundMark == RefundMark.REFUND_INCOME &&
+                    pending.status == PendingStatus.PENDING
+                amount = pending?.amountCents?.takeIf { it > 0 }
+            } else if (legacyRefundId != null) {
+                val refund = vm.transactionById(legacyRefundId)
+                available = refund?.refundPending == true && refund.refundMark == RefundMark.REFUND_INCOME
+                amount = refund?.amountCents?.takeIf { it > 0 }
+            }
+            if (available) rows = vm.refundCandidates(amount)
+        } catch (failure: Exception) {
+            if (failure is kotlinx.coroutines.CancellationException) throw failure
+            error = "加载失败"
+        } finally {
+            loading = false
+        }
+    }
+    val visible = remember(rows, amount, merchant, minAmount, maxAmount, startDate, endDate) {
+        filterRefundCandidates(rows, amount, merchant, minAmount, maxAmount, startDate, endDate)
+    }
+    fun pick(row: TransactionRow) {
+        if (submitting || !available) return
+        submitting = true
+        error = null
+        val done: (String?) -> Unit = { result ->
+            submitting = false
+            if (result == null) {
+                EcoToast.show("已退款")
+                onBack()
+            } else {
+                error = result
+            }
+        }
+        if (pendingId != null) vm.refundCaptured(pendingId, row.id, done)
+        else if (legacyRefundId != null) vm.handlePendingRefund(legacyRefundId, row.id, done)
     }
 
-    Column(Modifier.fillMaxSize()) {
-        EcoTopBar(
-            micro = "REFUND LINK",
-            title = "选择被退款的账单",
-            onBack = onBack,
-        )
-
-        Column(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 22.dp)
-                .padding(bottom = 32.dp),
+    Column(Modifier.fillMaxSize().imePadding()) {
+        EcoTopBar(micro = "REFUND", title = "选择被退款的账单", onBack = onBack)
+        LazyColumn(
+            Modifier.weight(1f).fillMaxWidth(),
+            contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 8.dp, bottom = 32.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Spacer(Modifier.size(4.dp))
-            EcoPageLead(
-                "微信「退款到账」通知不带金额，无法自动入账。选择对应的支出记录后，会生成一条退款收入" +
-                    "（可改金额以支持部分退款），并把原支出标记为「已退款」。",
-            )
-            Spacer(Modifier.size(10.dp))
-
-            when {
-                loading -> {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 36.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("加载中…", style = EcoType.PageLead, color = c.quiet)
-                    }
-                }
-                rows.isEmpty() -> {
-                    EcoPane {
-                        EcoEmpty(
-                            title = "暂无可选的支出",
-                            body = "近 60 天没有可选的支出记录。退款收入默认等于原支出金额。",
-                            icon = EcoIcons.Receipt,
-                        )
-                    }
-                }
-                else -> {
-                    EcoPane {
-                        Column {
-                            rows.forEachIndexed { index, row ->
-                                RefundRow(row = row, onClick = { linking = row })
-                                if (index != rows.lastIndex) EcoRowDivider(inset = 14.dp)
+            if (available) {
+                item(key = "filters") {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (amount != null) {
+                            Text("退款 ${Money.formatYuan(amount!!)}", style = EcoType.BillAmount, color = c.jade)
+                        } else {
+                            EcoField(label = "商户", value = merchant, onValueChange = { merchant = it }, placeholder = "搜索商户")
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                EcoMoneyField("最低金额", minAmount, { minAmount = it }, Modifier.weight(1f), placeholder = "不限")
+                                EcoMoneyField("最高金额", maxAmount, { maxAmount = it }, Modifier.weight(1f), placeholder = "不限")
                             }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            RefundDateField("开始日期", startDate, { startDate = it }, Modifier.weight(1f))
+                            RefundDateField("结束日期", endDate, { endDate = it }, Modifier.weight(1f))
+                        }
+                        if (startDate != null || endDate != null || merchant.isNotEmpty() || minAmount.isNotEmpty() || maxAmount.isNotEmpty()) {
+                            EcoTextAction("重置", onClick = {
+                                startDate = null; endDate = null; merchant = ""; minAmount = ""; maxAmount = ""
+                            })
                         }
                     }
                 }
             }
-
-            EcoPageNote("仅显示近 60 天、未退款的支出；退款收入默认等于原支出金额。")
+            error?.let { message -> item(key = "error") { Text(message, style = EcoType.PageNote, color = c.clay) } }
+            when {
+                loading -> item { EcoEmpty(title = "加载中…", icon = EcoIcons.Receipt) }
+                !available -> item { EcoEmpty(title = if (error == null) "退款已处理" else "暂时无法加载", icon = EcoIcons.Check) }
+                visible.isEmpty() -> item { EcoEmpty(title = "暂无可选账单", icon = EcoIcons.Receipt) }
+                else -> items(visible, key = { it.id }) { row ->
+                    EcoPane { RefundRow(row, onClick = { pick(row) }) }
+                }
+            }
         }
     }
+}
 
-    linking?.let { row ->
-        LinkRefundSheet(
-            row = row,
-            onLink = { amountCents, onResult ->
-                vm.registerRefund(row.id, amountCents) { error ->
-                    onResult(error)
-                    if (error == null) {
-                        // 原支出已标记退款，从候选中移除
-                        rows = rows.filter { it.id != row.id }
-                        EcoToast.show("已生成退款收入")
-                    }
-                }
-            },
-            onDismiss = { linking = null },
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RefundDateField(label: String, value: LocalDate?, onPick: (LocalDate) -> Unit, modifier: Modifier) {
+    var showPicker by remember { mutableStateOf(false) }
+    Box(modifier) {
+        EcoGhostButton(text = value?.toString() ?: label, onClick = { showPicker = true }, height = 42.dp)
+    }
+    if (showPicker) {
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = (value ?: LocalDate.now()).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
         )
+        DatePickerDialog(
+            onDismissRequest = { showPicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    state.selectedDateMillis?.let { onPick(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }
+                    showPicker = false
+                }) { Text("确定") }
+            },
+            dismissButton = { TextButton(onClick = { showPicker = false }) { Text("取消") } },
+        ) { DatePicker(state) }
     }
 }
 
@@ -200,81 +212,5 @@ private fun RefundRow(
     }
 }
 
-@Composable
-private fun LinkRefundSheet(
-    row: TransactionRow,
-    onLink: (amountCents: Long, onResult: (String?) -> Unit) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var amountText by remember(row.id) { mutableStateOf(Money.formatCents(row.amountCents)) }
-    var error by remember(row.id) { mutableStateOf<String?>(null) }
-    var submitting by remember(row.id) { mutableStateOf(false) }
-    val c = MaterialTheme.eco
-    val merchant = row.counterparty.ifBlank { row.note }.ifBlank { "未命名支出" }
-
-    EcoSheet(
-        onDismiss = { if (!submitting) onDismiss() },
-        title = "登记退款",
-        subtitle = "原支出 ${Money.formatYuan(row.amountCents)}，$merchant，${refundDate(row.timestamp)}",
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            EcoMoneyField(
-                label = "退款金额（元）",
-                value = amountText,
-                onValueChange = {
-                    amountText = it
-                    if (error != null) error = null
-                },
-                placeholder = "0.00",
-                supporting = "默认等于原支出；可改成更小的金额以支持部分退款。",
-                isError = error != null,
-            )
-
-            error?.let {
-                Text(it, style = EcoType.PageNote, color = c.clay)
-            }
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.weight(1f)) {
-                    EcoGhostButton(
-                        text = "取消",
-                        onClick = onDismiss,
-                        enabled = !submitting,
-                        height = 42.dp,
-                    )
-                }
-                Box(Modifier.weight(1f)) {
-                    EcoPrimaryButton(
-                        text = if (submitting) "处理中…" else "生成退款收入",
-                        onClick = link@ {
-                            val cents = Money.parseCents(amountText)
-                            if (cents == null || cents <= 0) {
-                                error = "请输入有效金额"
-                                return@link
-                            }
-                            if (cents > row.amountCents) {
-                                error = "退款金额不能超过原支出"
-                                return@link
-                            }
-                            submitting = true
-                            onLink(cents) { result ->
-                                submitting = false
-                                if (result == null) {
-                                    onDismiss()
-                                } else {
-                                    error = result
-                                }
-                            }
-                        },
-                        enabled = !submitting,
-                        height = 42.dp,
-                    )
-                }
-            }
-        }
-    }
-}
-
-private val refundDateFormatter = DateTimeFormatter.ofPattern("M月d日 HH:mm").withZone(ZoneId.systemDefault())
-
+private val refundDateFormatter = DateTimeFormatter.ofPattern("yyyy/M/d HH:mm").withZone(ZoneId.systemDefault())
 private fun refundDate(millis: Long): String = refundDateFormatter.format(Instant.ofEpochMilli(millis))

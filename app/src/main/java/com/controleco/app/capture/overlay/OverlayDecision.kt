@@ -89,6 +89,10 @@ private val systemSurfaceMarkers = listOf(
 internal fun isSystemSurface(packageName: String): Boolean =
     systemSurfaceMarkers.any { packageName.contains(it, ignoreCase = true) }
 
+/** 本应用悬浮窗也会发窗口事件；它不能覆盖真正的前台支付应用。 */
+internal fun foregroundAfterEvent(previous: String?, incoming: String, ownPackage: String, appInForeground: Boolean): String? =
+    if (incoming == ownPackage && !appInForeground) previous else incoming
+
 internal fun shouldShowOverlay(c: OverlayConditions): Boolean = when {
     !c.enabled || !c.canDrawOverlays -> false
     c.appInForeground -> false

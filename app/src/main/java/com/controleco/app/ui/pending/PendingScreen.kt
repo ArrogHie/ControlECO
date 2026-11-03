@@ -2,7 +2,6 @@ package com.controleco.app.ui.pending
 
 import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,12 +15,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,9 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,6 +40,7 @@ import com.controleco.app.capture.NotificationRules
 import com.controleco.app.data.LedgerViewModel
 import com.controleco.app.data.db.AccountEntity
 import com.controleco.app.data.db.CategoryEntity
+import com.controleco.app.data.db.CategoryRules
 import com.controleco.app.data.db.PendingStatus
 import com.controleco.app.data.db.PendingTransactionEntity
 import com.controleco.app.data.db.RefundMark
@@ -52,60 +48,46 @@ import com.controleco.app.data.db.TransactionRow
 import com.controleco.app.data.db.TxSource
 import com.controleco.app.data.db.TxType
 import com.controleco.app.ui.common.EcoIcons
-import com.controleco.app.ui.eco.EcoCategoryTile
 import com.controleco.app.ui.eco.EcoChip
 import com.controleco.app.ui.eco.EcoConfirm
 import com.controleco.app.ui.eco.EcoEmpty
 import com.controleco.app.ui.eco.EcoField
 import com.controleco.app.ui.eco.EcoGhostButton
 import com.controleco.app.ui.eco.EcoMoneyField
-import com.controleco.app.ui.eco.EcoPane
 import com.controleco.app.ui.eco.EcoPill
 import com.controleco.app.ui.eco.EcoPillTone
 import com.controleco.app.ui.eco.EcoPrimaryButton
 import com.controleco.app.ui.eco.EcoRowDivider
 import com.controleco.app.ui.eco.EcoSheet
 import com.controleco.app.ui.eco.EcoTextAction
-import com.controleco.app.ui.eco.EcoToast
 import com.controleco.app.ui.eco.EcoTopBar
 import com.controleco.app.ui.theme.EcoType
-import com.controleco.app.ui.theme.accBook
-import com.controleco.app.ui.theme.categoryColor
 import com.controleco.app.ui.theme.eco
 import com.controleco.app.util.Money
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-/**
- * 待确认账单：通知/页面捕获到的交易先落在这里，用户逐条确认（分类/账户/商户）或丢弃；
- * 0 元占位条需先补金额；微信红包（ASK）必须逐条明确确认，不参与「全部确认」。
- *
- * 除此之外还有一类条目：**已经入账、但还没处理**的退款收入（捕获来的退款）。
- * 它和捕获条目**并进同一个列表，不单独分区**（产品要求）；点开列同金额的支出让用户选，
- * 选中后那笔支出标记「已退款」、不再计入支出；选不到就「记为收入」。
- * 导入的退款账单由账单自身标记，不进这里。
- */
+/** 普通捕获、捕获退款与历史待处理退款合并展示；退款只从候选页处理。 */
 @Composable
-fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
+fun PendingScreen(
+    vm: LedgerViewModel,
+    onBack: () -> Unit,
+    onRefund: (pendingId: Long?, legacyRefundId: Long?) -> Unit,
+) {
     val pending by vm.pendingList.collectAsStateWithLifecycle(initialValue = emptyList())
     val refunds by vm.pendingRefunds.collectAsStateWithLifecycle(initialValue = emptyList())
     val accounts by vm.accounts.collectAsStateWithLifecycle()
     val categories by vm.categories.collectAsStateWithLifecycle()
+    val merchantRules by vm.merchantRules.collectAsStateWithLifecycle()
 
     var confirming by remember { mutableStateOf<PendingTransactionEntity?>(null) }
     var amountEditing by remember { mutableStateOf<PendingTransactionEntity?>(null) }
     var confirmAllAsk by remember { mutableStateOf(false) }
-    var linking by remember { mutableStateOf<TransactionRow?>(null) }
-    var candidates by remember { mutableStateOf<List<TransactionRow>?>(null) }
-    var linkError by remember { mutableStateOf<String?>(null) }
-    var submitting by remember { mutableStateOf(false) }
-    var incomeAsk by remember { mutableStateOf<TransactionRow?>(null) }
-    val amountMissing = pending.count { it.amountCents <= 0 }
-    val confirmableCount = pending.count { it.status != PendingStatus.ASK && it.amountCents > 0 }
-    val askCount = pending.count { it.status == PendingStatus.ASK }
+    val confirmableCount = pending.count {
+        it.status != PendingStatus.ASK && it.amountCents > 0 && it.refundMark != RefundMark.REFUND_INCOME
+    }
     val context = LocalContext.current
-    val c = MaterialTheme.eco
 
     // 捕获条目与退款条目并进一个列表，按时间倒序；不分区、不加小标题
     val entries = remember(pending, refunds) {
@@ -115,19 +97,10 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
         }.sortedByDescending { it.sortAt }
     }
 
-    // 打开退款 sheet 时拉同金额的支出候选
-    LaunchedEffect(linking?.id) {
-        val row = linking
-        candidates = null
-        linkError = null
-        submitting = false
-        if (row != null) candidates = vm.refundExpenseCandidates(row.amountCents)
-    }
-
     Column(Modifier.fillMaxSize()) {
         EcoTopBar(
             micro = "PENDING",
-            title = "待确认账单",
+            title = "待处理",
             onBack = onBack,
             action = {
                 if (confirmableCount > 0) {
@@ -144,8 +117,7 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                 contentAlignment = Alignment.Center,
             ) {
                 EcoEmpty(
-                    title = "没有待确认账单",
-                    body = "开启通知监听后，收款/动账通知会出现在这里",
+                    title = "暂无待处理账单",
                     icon = EcoIcons.Check,
                 )
             }
@@ -156,67 +128,20 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
                     .fillMaxWidth(),
                 contentPadding = PaddingValues(start = 22.dp, end = 22.dp, top = 8.dp, bottom = 32.dp),
             ) {
-                if (amountMissing > 0) {
-                    item(key = "amount-warning") {
-                        PendingWarning(
-                            icon = EcoIcons.Warning,
-                            text = "有 $amountMissing 条金额待补录：点「补金额」输入，" +
-                                "或从通知栏通知直接回复（「全部确认」会跳过它们）",
-                            fg = c.amber,
-                            bg = c.amberSoft,
-                        )
-                    }
-                }
-                if (askCount > 0) {
-                    item(key = "ask-warning") {
-                        PendingWarning(
-                            icon = EcoIcons.Gift,
-                            text = "有 $askCount 条微信红包待确认：请逐条确认是否记账，不参与「全部确认」。",
-                            fg = c.clay,
-                            bg = c.claySoft,
-                        )
-                    }
-                }
-                if (refunds.isNotEmpty()) {
-                    item(key = "refund-warning") {
-                        PendingWarning(
-                            icon = EcoIcons.Receipt,
-                            text = "有 ${refunds.size} 条退款待处理：选中被退款的支出后，" +
-                                "那笔支出会标记为「已退款」，不再计入本月支出与分类预算。",
-                            fg = c.blue,
-                            bg = c.blueSoft,
-                        )
-                    }
-                }
                 items(entries, key = { it.key }) { entry ->
                     when (entry) {
                         is PendingEntry.Capture -> PendingRow(
                             item = entry.item,
-                            onConfirm = { confirming = entry.item },
+                            onConfirm = {
+                                if (entry.item.refundMark == RefundMark.REFUND_INCOME) onRefund(entry.item.id, null)
+                                else confirming = entry.item
+                            },
                             onFillAmount = { amountEditing = entry.item },
                             onDiscard = { vm.discardPending(entry.item.id) },
                         )
                         is PendingEntry.Refund -> RefundPendingRow(
                             row = entry.row,
-                            onLink = { linking = entry.row },
-                            onMarkIncome = { incomeAsk = entry.row },
-                        )
-                    }
-                }
-                item(key = "summary") {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(top = 13.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            buildString {
-                                append("共 ${pending.size + refunds.size} 条，$confirmableCount 条可一键确认")
-                                if (refunds.isNotEmpty()) append("，${refunds.size} 条退款待处理")
-                            },
-                            style = EcoType.PageNote,
-                            color = c.quiet,
+                            onLink = { onRefund(null, entry.row.id) },
                         )
                     }
                 }
@@ -229,12 +154,12 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
             item = p,
             accounts = accounts,
             categories = categories,
-            defaultCategoryId = vm.guessCategoryId(
-                p.type,
-                p.counterparty.ifBlank { p.note },
-                isRefund = p.refundMark == RefundMark.REFUND_INCOME,
-            ),
-            defaultAccountId = vm.guessAccountId(p.sourcePackage, p.ruleName, p.paymentInstrument),
+            defaultCategoryId = remember(p, categories, merchantRules) {
+                vm.guessCategoryId(p.type, p.counterparty.ifBlank { p.note }, counterparty = p.counterparty, note = p.note)
+            },
+            defaultAccountId = remember(p, accounts, merchantRules) {
+                vm.guessAccountId(p.sourcePackage, p.ruleName, p.paymentInstrument, p.type, p.counterparty, p.note)
+            },
             onConfirm = { categoryId, accountId, counterparty ->
                 vm.confirmPending(p, categoryId, accountId, counterparty)
                 confirming = null
@@ -258,58 +183,10 @@ fun PendingScreen(vm: LedgerViewModel, onBack: () -> Unit) {
         )
     }
 
-    linking?.let { row ->
-        RefundLinkSheet(
-            row = row,
-            candidates = candidates,
-            error = linkError,
-            submitting = submitting,
-            onPick = { expense ->
-                submitting = true
-                vm.handlePendingRefund(row.id, expense.id) { error ->
-                    submitting = false
-                    if (error == null) {
-                        linking = null
-                        EcoToast.show("已标记为已退款")
-                    } else {
-                        linkError = error
-                    }
-                }
-            },
-            onMarkIncome = {
-                linking = null
-                incomeAsk = row
-            },
-            onDismiss = { linking = null },
-        )
-    }
-
-    incomeAsk?.let { row ->
-        EcoConfirm(
-            title = "记为收入",
-            body = "这笔退款按普通收入记账；对应的支出不会被标记为已退款，仍计入本月支出。之后不会再出现在待处理里。",
-            confirmText = "记为收入",
-            onConfirm = {
-                vm.markRefundAsIncome(row.id) { error ->
-                    if (error != null) Toast.makeText(context, error, Toast.LENGTH_LONG).show()
-                    else EcoToast.show("已记为收入")
-                }
-                incomeAsk = null
-            },
-            onDismiss = { incomeAsk = null },
-        )
-    }
-
     if (confirmAllAsk) {
-        val confirmable = pending.count { it.status != PendingStatus.ASK && it.amountCents > 0 }
-        val confirmBody = buildString {
-            append("将把 $confirmable 条按默认分类（其他）与推测账户入账，之后可在流水中修改。")
-            if (amountMissing > 0) append("另有 $amountMissing 条金额待补录，不会被确认。")
-            if (refunds.isNotEmpty()) append("${refunds.size} 条退款待处理不会被动到。")
-        }
         EcoConfirm(
             title = "全部确认",
-            body = confirmBody,
+            body = "确认 $confirmableCount 笔账单？",
             confirmText = "确认",
             onConfirm = {
                 vm.confirmAllPending()
@@ -341,33 +218,6 @@ private sealed interface PendingEntry {
 // ---------- 列表 ----------
 
 @Composable
-private fun PendingWarning(
-    icon: ImageVector,
-    text: String,
-    fg: Color,
-    bg: Color,
-) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(bottom = 9.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(bg)
-            .border(1.dp, fg.copy(alpha = 0.18f), RoundedCornerShape(16.dp))
-            .padding(horizontal = 13.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Icon(icon, contentDescription = null, tint = fg, modifier = Modifier.size(15.dp))
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text,
-            style = EcoType.PageLead.copy(fontSize = 10.sp, lineHeight = 15.sp),
-            color = fg,
-        )
-    }
-}
-
-@Composable
 private fun PendingRow(
     item: PendingTransactionEntity,
     onConfirm: () -> Unit,
@@ -377,16 +227,18 @@ private fun PendingRow(
     val c = MaterialTheme.eco
     val amountMissing = item.amountCents <= 0
     val isAsk = item.status == PendingStatus.ASK
+    val isRefund = item.refundMark == RefundMark.REFUND_INCOME
 
     Column(
         Modifier
             .fillMaxWidth()
-            .clickable(onClick = if (amountMissing) onFillAmount else onConfirm)
+            .clickable(onClick = if (amountMissing && !isRefund) onFillAmount else onConfirm)
             .padding(top = 11.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f)) {
                 val amountText = when {
+                    isRefund && amountMissing -> "退款"
                     amountMissing -> "金额待补"
                     item.type == TxType.INCOME -> "+" + Money.formatYuan(item.amountCents)
                     else -> "-" + Money.formatYuan(item.amountCents)
@@ -447,6 +299,7 @@ private fun PendingRow(
             }
             Spacer(Modifier.width(10.dp))
             when {
+                isRefund -> EcoPill(text = "退款", tone = EcoPillTone.Warn)
                 amountMissing -> EcoPill(text = "待补", tone = EcoPillTone.Warn)
                 isAsk -> EcoPill(text = "红包", tone = EcoPillTone.Bad)
                 else -> EcoPill(text = "待确认", tone = EcoPillTone.Blue)
@@ -460,6 +313,7 @@ private fun PendingRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             when {
+                isRefund -> PendingTextAction("选择原账单", c.blue, onConfirm)
                 amountMissing -> PendingTextAction("补金额", c.blue, onFillAmount)
                 else -> PendingTextAction("确认", c.blue, onConfirm)
             }
@@ -472,13 +326,12 @@ private fun PendingRow(
 
 /**
  * 退款待处理行：已入账的退款收入，还没标记对应的原支出。
- * 动作：选被退款的账单（那笔支出标「已退款」，不再计入支出）/ 记为收入（只按普通收入记账）。
+ * 仅用于兼容更新前已经入账的退款。
  */
 @Composable
 private fun RefundPendingRow(
     row: TransactionRow,
     onLink: () -> Unit,
-    onMarkIncome: () -> Unit,
 ) {
     val c = MaterialTheme.eco
     val merchant = row.counterparty.ifBlank { row.note }.ifBlank { "未命名退款" }
@@ -527,159 +380,11 @@ private fun RefundPendingRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             PendingTextAction("选择原账单", c.blue, onLink)
-            Spacer(Modifier.width(18.dp))
-            PendingTextAction("记为收入", c.muted, onMarkIncome)
         }
     }
     EcoRowDivider(inset = 0.dp)
 }
 
-// ---------- 选原账单 sheet ----------
-
-/**
- * 选原账单：**只列同金额的支出**（产品口径）。没有候选时引导「记为收入」；
- * 每一行点一下就完成处理（那笔支出标「已退款」、退款标「已处理」），不再多一步确认。
- */
-@Composable
-private fun RefundLinkSheet(
-    row: TransactionRow,
-    candidates: List<TransactionRow>?,
-    error: String?,
-    submitting: Boolean,
-    onPick: (TransactionRow) -> Unit,
-    onMarkIncome: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val c = MaterialTheme.eco
-    val merchant = row.counterparty.ifBlank { row.note }.ifBlank { "未命名退款" }
-
-    EcoSheet(
-        onDismiss = { if (!submitting) onDismiss() },
-        title = "选择被退款的账单",
-        subtitle = "退款 +${Money.formatYuan(row.amountCents)}，$merchant，${pendingTime(row.timestamp)}",
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-                "选中后，那笔支出会标记为「已退款」，不再计入本月支出与分类预算。",
-                style = EcoType.PageNote,
-                color = c.muted,
-            )
-            Text("同金额的支出账单", style = EcoType.FieldLabel, color = c.muted)
-            when {
-                candidates == null -> Text("加载中…", style = EcoType.PageNote, color = c.quiet)
-                candidates.isEmpty() -> Column {
-                    Text("没有同金额的支出账单", style = EcoType.PageNote, color = c.amber)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "可以「记为收入」：这笔退款按普通收入记账，对应的支出不会被标记为已退款。",
-                        style = EcoType.PageNote,
-                        color = c.quiet,
-                    )
-                }
-                else -> EcoPane {
-                    Column {
-                        candidates.forEachIndexed { index, expense ->
-                            RefundCandidateRow(
-                                row = expense,
-                                enabled = !submitting,
-                                onClick = { onPick(expense) },
-                            )
-                            if (index != candidates.lastIndex) EcoRowDivider(inset = 14.dp)
-                        }
-                    }
-                }
-            }
-
-            error?.let {
-                Text(it, style = EcoType.PageNote, color = c.clay)
-            }
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.weight(1f)) {
-                    EcoGhostButton(
-                        text = "记为收入",
-                        onClick = onMarkIncome,
-                        enabled = !submitting,
-                        height = 42.dp,
-                    )
-                }
-                Box(Modifier.weight(1f)) {
-                    EcoGhostButton(
-                        text = "取消",
-                        onClick = onDismiss,
-                        enabled = !submitting,
-                        height = 42.dp,
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** 候选支出行：分类瓦片 + 金额/商户 + 分类 · 账户 · 日期；已打「已退」标记的也列出来 */
-@Composable
-private fun RefundCandidateRow(
-    row: TransactionRow,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    val c = MaterialTheme.eco
-    val merchant = row.counterparty.ifBlank { row.note }.ifBlank { "未命名支出" }
-    val detail = listOf(row.categoryName, row.accountName, pendingTime(row.timestamp))
-        .filter { it.isNotBlank() }
-        .joinToString(" ")
-
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        EcoCategoryTile(
-            categoryName = row.categoryName,
-            icon = row.categoryIcon,
-            size = 34.dp,
-        )
-        Spacer(Modifier.width(11.dp))
-        Column(Modifier.weight(1f)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
-                Text(
-                    "-" + Money.formatYuan(row.amountCents),
-                    style = EcoType.BillAmount,
-                    color = c.ink,
-                    maxLines = 1,
-                )
-                Spacer(Modifier.width(5.dp))
-                Text(
-                    merchant,
-                    style = EcoType.RowTitle,
-                    color = c.ink,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                if (row.refundMark == RefundMark.REFUNDED_EXPENSE) {
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        "已退",
-                        style = EcoType.Pill.copy(fontSize = 8.sp, fontWeight = FontWeight.Bold),
-                        color = c.amber,
-                    )
-                }
-            }
-            Text(
-                detail,
-                style = EcoType.RowSub,
-                color = c.muted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-/** 退款行的来源标签（导入账单的退款来源就是微信/支付宝） */
 private fun refundSourceLabel(source: TxSource): String = when (source) {
     TxSource.WECHAT -> "微信支付"
     TxSource.ALIPAY -> "支付宝"
@@ -716,9 +421,13 @@ private fun ConfirmPendingSheet(
 ) {
     var categoryId by remember(item.id) { mutableStateOf(defaultCategoryId) }
     var accountId by remember(item.id) { mutableStateOf(defaultAccountId) }
+    var categoryEdited by remember(item.id) { mutableStateOf(false) }
+    var accountEdited by remember(item.id) { mutableStateOf(false) }
+    LaunchedEffect(defaultCategoryId) { if (!categoryEdited) categoryId = defaultCategoryId }
+    LaunchedEffect(defaultAccountId) { if (!accountEdited) accountId = defaultAccountId }
     var counterparty by remember(item.id) { mutableStateOf(item.counterparty) }
     var error by remember(item.id) { mutableStateOf<String?>(null) }
-    val catsOfType = categories.filter { it.type == item.type }
+    val catsOfType = categories.filter { it.type == item.type && !CategoryRules.isRefundIncome(it.type, it.name) }
     val c = MaterialTheme.eco
     val kind = if (item.type == TxType.EXPENSE) "支出" else "收入"
 
@@ -756,6 +465,7 @@ private fun ConfirmPendingSheet(
                                 text = cat.name,
                                 selected = categoryId == cat.id,
                                 onClick = {
+                                    categoryEdited = true
                                     categoryId = cat.id
                                     if (error != null) error = null
                                 },
@@ -780,6 +490,7 @@ private fun ConfirmPendingSheet(
                                 text = acc.name,
                                 selected = accountId == acc.id,
                                 onClick = {
+                                    accountEdited = true
                                     accountId = acc.id
                                     if (error != null) error = null
                                 },

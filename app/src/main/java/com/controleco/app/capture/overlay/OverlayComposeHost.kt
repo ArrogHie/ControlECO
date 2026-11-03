@@ -35,9 +35,14 @@ internal class OverlayComposeHost : LifecycleOwner, ViewModelStoreOwner, SavedSt
     private val store = ViewModelStore()
     private val savedStateController = SavedStateRegistryController.create(this)
 
+    init {
+        // addView 会同步触发首次组合；在挂载前恢复，避免 rememberSaveable 读取未恢复的注册表。
+        savedStateController.performRestore(null)
+        lifecycleRegistry.currentState = Lifecycle.State.CREATED
+    }
+
     /** ComposeView 挂载后调用：恢复空 SavedState + 进入 RESUMED（触发首次组合） */
     fun attach() {
-        savedStateController.performRestore(null)
         lifecycleRegistry.currentState = Lifecycle.State.RESUMED
     }
 

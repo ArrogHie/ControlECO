@@ -148,7 +148,8 @@ fun AccBookNav(
         when {
             route == null -> Unit
             route == CaptureCenter.ROUTE_PENDING -> navController.navigate("pending")
-            route == CaptureCenter.ROUTE_REFUND_LINK -> navController.navigate("refundLink")
+            route == CaptureCenter.ROUTE_REFUND_LINK -> navController.navigate("pending")
+            route.startsWith(CaptureCenter.ROUTE_REFUND_LINK + "/") -> navController.navigate(route)
             // 「已记入一笔账」通知：直达该笔记录的编辑页（追加路由：edit/{txId}）
             route.startsWith(CaptureCenter.ROUTE_EDIT_PREFIX) -> navController.navigate(route)
             // 快捷方式/磁贴：直接进快速记账
@@ -229,8 +230,23 @@ fun AccBookNav(
         composable("accounts") { AccountsScreen(vm = vm, onBack = { navController.popBackStack() }) }
         composable("categories") { CategoriesScreen(vm = vm, onBack = { navController.popBackStack() }) }
         composable("import") { ImportScreen(vm = vm, onBack = { navController.popBackStack() }) }
-        composable("pending") { PendingScreen(vm = vm, onBack = { navController.popBackStack() }) }
-        composable("refundLink") { RefundLinkScreen(vm = vm, onBack = { navController.popBackStack() }) }
+        composable("pending") {
+            PendingScreen(
+                vm = vm,
+                onBack = { navController.popBackStack() },
+                onRefund = { pendingId, legacyRefundId ->
+                    navController.navigate(if (pendingId != null) "refundLink/$pendingId" else "refundLegacy/$legacyRefundId")
+                },
+            )
+        }
+        composable("refundLink/{pendingId}") { entry ->
+            RefundLinkScreen(vm = vm, pendingId = entry.arguments?.getString("pendingId")?.toLongOrNull(),
+                onBack = { navController.popBackStack() })
+        }
+        composable("refundLegacy/{refundId}") { entry ->
+            RefundLinkScreen(vm = vm, legacyRefundId = entry.arguments?.getString("refundId")?.toLongOrNull(),
+                onBack = { navController.popBackStack() })
+        }
         composable("captureLog") { CaptureLogScreen(vm = vm, onBack = { navController.popBackStack() }) }
         composable("captureTrace") {
             CaptureTraceScreen(

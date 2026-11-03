@@ -174,4 +174,27 @@ class CaptureDefaultsTest {
         // 完全匹配不到 → null，由调用方保持原账户
         assertNull(CaptureDefaults.trustedAccountId(accounts, NotificationRules.WECHAT, "某个不存在的卡"))
     }
+
+    @Test
+    fun `商户未命中仍从备注服务线索推断分类`() {
+        assertEquals(6L, CaptureDefaults.categoryId(
+            categories, TxType.EXPENSE, "微信支付", counterparty = "微信支付", note = "地铁乘车码代扣",
+        ))
+        // 商户本身的明确分类优先于备注。
+        assertEquals(7L, CaptureDefaults.categoryId(
+            categories, TxType.EXPENSE, "市医院", counterparty = "市医院", note = "院内停车",
+        ))
+        assertNull(CaptureDefaults.categorySuggestionId(categories, TxType.EXPENSE, "陌生商户", ""))
+    }
+
+    @Test
+    fun `普通收入不能从遗留学习规则或首项兜底进入退款分类`() {
+        val onlyRefund = listOf(cat(8, "退款", TxType.INCOME))
+        assertNull(CaptureDefaults.categoryId(onlyRefund, TxType.INCOME, "瑞幸咖啡"))
+        val rules = listOf(com.controleco.app.data.db.MerchantRuleEntity(
+            matchKey = "瑞幸咖啡", type = TxType.INCOME, categoryId = 8,
+        ))
+        assertEquals(5L, CaptureDefaults.categoryId(categories + onlyRefund, TxType.INCOME,
+            "瑞幸咖啡", learnedRules = rules))
+    }
 }

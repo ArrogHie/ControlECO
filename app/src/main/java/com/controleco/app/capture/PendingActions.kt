@@ -2,12 +2,16 @@ package com.controleco.app.capture
 
 import androidx.room.withTransaction
 import com.controleco.app.data.db.AccBookDatabase
+import com.controleco.app.data.db.CategoryEntity
 import com.controleco.app.data.db.MerchantRuleDao
 import com.controleco.app.data.db.PendingDao
+import com.controleco.app.data.db.PendingStatus
 import com.controleco.app.data.db.PendingTransactionEntity
 import com.controleco.app.data.db.RefundMark
+import com.controleco.app.data.db.RefundCategory
 import com.controleco.app.data.db.TransactionDao
 import com.controleco.app.data.db.TransactionEntity
+import com.controleco.app.data.db.TxType
 import com.controleco.app.util.AppLog
 
 /**
@@ -18,6 +22,11 @@ import com.controleco.app.util.AppLog
  * externalId 规则、来源标记（TxSource）、退款标记、重复插入的处理方式、**商户归类学习**都只有一份。
  */
 internal object PendingActions {
+
+    /** 普通确认/悬浮编辑不能代替选支出退款，也不能把普通收入伪装成退款。 */
+    internal fun ordinaryCategoryAllowed(type: TxType, refundMark: RefundMark, category: CategoryEntity?): Boolean =
+        refundMark == RefundMark.NONE && category != null && category.type == type &&
+            !(category.type == TxType.INCOME && category.name == RefundCategory.NAME)
 
     /**
      * 确认入账：写交易（externalId = "NTF:" + dedupKey，唯一索引兜底防重）+ 删除待确认条目
@@ -41,9 +50,20 @@ internal object PendingActions {
         val counterpartyValue = counterparty.trim().ifBlank { item.counterparty }
         // 提前占住内存终态：确认的 Room 事务删除待确认条目前后都不能出现可重新入队的空窗。
         // 真正失败时撤销占位；窗口锚点仍来自 item.createdAt，绝不来自本次点击时间。
-        LogicalTransactions.markResolved(item, CaptureResolution.HANDLED)
+        var resolved = false
         val txId = try {
             db.withTransaction {
+                // 页面/悬浮卡可能持有已丢弃或已经处理的旧快照，必须在写入事务内重新确认仍待处理。
+                val fresh = pendingDao.getById(item.id) ?: return@withTransaction null
+                if (fresh.status !in setOf(PendingStatus.PENDING, PendingStatus.ASK) ||
+                    fresh.dedupKey != item.dedupKey || fresh.type != item.type) return@withTransaction null
+                require(ordinaryCategoryAllowed(fresh.type, fresh.refundMark,
+                    db.categoryDao().getAll().find { it.id == categoryId })) {
+                    "请选择有效分类；退款请先选择支出账单"
+                }
+                require(amountCents > 0) { "请输入有效金额" }
+                LogicalTransactions.markResolved(fresh, CaptureResolution.HANDLED)
+                resolved = true
                 val id = txDao.insert(
                     TransactionEntity(
                         type = item.type,
@@ -55,9 +75,8 @@ internal object PendingActions {
                         counterparty = counterpartyValue,
                         source = CaptureDefaults.txSource(item.sourcePackage),
                         externalId = externalId,
-                        refundMark = item.refundMark,
-                        // 捕获来的退款收入同样要用户指认原支出（进「待确认账单」）
-                        refundPending = item.refundMark == RefundMark.REFUND_INCOME,
+                        refundMark = RefundMark.NONE,
+                        refundPending = false,
                         flowId = item.flowId,
                     ),
                 )
@@ -71,13 +90,13 @@ internal object PendingActions {
                 AppLog.i("pending", "already recorded, skip duplicate externalId=$externalId")
                 null
             } else {
-                LogicalTransactions.forget(item.dedupKey)
+                if (resolved) LogicalTransactions.forget(item.dedupKey)
                 throw e
             }
         }
         if (txId != null) {
             merchantRuleDao?.let {
-                MerchantRules.learn(it, item.type, categoryId, accountId, counterpartyValue, item.note)
+                MerchantRules.learn(it, item.type, categoryId, accountId, counterpartyValue, note)
             }
             AppLog.i("pending", "confirmed #${item.id} externalId=$externalId tx=$txId")
         }
@@ -127,8 +146,13 @@ internal object PendingActions {
         note: String = item.note,
         editedFields: Set<GuardedField> = GuardedField.entries.toSet(),
     ): Boolean {
+        if (!ordinaryCategoryAllowed(item.type, item.refundMark, db.categoryDao().getAll().find { it.id == categoryId })) {
+            return false
+        }
         val externalId = "NTF:${item.dedupKey}"
         val txId = txDao.findIdByExternalId(externalId) ?: return false
+        val transaction = txDao.getById(txId) ?: return false
+        if (transaction.refundMark != RefundMark.NONE || transaction.type != item.type) return false
         val counterpartyValue = counterparty.trim().ifBlank { item.counterparty }
         // 用数据库里的最新备注/时间：卡片打开后页面可能又补了信息，用户只改了金额/商户，
         // 不能拿打开卡片时的旧快照把后到的富化结果覆盖回去

@@ -20,7 +20,7 @@ object CategoryGuesser {
     )
 
     fun guess(text: String): String {
-        val hit = rules.firstOrNull { (_, keywords) -> keywords.any { text.contains(it) } }
+        val hit = rules.firstOrNull { (_, keywords) -> keywords.any { text.contains(it, ignoreCase = true) } }
         return hit?.first ?: "其他"
     }
 

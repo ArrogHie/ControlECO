@@ -4,8 +4,11 @@ import com.controleco.app.data.db.AccountEntity
 import com.controleco.app.data.db.CategoryEntity
 import com.controleco.app.data.db.MerchantRuleEntity
 import com.controleco.app.data.db.MerchantRuleDao
+import com.controleco.app.data.db.RefundCategory
 import com.controleco.app.data.db.TxType
 import com.controleco.app.util.AppLog
+import java.text.Normalizer
+import java.util.Locale
 
 /**
  * 商户归类学习（"越用越准"，见 docs/自动记账捕获机制.md 第一节「机制速览」）。
@@ -28,24 +31,38 @@ internal object MerchantRules {
         "转账", "红包", "收款", "付款", "支付", "消费", "扫码", "商户", "订单", "交易",
         "零钱", "零钱通", "余额", "余额宝", "花呗", "借呗", "银行卡", "储蓄卡", "信用卡",
         "京东", "京东支付", "淘宝", "天猫", "拼多多", "抖音", "美团", "美团外卖", "饿了么",
-        "微信", "支付宝转账", "收款方", "对方",
+        "微信", "支付宝转账", "收款方", "对方", "支付成功", "付款成功", "收款成功", "交易成功",
     )
 
     private val punctuation = Regex("""[\s\-_·,，。;；:：、|/\\()（）\[\]【】"'“”‘’]+""")
+    private val merchantLabel = Regex("""^(?:商户名称|收款商户|收款方|商户|商家|对方)\s*[:：]\s*""")
+    private val noteMerchant = Regex("""(?:^|[\n,，;；|])\s*(?:商户名称|收款商户|收款方|商户|商家|对方)\s*[:：]\s*([^\n,，;；|]+)""")
+    private val nextField = Regex("""\s+(?:支付金额|交易金额|付款金额|金额|支付方式|交易时间|订单号)\s*[:：]""")
+    private val paymentPrefix = Regex("""^(?:微信支付|支付宝|云闪付|银联)\s*[-·*：:]\s*""")
+    private val amountText = Regex("""[¥￥]|\d+(?:\.\d+)?\s*元""")
 
     /**
      * 学习键：优先商户字段，空则退回备注；归一化（去空白标点、小写、截断 20 字）。
      * 返回 null = 不值得学（空/过短/纯数字/通用词/像整条通知原文）。
      */
     fun keyOf(counterparty: String, note: String): String? {
-        val source = counterparty.trim().ifBlank { note.trim() }
-        if (source.isBlank()) return null
-        val key = punctuation.replace(source, "").lowercase().take(20)
+        merchantKey(counterparty)?.let { return it }
+        // 通用平台商户只接受备注里明确标注的商户，不拿整条通知当商户学。
+        val labeled = noteMerchant.find(note)?.groupValues?.get(1)
+            ?.let { nextField.split(it, limit = 2).first() }
+        if (labeled != null) return merchantKey(labeled)
+        return if (counterparty.isBlank()) merchantKey(note) else null
+    }
+
+    private fun merchantKey(raw: String): String? {
+        val source = Normalizer.normalize(raw, Normalizer.Form.NFKC).trim()
+            .replace(merchantLabel, "").replace(paymentPrefix, "")
+        if (source.isBlank() || amountText.containsMatchIn(source) || source.contains('\n')) return null
+        val fullKey = punctuation.replace(source, "").lowercase(Locale.ROOT)
+        val key = fullKey.take(20)
         if (key.length < 2) return null
         if (key.all { it.isDigit() }) return null
         if (key in stopWords) return null
-        // 像整条通知原文（很长、含"元/¥"）的备注不做键——它是一次性的，不是"商户"
-        if (key.contains('¥') || key.contains("元") && key.length > 12) return null
         return key
     }
 
@@ -95,7 +112,10 @@ internal object MerchantRules {
     fun match(rules: List<MerchantRuleEntity>, type: TxType, counterparty: String, note: String): MerchantRuleEntity? {
         if (rules.isEmpty()) return null
         val key = keyOf(counterparty, note) ?: return null
-        return rules.firstOrNull { it.matchKey == key && it.type == type }
+        val sameType = rules.filter { it.type == type }
+        // 原键优先；历史带标签/全角的规则可继续使用，冲突时采用最近的明确选择。
+        return sameType.filter { it.matchKey == key }.maxByOrNull { it.updatedAt }
+            ?: sameType.filter { merchantKey(it.matchKey) == key }.maxByOrNull { it.updatedAt }
     }
 
     /**
@@ -109,7 +129,10 @@ internal object MerchantRules {
         note: String,
     ): Long? {
         val rule = match(rules, type, counterparty, note) ?: return null
-        return categories.firstOrNull { it.id == rule.categoryId && it.type == type }?.id
+        return categories.firstOrNull {
+            it.id == rule.categoryId && it.type == type &&
+                !(it.type == TxType.INCOME && it.name == RefundCategory.NAME)
+        }?.id
     }
 
     /** 应用规则得到账户 id：规则命中且账户仍存在才生效 */
