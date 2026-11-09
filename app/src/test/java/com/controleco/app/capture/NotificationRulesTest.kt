@@ -132,6 +132,65 @@ class NotificationRulesTest {
     }
 
     @Test
+    fun `支付宝支出积分提醒_真实52元样本不被营销词过滤`() {
+        // 2026-11-05 用户提供的真实捕获：通知正文重复“交易提醒”，积分数不能作金额。
+        val r = parse(
+            NotificationRules.ALIPAY, "交易提醒",
+            "交易提醒 你有一笔52.00元的支出，点击领取9个支付宝积分。",
+        )!!
+        assertEquals(TxType.EXPENSE, r.type)
+        assertEquals(5200L, r.amountCents)
+        assertFalse(r.isRefund)
+        assertEquals("支付宝", r.sourceLabel)
+        assertEquals("支付宝·支出积分提醒", r.ruleName)
+        assertEquals("com.eg.android.AlipayGphone|EXPENSE|5200|${postTime / 60_000}", r.dedupKey)
+    }
+
+    @Test
+    fun `支付宝支出积分提醒_支持长正文与归一化金额`() {
+        // 合成边界：只在 bigText 中提供完整句式；积分大小不影响支出金额。
+        for ((body, cents) in listOf(
+            "你有一笔0.01元的支出，点击领取999个支付宝积分。" to 1L,
+            "交易提醒 你有一笔１,２３４.５６元的支出, 点击领取１２个支付宝积分" to 123456L,
+            "你有一笔10000000元的支出，点击领取1个支付宝积分。" to NotificationRules.MAX_AMOUNT_CENTS,
+        )) {
+            val r = parse(NotificationRules.ALIPAY, "交易提醒", "交易提醒", bigText = body)!!
+            assertEquals(cents, r.amountCents)
+            assertEquals("支付宝·支出积分提醒", r.ruleName)
+        }
+    }
+
+    @Test
+    fun `支付宝支出积分提醒_不接受非法或超限金额`() {
+        for (amount in listOf("0.00", "-52.00", "52.001", "10000000.01")) {
+            assertNull(parse(
+                NotificationRules.ALIPAY, "交易提醒",
+                "你有一笔${amount}元的支出，点击领取9个支付宝积分。",
+            ))
+        }
+    }
+
+    @Test
+    fun `支付宝支出积分提醒_不放宽其他来源`() {
+        val body = "你有一笔52.00元的支出，点击领取9个支付宝积分。"
+        for (pkg in listOf(NotificationRules.WECHAT, NotificationRules.UNIONPAY, "com.jingdong.app.mall", "com.example.app")) {
+            assertNull(parse(pkg, "微信支付 交易提醒", body))
+        }
+    }
+
+    @Test
+    fun `支付宝支出积分提醒_相似营销和不完整句式仍拒绝`() {
+        for (body in listOf(
+            "点击领取9个支付宝积分。",
+            "你有一笔52.00元的支出，点击领取9元红包。",
+            "你有一笔52.00元的支出，点击领取支付宝积分。",
+            "活动示例：你有一笔52.00元的支出，点击领取9个支付宝积分。",
+        )) {
+            assertNull(parse(NotificationRules.ALIPAY, "交易提醒", body))
+        }
+    }
+
+    @Test
     fun `alipay expense with amount before keyword`() {
         val r = parse(NotificationRules.ALIPAY, "交易提醒", "你有一笔14.90元的支出，点此查看详情。")!!
         assertEquals(TxType.EXPENSE, r.type)

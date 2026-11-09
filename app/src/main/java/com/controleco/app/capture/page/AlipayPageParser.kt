@@ -7,15 +7,17 @@ import com.controleco.app.util.Money
 /**
  * 支付宝（com.eg.android.AlipayGphone）页面解析器。
  *
- * **只保留有支付宝真机样本的动账结果页**：付款成功页。两种真实版式（2026-10 真机）：
+ * **只保留有支付宝真机样本的动账结果页**：付款成功页。真实版式：
  *
  * 1. 实付与标题分节点：
  *    `支付成功 | 回首页 | ￥ | 9.17 | 获得森林能量 | 鸿润福连锁超市 | ￥9.27 | 碰一下立减 | -￥0.10 | 付款方式 | 中国银行储蓄卡(****) …`
  * 2. 实付与标题同节点：
  *    `支付成功￥19.70 | 支付成功 | 19.70 | 订单金额 | ￥22.20 | 红包 | -￥2.50 | 付款方式 | 支付宝小荷包(…) …`
+ * 3. 标题前有说明节点（2026-11-05）：
+ *    `「支付寶」的說明文字列。 | 支付成功￥52.00 | 支付成功 | 52.00 | 拼多多平台商户 …`
  *
  * 判据只有三条：
- * - 第一段可见文字必须以 `支付成功` 开头；
+ * - 前两个有效文本节点中至少一个以 `支付成功` 开头；
  * - 能取到标题内金额，或标题后的第一个金额（支持 `￥` 与数字拆成两个节点）；
  * - 不命中历史账单详情页字段（详情页正文里也可能出现“支付成功”作为当前状态）。
  *
@@ -55,13 +57,13 @@ object AlipayPageParser : AppPageParser {
 
     override fun parse(snapshot: PageSnapshot, flow: PageFlow): PageParseResult {
         val lines = snapshot.lines
-        val first = lines.firstOrNull()?.trim().orEmpty()
-        if (!first.startsWith(PAYMENT_SUCCESS)) return PageParseResult.NotATradePage
+        val successIndex = lines.take(2).indexOfFirst { it.trim().startsWith(PAYMENT_SUCCESS) }
+        if (successIndex < 0) return PageParseResult.NotATradePage
 
         // 历史账单详情页：正文里的“支付成功”是状态字段，不是新的一笔
         if (historyDetailMarkers.any { snapshot.joined.contains(it) }) return PageParseResult.NotATradePage
 
-        val amountText = firstPaymentAmount(lines)
+        val amountText = firstPaymentAmount(lines, successIndex)
             ?: return PageParseResult.SceneOnly(
                 PageScene.PAYMENT_SUCCESS, TradeState.SUCCESS, "支付宝成功页无金额",
             )
@@ -109,9 +111,9 @@ object AlipayPageParser : AppPageParser {
      * 而订单原价 `￥9.27`、立减 `-￥0.10` 都在其后。无货币符号的裸金额要求带小数点，
      * 避免把徽章计数（如“600葵花籽”拆出的 600）当成金额。
      */
-    private fun firstPaymentAmount(lines: List<String>): String? {
-        PageParseSupport.amountInAnchor(lines.first())?.let { return it }
-        var i = 1
+    private fun firstPaymentAmount(lines: List<String>, successIndex: Int): String? {
+        PageParseSupport.amountInAnchor(lines[successIndex])?.let { return it }
+        var i = successIndex + 1
         while (i < lines.size) {
             val text = lines[i].trim()
             if (text.isEmpty()) {

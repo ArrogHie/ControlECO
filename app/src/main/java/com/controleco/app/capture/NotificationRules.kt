@@ -390,6 +390,30 @@ object NotificationRules {
     /** 兜底：文本里直接出现 ¥ 金额（已支付¥12.80 / 收款金额¥0.01） */
     private val currencyAmount = Regex("""[￥¥]\s*$AMT""")
 
+    /**
+     * 支付宝真机样本（2026-11-05）：支出后附带领取积分，不能被“点击领取”噪声词挡掉。
+     * 只完整匹配单个正文/长正文，可带“交易提醒”前缀；第一个捕获组是支出金额，积分不作金额。
+     */
+    private val alipayPointsExpense = Regex(
+        """(?:交易提醒\s*)*你有一笔${AMT}元的支出[，,]\s*点击领取[0-9]+个支付宝积分[。.!！]?""",
+    )
+
+    private fun parseAlipayPointsExpense(text: String, bigText: String, body: String, postTime: Long): ParsedNotification? {
+        val amountText = sequenceOf(text, bigText)
+            .map(::normalize)
+            .firstNotNullOfOrNull { alipayPointsExpense.matchEntire(it)?.groupValues?.get(1) }
+            ?: return null
+        val amountCents = Money.parseCents(amountText)?.takeIf { it in 1..MAX_AMOUNT_CENTS } ?: return null
+        return ParsedNotification(
+            type = TxType.EXPENSE,
+            amountCents = amountCents,
+            sourceLabel = sourceLabel(ALIPAY),
+            ruleName = "支付宝·支出积分提醒",
+            note = body.take(200),
+            dedupKey = dedupKey(ALIPAY, TxType.EXPENSE, false, amountCents, postTime),
+        )
+    }
+
     // ---------- 微信专用金额正则（关键词与 wechatExpenseWords 对齐，2026-10-24） ----------
 
     /**
@@ -431,6 +455,11 @@ object NotificationRules {
             normalize(sequenceOf(title, text, bigText).filter { it.isNotBlank() }.joinToString(" ")),
         ).trim()
         if (body.isBlank()) return null
+
+        // 完整的支付宝支出积分模板先按专用规则解析，不放宽其他通知的营销过滤。
+        if (packageName == ALIPAY) {
+            parseAlipayPointsExpense(text, bigText, body, postTime)?.let { return it }
+        }
 
         // 微信身份闸门（只影响微信）：非「微信支付」服务通知只进捕获日志，不入队/不入账
         if (!wechatIdentityOk(packageName, title, text, bigText)) {

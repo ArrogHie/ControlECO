@@ -263,6 +263,68 @@ class PaymentPageParserTest {
     }
 
     @Test
+    fun `支付宝成功页_真实说明节点后第二节点支付成功可识别`() {
+        // 2026-11-05 用户提供的真实页面节点，成功标题前多了一条无障碍说明。
+        val r = candidate(
+            NotificationRules.ALIPAY,
+            listOf(
+                "「支付寶」的說明文字列。", "支付成功￥52.00", "支付成功", "52.00",
+                "拼多多平台商户", "￥52.00", "付款方式", "帳戶餘額", "x3", "完成",
+            ),
+        )
+        assertEquals(TxType.EXPENSE, r.type)
+        assertEquals(5200L, r.amountCents)
+        assertEquals("拼多多平台商户", r.counterparty)
+        assertEquals(PageScene.PAYMENT_SUCCESS, r.scene)
+        assertEquals("支付宝·付款成功页", r.ruleName)
+    }
+
+    @Test
+    fun `支付宝第二节点成功标题_先取标题金额而非后续金额`() {
+        val r = candidate(
+            NotificationRules.ALIPAY,
+            listOf("页面说明", "支付成功￥52.00", "￥99.00", "订单金额", "￥100.00", "完成"),
+        )
+        assertEquals(5200L, r.amountCents)
+    }
+
+    @Test
+    fun `支付宝第二节点成功标题_拆分实付且忽略标题前金额`() {
+        val r = candidate(
+            NotificationRules.ALIPAY,
+            listOf("￥999.00", "支付成功", "￥", "52.00", "订单金额", "￥59.00", "完成"),
+        )
+        assertEquals(5200L, r.amountCents)
+    }
+
+    @Test
+    fun `支付宝第二节点零元成功标题_不取后续订单金额`() {
+        val r = parse(
+            NotificationRules.ALIPAY,
+            listOf("页面说明", "支付成功￥0.00", "订单金额", "￥52.00", "完成"),
+        )
+        assertTrue(r is PageParseResult.SceneOnly)
+    }
+
+    @Test
+    fun `支付宝第三节点才出现成功标题_仍不生成候选`() {
+        val r = parse(
+            NotificationRules.ALIPAY,
+            listOf("页面说明", "其他内容", "支付成功￥52.00", "完成"),
+        )
+        assertEquals(PageParseResult.NotATradePage, r)
+    }
+
+    @Test
+    fun `支付宝第二节点支付成功_历史详情仍不生成候选`() {
+        val r = parse(
+            NotificationRules.ALIPAY,
+            listOf("页面说明", "支付成功￥52.00", "当前状态", "支付成功", "交易单号", "202611050001"),
+        )
+        assertEquals(PageParseResult.NotATradePage, r)
+    }
+
+    @Test
     fun `支付宝首页账单预览_不是动账结果页不生成候选`() {
         // 真实样本（2026-10-18）：首页的「用支付宝收钱码，收款到账有提醒」只是营销文案，
         // 账单预览里的 ¥9.17 曾被当成收款到账记了一笔收入
